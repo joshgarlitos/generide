@@ -1,4 +1,4 @@
-# rct2-coaster-gen
+# generide
 
 A Python tool for generating and authoring roller coaster track files for OpenRCT2.
 

@@ -1,4 +1,4 @@
-# rct2-coaster-gen
+# generide
 
 ## What this project is
 A Python tool for generating roller coaster track files for OpenRCT2. Produces `.td6`
