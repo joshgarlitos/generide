@@ -8,11 +8,12 @@ generide is a Python tool that emits `.td6` files — the format OpenRCT2 uses t
 
 ## Where this stands today
 
-I'm in Phase 1: reading and writing the binary format itself. Before I can generate a coaster, I have to prove I understand the format end-to-end. The cleanest proof is a round-trip — take a real `.td6` file, decode it into Python, encode it back, check the bytes match. If they match, I'm right. If they don't, I'm lying to myself.
+Phase 1 was about reading and writing the binary format itself. Before I can generate a coaster, I have to prove I understand the format end-to-end. The cleanest proof is a round-trip — take a real `.td6` file, decode it into Python, encode it back, check the bytes match. If they match, I'm right. If they don't, I'm lying to myself. They match.
 
 As of right now:
-- RLE compression layer: **done**, 12 tests passing including a round-trip over a real exported ride
-- TD6 decode/encode: **in progress**
+- RLE compression layer: **done**, round-trip tested over a real exported ride
+- TD6 decode/encode: **done**, a real Mine Train ride round-trips byte-for-byte (16 tests passing)
+- Geometry (Phase 2): next
 - Generation: not yet
 
 ## How it works

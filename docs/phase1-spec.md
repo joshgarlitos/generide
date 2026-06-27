@@ -153,9 +153,28 @@ class Ride:
     x_space_required: int
     y_space_required: int
     circuits_and_lift_speed: int
+    header: bytes           # raw bytes 0x00–0xa2 (the full header block)
     elements: list[TrackElement]
     remainder: bytes        # everything after track data, written back verbatim
 ```
+
+### Why `Ride` keeps a raw `header` blob
+
+The header runs from 0x00 to 0xa2 (163 bytes), but we only name ~20 of those
+bytes as fields. The unnamed bytes between them (cost at 0x02, the 0x08–0x4a
+range, G-force fields, etc.) still need to survive a round-trip. So `Ride` keeps
+the entire raw header block, and:
+
+- `decode()` parses the named fields *out of* `header` for convenient inspection.
+- `encode()` starts from a copy of `header`, overwrites the named-field offsets
+  with the current field values, then appends elements + terminator + remainder.
+
+Named fields are the source of truth for *their own* offsets; `header` is the
+source of truth for every byte we haven't parsed yet. This is the same
+"store opaque, write back verbatim" approach used for `remainder`, applied to the
+gaps within the header. As later phases parse more fields, those bytes migrate
+from "covered by header" to "covered by a named field" — behavior is identical
+either way.
 
 ---
 

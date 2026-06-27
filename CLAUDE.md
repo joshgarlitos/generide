@@ -32,9 +32,9 @@ data/
 ```
 
 ## Phases
-- **Phase 1 (current)** — TD6 round-trip: read a real .td6 file, decode it, re-encode
-  it, confirm the bytes match. No generation yet.
-- **Phase 2** — Geometry: implement advance_position() correctly with tests.
+- **Phase 1 (DONE)** — TD6 round-trip: read a real .td6 file, decode it, re-encode it,
+  confirm the decompressed bytes match. 16 tests passing. See rct2/rle.py + rct2/td6.py.
+- **Phase 2 (current)** — Geometry: implement advance_position() correctly with tests.
 - **Phase 3** — Hand-author a coaster as a Python list of segments, encode to TD6,
   load in OpenRCT2.
 - **Phase 4** — Genetic algorithm.

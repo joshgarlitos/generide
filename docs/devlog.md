@@ -4,6 +4,24 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-06-26 — Phase 1 done. The round-trip is green.
+
+`td6.py` is written and a real Mine Train ride decodes to a `Ride` object and re-encodes back to the same decompressed bytes. Sixteen tests passing. Phase 1 is closed.
+
+The satisfying part: I didn't find the bug by running the code. I found it by *looking at the real file first*. Before writing a line of the decoder, I dumped the fixture's offsets in a REPL and confirmed everything the spec claimed — ride type 0x11, vehicle `AMT1`, 89 elements terminating at 0x155, 2698 bytes of remainder. All correct. But staring at it, I realized the spec's data model was quietly broken in a way that would have wasted an afternoon.
+
+**The header-gap trap.** The spec's `Ride` dataclass names about 20 fields at specific offsets. But the header is 163 bytes (0x00–0xa2), and the bytes *between* the named fields — cost, the whole 0x08–0x4a stretch, G-forces — aren't stored anywhere. If `encode()` rebuilds the file from just the named fields, all those gap bytes vanish and the round-trip fails. The named fields are islands; the spec forgot the ocean.
+
+The fix is the same move I already made for `remainder`: keep the raw 163-byte header blob on the `Ride`, parse named fields out of it for convenience, and on encode start from the raw header and overwrite only the named offsets. Opaque-by-default, parse what you need. As later phases understand more fields, bytes migrate from "covered by the blob" to "covered by a field" with no behavior change.
+
+I'd internalized this lesson abstractly from the kevinburke `cosdeg` bug — "structure right, math wrong are separate questions." This was the same shape one level down: the spec's *structure* (which fields exist) was right, but its *completeness* (does it preserve every byte) was wrong, and that gap is invisible until a round-trip catches it. Verifying against the real artifact before coding is what surfaced it. That habit keeps paying for itself.
+
+**On comparing decompressed bytes, not compressed.** Wrote that reasoning into the spec and the test comment last session; the test now leans on it for real. Our `compress()` packs runs differently than 1999-era RCT2 did, both correct, different bytes. Compare the data, not the encoding. Green.
+
+Next is the interesting part: Phase 2, track segment geometry. Where the coaster stops being a byte array and starts being a shape in space.
+
+---
+
 ## 2026-05-25 — Phase 1 halfway done, which is a weird place to be proud of
 
 The RLE layer is done. Twelve tests passing, including a round-trip over a real exported ride file. I'm going to sit with that for a second, because "I wrote a decompressor" doesn't sound like much — but I had no official spec, just a community-maintained reference and a Go codebase to squint at, and the first time the round-trip test went green I felt like I'd cracked a safe.
