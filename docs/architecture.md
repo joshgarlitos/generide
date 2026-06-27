@@ -96,6 +96,8 @@ Ride object  ──── (Phase 2) ────►  validated by geometry.py
 
 **The last 4 bytes of every `.td6` are a checksum.** Phase 1 ignores it — we strip it on read and don't regenerate it on write. OpenRCT2 will reject files with bad checksums, so Phase 3 needs to compute checksums the game will accept.
 
+**RLE has multiple valid encodings of the same data.** A run of identical bytes can be encoded as a run *or* as a literal — both decompress identically. So re-compressing a file won't necessarily reproduce byte-identical output to the original, even when the code is correct. Round-trip tests must compare *decompressed* bytes, not raw compressed bytes. (Full explanation in the [Phase 1 spec](phase1-spec.md).) This also means a byte-identical re-compression is *not* guaranteed for free — if the Phase 3 checksum turns out to require it, our compressor would need to match RCT2's exact run/literal boundary choices.
+
 **Bit-packed fields hide multiple values in one byte.** Examples: `control_flags` at offset 0x4b packs load type into bits 0-2 plus several boolean flags above; `circuits_and_lift_speed` at 0xa2 packs circuit count into the top 3 bits and lift speed into the bottom 5. Always read these as raw bytes first and unpack into structured fields second.
 
 **kevinburke/rct is a reference, not a transplant donor.** Its TD6 read/write structure is sound. Its geometry math has real bugs: `Advance()` panics on valid input, `cosdeg()` uses `math.Sin` instead of `math.Cos`, collision detection uses bounding boxes instead of per-tile occupancy, `Mutate()` is empty. Read it for structure. Re-derive the math.

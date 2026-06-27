@@ -3,6 +3,12 @@
 Control byte `c`:
   c < 128  → next (c + 1) bytes are literal
   c >= 128 → next byte is repeated (257 - c) times
+
+Note: this encoding is not one-to-one. The same data can be compressed in
+multiple valid ways (e.g. a short run of identical bytes can be a run OR a
+literal), all decompressing identically. So compress(decompress(x)) need not
+equal x byte-for-byte, even though it is correct. Tests compare decompressed
+bytes, not raw compressed bytes.
 """
 
 

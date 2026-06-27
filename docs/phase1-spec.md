@@ -39,6 +39,35 @@ We need both a decompressor (for reading) and a compressor (for writing).
 
 Reference implementation to port: `rle/lib.go` in kevinburke/rct.
 
+### Why the same data has more than one valid encoding
+
+RLE compression is not one-to-one. A given stretch of bytes can be encoded
+correctly in multiple ways, and they all decompress to the identical result.
+
+Example — the four bytes `AA AA AA AA` can be encoded as:
+- one **run**: "repeat `AA` four times" (2 bytes), or
+- one **literal**: "the next 4 bytes are `AA AA AA AA`" (5 bytes).
+
+Both are valid. Both decompress to `AA AA AA AA`.
+
+This matters for testing. The original RCT2 encoder that produced our fixture made
+its own choices about where to draw run/literal boundaries; our `compress()` makes
+its own. So re-compressing a file will **not** necessarily produce byte-identical
+output to the original — even when our code is perfectly correct.
+
+Therefore the round-trip test compares **decompressed** bytes, not the raw
+compressed bytes:
+
+```python
+assert decompress(reencoded) == decompress(compressed)   # ✅ compares real data
+# assert reencoded == compressed                         # ❌ can fail for a non-real reason
+```
+
+Comparing decompressed bytes proves our *data* is faithful. It does **not** prove
+our compressor reproduces the exact file RCT2 would. That stronger property only
+matters if something downstream needs a byte-identical file — most likely the
+checksum (deferred to Phase 3). For Phase 1, decompressed comparison is correct.
+
 ---
 
 ## Decompressed file layout
@@ -158,7 +187,7 @@ This test passes:
 
 ```python
 def test_round_trip():
-    with open("data/sample_rides/mischief.td6", "rb") as f:
+    with open("data/sample_rides/manic_miner_test.td6", "rb") as f:
         original = f.read()
 
     # strip 4-byte checksum
@@ -167,6 +196,10 @@ def test_round_trip():
     ride = td6.decode(compressed)
     reencoded = td6.encode(ride)
 
+    # Compare decompressed bytes, not raw compressed bytes: RLE has multiple
+    # valid encodings of the same data, so our compressor may produce different
+    # (still-correct) bytes than RCT2's. See "Why the same data has more than
+    # one valid encoding" above.
     assert decompress(reencoded) == decompress(compressed)
 ```
 
