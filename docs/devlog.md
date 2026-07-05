@@ -20,6 +20,18 @@ Writing it out also gave us a chance to improve how the writing skill handles te
 
 ---
 
+## 2026-06-27 — Design system
+
+I built out a design system for the personal site using Claude Design, a separate tool from Claude Code. The process was to point it at the garlitos-site repo, let it read the codebase, and have it codify what was already there into a structured, reusable system.
+
+The output is a set of CSS token files, reusable React components, foundation specimen cards, and a UI kit. The tokens capture the core of the brand: warm off-white paper background (`#fcfcfa`), deep olive for links and interactive elements (`#59670f`), chartreuse as a highlighter marker (`#d6f84a`), and system fonts throughout. No gradients, no shadows, no icons, no emoji. Square corners except for tag pills. Text sits on a 28px baseline grid.
+
+The component set covers Link, Tag, Button, Breadcrumbs, ExperienceTimeline, and TopicCard. A Prose component was added to handle note body text, applying the site's type rhythm — 16px body, 1.7 line-height, hairline blockquote rule — consistently across any note. The UI kit is a click-through of the personal site: Home to Notes index to a note detail page and back.
+
+The design system ships with a `SKILL.md` file, which makes it loadable as a skill in Claude Code sessions. The zip was extracted to `~/Projects/design-system/` so it's available across projects.
+
+---
+
 ## 2026-06-26 — Phase 1 done. The round-trip is green.
 
 `td6.py` is written and a real Mine Train ride decodes to a `Ride` object and re-encodes back to the same decompressed bytes. Sixteen tests passing. Phase 1 is closed.
