@@ -4,6 +4,22 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-07-05 — Documentation, diagrams, and a design system
+
+No code this session. I wrote down how the project works, for two audiences: myself, and whoever eventually reads about it on garlitos.com.
+
+**The roadmap.** I wrote out the four phases and their done criteria in `docs/roadmap.md`. Nothing in there was new thinking, but putting it in one place made the shape of the project easier to hold. Phase 1 is done, Phase 2 is next, Phases 3 and 4 are still descriptions of what I want to get to.
+
+**The RLE explainer.** I wrote `docs/rle.md` as a ground-up explanation of how RCT2's run-length encoding works, starting from what a bit is, building up through bytes and hexadecimal, and ending at the control byte mechanism. The format has two modes: a control byte below 128 means the next `c + 1` bytes are literal data; a control byte of 128 or above means the next byte repeats `257 - c` times.
+
+Writing it out also gave us a chance to improve how the writing skill handles technical explainers. The first draft Claude produced opened with the mechanism. We caught that a reader who doesn't know what RLE is, what encoding means, or why RCT2 uses it at all gets no foothold from a control byte description. So we added a rule to the writing skill: technical explainers open with what the thing is and why it exists, then build down to the mechanics.
+
+**The diagram.** I built an SVG of the two modes side by side using the Garlitos design system colors. It lives at `docs/assets/rle-diagram.svg` and is embedded in the RLE doc. The control byte is highlighted in olive, data bytes in warm grey, with an arrow showing what expands to what in output. I added dark mode support via CSS variables and a `prefers-color-scheme` media query inside the SVG. It only works when the SVG is inlined in HTML rather than referenced via `img`.
+
+**Publishing structure.** I set up `docs/assets/` in this repo for source diagrams and `notes/assets/` in garlitos-site for anything that gets published. The workflow is manual. Write the doc here, copy the assets over when the note is ready to go live.
+
+---
+
 ## 2026-06-26 — Phase 1 done. The round-trip is green.
 
 `td6.py` is written and a real Mine Train ride decodes to a `Ride` object and re-encodes back to the same decompressed bytes. Sixteen tests passing. Phase 1 is closed.
