@@ -12,6 +12,8 @@ Bytes are often represented in hexadecimal, a base-16 counting system. Programme
 
 RCT2's `.td6` file is a sequence of bytes. The RLE layer sits at the bottom of the stack: when reading a file, decompression runs first, before anything else touches the ride data. When writing, compression runs last, after all the ride data has been serialized to bytes.
 
+![RCT2 RLE: Two Modes](assets/rle-diagram.svg)
+
 The format has two modes, controlled by a single byte called `c` at the start of each chunk.
 
 If `c` is below 128, you're in a literal run. The next `c + 1` bytes are raw data, copied straight to output. So if `c` is 3, the next four bytes are literals.
