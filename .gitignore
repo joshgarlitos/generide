@@ -13,3 +13,7 @@ build/
 # Editor
 .vscode/
 .idea/
+
+# Private AI agent instructions
+CLAUDE.local.md
+AGENTS.md
