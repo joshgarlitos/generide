@@ -17,3 +17,6 @@ build/
 # Private AI agent instructions
 CLAUDE.local.md
 AGENTS.md
+
+# Generated track files (keep data/sample_rides/)
+/*.td6

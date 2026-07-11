@@ -4,6 +4,46 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-07-11 — Phase 4: The genetic algorithm learns to build real coasters
+
+The GA is working. Tracks evolve, export to TD6, and load in OpenRCT2. Getting there required learning, the hard way, that RCT2's track system has rules the game enforces but never explains.
+
+**The basic architecture.** Three new modules: `fitness.py` scores tracks without running the game, `mutations.py` handles insertions, deletions, replacements, and crossover, and `evolution.py` runs the loop with tournament selection and elitism. A CLI script, `evolve_coaster.py`, ties it together. The genome is just a list of segment IDs; the station segments stay fixed at the front, and the GA evolves everything after.
+
+The first version worked on paper. Tracks closed, fitness improved over generations, the TD6 files saved correctly. Then I tried to place them in OpenRCT2.
+
+**Lesson one: slope transitions.** The game rejected the track with "invalid height." Looking at the segment sequence, the problem was obvious once I knew to look: a `25_deg_up_to_flat` segment appeared right after a flat turn. That segment expects the track to already be climbing. You can't transition out of a slope you never entered.
+
+RCT2 tracks have slope state. There are three: flat, up, and down. Certain segments require a specific state and produce a specific state. `flat_to_25_deg_up` requires flat and produces up. `25_deg_up` requires up and stays up. `25_deg_up_to_flat` requires up and produces flat. The GA was inserting slope pieces at random, which meant most combinations were illegal.
+
+The fix was two parts. First, I added `count_slope_violations()` to the fitness function, which walks the track, maintains slope state, and counts every time a segment's requirement doesn't match. Heavy penalty per violation. Second, I changed the mutation operators to insert slope pieces only as complete valid sequences: `[flat_to_25_deg_up, 25_deg_up, 25_deg_up_to_flat]` as a unit, never the pieces individually. Delete and replace operations skip slope segments entirely to avoid breaking a sequence in the middle.
+
+**Lesson two: the train needs to get up the first hill.** The next track placed successfully but the train rolled out of the station, lost momentum on the first climb, and rolled back. No chain lift.
+
+In RCT2, chain lift is a per-segment flag, not a track-wide setting. The station segment can have it, but that only pulls the train through the station. The actual climb needs it too. I added logic to detect the first uphill sequence after the station and set `chain_lift=True` on every segment in that sequence.
+
+**Lesson three: energy budget.** Even with chain lift on the first hill, some evolved tracks would valley: the train would drop into a low section and not have enough momentum to climb back out. The game doesn't calculate this for you. If your track goes down 10 units, across 50 segments, then back up 8 units, the friction losses might exceed what gravity gives back.
+
+I added `estimate_energy_violations()`, which tracks elevation through the circuit. It records the highest point reached under chain lift, then checks every subsequent segment against the available energy budget, accounting for friction loss per segment. Any segment that climbs higher than the budget allows counts as a violation. The first hill having chain lift is checked separately; without it, the train has no energy to start with.
+
+**Lesson four: bank transitions.** The last failure was subtler. The track placed, the train ran, but it looked wrong and the game complained about the layout. Banked turns were connecting directly to flat straights with no transition.
+
+Banking works the same way as slopes. There's bank state: flat, left-banked, right-banked. A `banked_right_quarter_turn` requires right-bank state. A flat straight requires flat state. Going from one to the other without a `right_bank_to_flat` transition is illegal. The game lets you place it, but the track doesn't render correctly and the ride won't test properly.
+
+I added `count_bank_violations()` using the same state-machine pattern as slopes, added `BANKED_SEQUENCES` to the mutation module (each one a complete flat-to-banked-turn-to-flat sequence), and updated mutations to only insert banked turns as full sequences. Same pattern, different state machine.
+
+**Where the fitness function landed.** The proxy fitness now scores on track length (up to 50 segments), elevation changes, balanced left/right turns, and segment variety. It penalizes open circuits (-10,000), collisions (-50 per overlapping tile), going underground (-20 per unit below z=0), slope violations (-100 each), bank violations (-100 each), energy violations (-50 each), and missing chain lift on the first hill (-200). The penalties are heavy enough that no amount of positive scoring can overcome a fundamental physics violation.
+
+The weights came from trial and error. Early versions penalized open circuits by only 1,000 points, and long tracks with lots of elevation changes would score higher despite not closing. Bumping it to 10,000 fixed that. The collision penalty needed to be high enough that self-intersecting tracks couldn't win on other merits but low enough that near-misses weren't catastrophic. 50 per tile ended up working.
+
+**What I'd do differently.** The biggest time sink was the feedback loop: evolve, export, load in OpenRCT2, watch it fail, figure out why, fix the code, repeat. Each cycle took a few minutes and most of the failures weren't obvious from the error message alone. If I were starting over, I'd build a validation layer that catches all the game's constraints before evolution even starts, so the fitness function never sees an illegal track. Right now, the fitness function does double duty as both scorer and validator, which works but isn't clean.
+
+**What's next.** The tracks are valid now, but they're not interesting. The fitness function rewards hills and turns but doesn't know what makes a coaster fun. The next step is either porting OpenRCT2's rating algorithm to Python (so fitness can target excitement/intensity/nausea directly) or automating the game to place tracks and read the ratings back. The second is harder but more accurate; the first is self-contained but might drift from what the game actually calculates.
+
+For now, though: tracks evolve, tracks export, tracks run. Phase 4 is working.
+
+---
+
 ## 2026-07-05 — Documentation, diagrams, and a design system
 
 No code this session. I wrote down how the project works, for two audiences: myself, and whoever eventually reads about it on garlitos.com.
