@@ -2,14 +2,16 @@
 
 Sits on top of rct2.rle. A .td6 file is RLE-compressed; we decompress, parse
 fields at fixed offsets and the 2-byte track elements (until a 0xFF terminator),
-and keep everything else as opaque bytes that round-trip verbatim.
+then parse entrance/exit structures and preserve scenery as opaque bytes.
 
 Field offsets and the data model are documented in docs/phase1-spec.md.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Union
 
-from rct2 import rle
+from rct2 import checksum, rle
 
 # Header field offsets (into the decompressed byte array).
 IDX_RIDE_TYPE = 0x00
@@ -54,6 +56,17 @@ class TrackElement:
 
 
 @dataclass
+class Entrance:
+    """Station entrance or exit position relative to track origin."""
+
+    x: int  # signed, in sub-tile units (32 per tile)
+    y: int  # signed, in sub-tile units
+    z: int  # height offset
+    direction: int  # 0-3, facing direction
+    is_exit: bool
+
+
+@dataclass
 class Ride:
     ride_type: int
     operating_mode: int
@@ -73,8 +86,14 @@ class Ride:
     y_space_required: int
     circuits_and_lift_speed: int
     header: bytes
-    elements: list
-    remainder: bytes
+    elements: list[TrackElement]
+    entrances: list[Entrance] = field(default_factory=list)
+    scenery: bytes = b""  # opaque scenery data (preserved for round-trip)
+
+    @property
+    def remainder(self) -> bytes:
+        """Legacy accessor: returns entrances + scenery as raw bytes."""
+        return _encode_entrances(self.entrances) + self.scenery
 
 
 def _decode_element(seg: int, flags: int) -> TrackElement:
@@ -99,6 +118,38 @@ def _encode_element(el: TrackElement) -> bytes:
     return bytes([el.segment_type, flags])
 
 
+def _decode_entrances(data: bytes) -> tuple[list[Entrance], bytes]:
+    """Parse entrance/exit structures, return (entrances, remaining_scenery)."""
+    entrances = []
+    i = 0
+    while i < len(data) and data[i] != TERMINATOR:
+        direction = data[i]
+        flags = data[i + 1]
+        x = int.from_bytes(data[i + 2 : i + 4], "little", signed=True)
+        y = int.from_bytes(data[i + 4 : i + 6], "little", signed=True)
+        is_exit = bool(flags & 0x80)
+        z = flags & 0x7F
+        entrances.append(Entrance(x=x, y=y, z=z, direction=direction, is_exit=is_exit))
+        i += 6
+    # Skip the terminator
+    if i < len(data) and data[i] == TERMINATOR:
+        i += 1
+    return entrances, data[i:]
+
+
+def _encode_entrances(entrances: list[Entrance]) -> bytes:
+    """Serialize entrance/exit structures with terminator."""
+    out = bytearray()
+    for ent in entrances:
+        flags = (0x80 if ent.is_exit else 0x00) | (ent.z & 0x7F)
+        out.append(ent.direction)
+        out.append(flags)
+        out.extend(ent.x.to_bytes(2, "little", signed=True))
+        out.extend(ent.y.to_bytes(2, "little", signed=True))
+    out.append(TERMINATOR)
+    return bytes(out)
+
+
 def decode(compressed: bytes) -> Ride:
     """Decompress and parse raw .td6 bytes (checksum already stripped) into a Ride."""
     d = rle.decompress(compressed)
@@ -110,7 +161,10 @@ def decode(compressed: bytes) -> Ride:
         elements.append(_decode_element(d[i], d[i + 1]))
         i += 2
     terminator_idx = i
-    remainder = d[terminator_idx + 1:]
+    after_track = d[terminator_idx + 1 :]
+
+    # Parse entrance/exit structures
+    entrances, scenery = _decode_entrances(after_track)
 
     return Ride(
         ride_type=d[IDX_RIDE_TYPE],
@@ -126,13 +180,14 @@ def decode(compressed: bytes) -> Ride:
         excitement=d[IDX_EXCITEMENT],
         intensity=d[IDX_INTENSITY],
         nausea=d[IDX_NAUSEA],
-        dat_data=d[IDX_DAT_DATA:IDX_DAT_DATA + LEN_DAT_DATA],
+        dat_data=d[IDX_DAT_DATA : IDX_DAT_DATA + LEN_DAT_DATA],
         x_space_required=d[IDX_X_SPACE],
         y_space_required=d[IDX_Y_SPACE],
         circuits_and_lift_speed=d[IDX_CIRCUITS_AND_LIFT],
         header=d[:IDX_TRACK_DATA],
         elements=elements,
-        remainder=remainder,
+        entrances=entrances,
+        scenery=scenery,
     )
 
 
@@ -153,7 +208,7 @@ def encode(ride: Ride) -> bytes:
     out[IDX_EXCITEMENT] = ride.excitement
     out[IDX_INTENSITY] = ride.intensity
     out[IDX_NAUSEA] = ride.nausea
-    out[IDX_DAT_DATA:IDX_DAT_DATA + LEN_DAT_DATA] = ride.dat_data
+    out[IDX_DAT_DATA : IDX_DAT_DATA + LEN_DAT_DATA] = ride.dat_data
     out[IDX_X_SPACE] = ride.x_space_required
     out[IDX_Y_SPACE] = ride.y_space_required
     out[IDX_CIRCUITS_AND_LIFT] = ride.circuits_and_lift_speed
@@ -161,6 +216,25 @@ def encode(ride: Ride) -> bytes:
     for el in ride.elements:
         out += _encode_element(el)
     out.append(TERMINATOR)
-    out += ride.remainder
+    out += _encode_entrances(ride.entrances)
+    out += ride.scenery
 
     return rle.compress(bytes(out))
+
+
+# --- File-level convenience functions ---
+
+
+def load(path: Union[str, Path]) -> Ride:
+    """Load a .td6 file, verify checksum, and decode into a Ride."""
+    data = Path(path).read_bytes()
+    content, expected = checksum.strip(data)
+    if not checksum.verify(content, expected):
+        raise ValueError(f"checksum mismatch: expected {expected}, got {checksum.compute(content)}")
+    return decode(content)
+
+
+def save(ride: Ride, path: Union[str, Path]) -> None:
+    """Encode a Ride and write to a .td6 file with checksum."""
+    compressed = encode(ride)
+    Path(path).write_bytes(checksum.append(compressed))
