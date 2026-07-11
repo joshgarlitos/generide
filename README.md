@@ -13,7 +13,7 @@ Phase 1 was about reading and writing the binary format itself. Before I can gen
 As of right now:
 - RLE compression layer: **done**, round-trip tested over a real exported ride
 - TD6 decode/encode: **done**, a real Mine Train ride round-trips byte-for-byte (16 tests passing)
-- Geometry (Phase 2): next
+- Geometry (Phase 2): done; the 89-piece Mine Train fixture passes unified validation
 - Generation: not yet
 
 ## How it works
@@ -60,7 +60,7 @@ That's it. You don't need OpenRCT2 installed to develop — the test fixtures ar
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1 | Round-trip a real `.td6` file through Python | RLE done; TD6 in progress |
-| 2 | Track segment geometry — given a piece, where does the next one land? | Not started |
+| 2 | Track segment geometry — given a piece, where does the next one land? | Done |
 | 3 | Hand-author a coaster in Python, load it in-game | Not started |
 | 4 | Genetic algorithm | Not started |
 

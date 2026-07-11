@@ -25,13 +25,19 @@ The goal here is to prove I understand the `.td6` format end to end. I decode a 
 
 Done when every sample ride in `data/sample_rides/` round-trips byte-identical through `rle.py` and `td6.py`, with the load-bearing fields asserted one by one so a silent corruption can't slip past a raw byte compare.
 
-### Phase 2: Track geometry (next)
+### Phase 2: Track geometry (complete)
 
 Given a track piece, plus the track's current position and heading, work out where the next piece ends up. This is the layer that turns a flat array of bytes into a coaster with a shape in space.
 
 Two of my references are unreliable. The community spec is mostly right but occasionally just wrong, and the Go implementation I'm cross-checking uses `Sin` where it means `Cos`, which rotates every coaster 90 degrees without ever failing loudly. So I'm deriving the geometry math from first principles and checking it against exported rides rather than porting it.
 
 Done when I can walk an exported ride's track segments through `geometry.py` and the computed path closes its own circuit back at the station, within tolerance. If a coaster's geometry doesn't reconcile, I have it wrong.
+
+All 89 segments in the exported Mine Train fixture return to the exact starting
+position, elevation, and heading. Its 224 occupied cells have no exact 3D
+overlaps, its calculated footprint matches the TD6 dimensions after rotation,
+and the unified validator checks closure, known geometry, collisions, footprint,
+height, and minimum elevation.
 
 ### Phase 3: Hand-authored coaster (not started)
 
@@ -60,6 +66,6 @@ Things I've parked so the current phase stays the current phase:
 | Phase | Goal | Status |
 |------|------|--------|
 | 1 | Round-trip a `.td6` through Python | In progress |
-| 2 | Track segment geometry | Next |
+| 2 | Track segment geometry | Complete |
 | 3 | Hand-author a coaster, load it in-game | Not started |
 | 4 | Constraint-driven generator | Not started |
