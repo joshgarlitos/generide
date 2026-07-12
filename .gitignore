@@ -15,6 +15,7 @@ build/
 .idea/
 
 # Private AI agent instructions
+CLAUDE.md
 CLAUDE.local.md
 AGENTS.md
 
