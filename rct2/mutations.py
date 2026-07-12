@@ -167,6 +167,7 @@ def _is_special_segment(seg_id: int) -> bool:
 
 def mutate(
     segments: list[int],
+    rng: random.Random,
     rate: float = 0.1,
     max_attempts: int = 10,
 ) -> list[int]:
@@ -205,7 +206,7 @@ def mutate(
         num_mutations = max(1, int(len(segments) * rate))
 
         for _ in range(num_mutations):
-            mutation_type = random.choice([
+            mutation_type = rng.choice([
                 "insert_simple", "insert_slope", "insert_banked",
                 "delete", "replace", "swap"
             ])
@@ -216,20 +217,20 @@ def mutate(
 
             if mutation_type == "insert_simple":
                 # Insert a single flat-compatible segment
-                pos = random.randint(start, len(result))
-                new_seg = random.choice(SIMPLE_SEGMENTS)
+                pos = rng.randint(start, len(result))
+                new_seg = rng.choice(SIMPLE_SEGMENTS)
                 result = insert_segment(result, pos, new_seg)
 
             elif mutation_type == "insert_slope":
                 # Insert a complete slope sequence
-                pos = random.randint(start, len(result))
-                sequence = random.choice(SLOPE_SEQUENCES)
+                pos = rng.randint(start, len(result))
+                sequence = rng.choice(SLOPE_SEQUENCES)
                 result = _insert_sequence(result, pos, sequence)
 
             elif mutation_type == "insert_banked":
                 # Insert a complete banked turn sequence
-                pos = random.randint(start, len(result))
-                sequence = random.choice(BANKED_SEQUENCES)
+                pos = rng.randint(start, len(result))
+                sequence = rng.choice(BANKED_SEQUENCES)
                 result = _insert_sequence(result, pos, sequence)
 
             elif mutation_type == "delete":
@@ -238,7 +239,7 @@ def mutate(
                     safe_indices = [i for i in mutable_indices
                                     if not _is_special_segment(result[i])]
                     if safe_indices:
-                        pos = random.choice(safe_indices)
+                        pos = rng.choice(safe_indices)
                         result = delete_segment(result, pos)
 
             elif mutation_type == "replace":
@@ -246,8 +247,8 @@ def mutate(
                 safe_indices = [i for i in mutable_indices
                                 if not _is_special_segment(result[i])]
                 if safe_indices:
-                    pos = random.choice(safe_indices)
-                    new_seg = random.choice(SIMPLE_SEGMENTS)
+                    pos = rng.choice(safe_indices)
+                    new_seg = rng.choice(SIMPLE_SEGMENTS)
                     result = replace_segment(result, pos, new_seg)
 
             elif mutation_type == "swap":
@@ -255,11 +256,11 @@ def mutate(
                 safe_indices = [i for i in mutable_indices
                                 if not _is_special_segment(result[i])]
                 if len(safe_indices) >= 2:
-                    pos1, pos2 = random.sample(safe_indices, 2)
+                    pos1, pos2 = rng.sample(safe_indices, 2)
                     result = swap_segments(result, pos1, pos2)
 
         # Try to repair if not closed
-        repaired = repair_circuit(result)
+        repaired = repair_circuit(result, rng)
         if repaired is not None and is_closed_circuit(Position(), repaired):
             return repaired
 
@@ -304,6 +305,7 @@ def _get_required_heading_to_start(end_pos: Position, start: Position) -> int:
 
 def repair_circuit(
     segments: list[int],
+    rng: random.Random,
     max_repair_segments: int = 8,
 ) -> Optional[list[int]]:
     """Attempt to repair an open circuit by inserting corrective segments.
@@ -349,11 +351,11 @@ def repair_circuit(
             if heading_gap == 0:
                 return result  # Done!
             elif heading_gap == 1 or heading_gap == -3:  # Need right turn
-                result.append(random.choice(TURN_RIGHT))
+                result.append(rng.choice(TURN_RIGHT))
             elif heading_gap == 3 or heading_gap == -1:  # Need left turn
-                result.append(random.choice(TURN_LEFT))
+                result.append(rng.choice(TURN_LEFT))
             else:  # heading_gap == 2
-                result.append(random.choice(TURN_RIGHT))
+                result.append(rng.choice(TURN_RIGHT))
             segments_added += 1
             continue
 
@@ -376,11 +378,11 @@ def repair_circuit(
         if turn_needed != 0:
             # Need to turn toward start
             if turn_needed == 1:  # Need right turn
-                result.append(random.choice(TURN_RIGHT))
+                result.append(rng.choice(TURN_RIGHT))
             elif turn_needed == 3:  # Need left turn
-                result.append(random.choice(TURN_LEFT))
+                result.append(rng.choice(TURN_LEFT))
             elif turn_needed == 2:  # Need 180
-                result.append(random.choice(TURN_RIGHT))
+                result.append(rng.choice(TURN_RIGHT))
             segments_added += 1
             continue
 
@@ -393,7 +395,11 @@ def repair_circuit(
     return None
 
 
-def crossover(parent1: list[int], parent2: list[int]) -> tuple[list[int], list[int]]:
+def crossover(
+    parent1: list[int],
+    parent2: list[int],
+    rng: random.Random,
+) -> tuple[list[int], list[int]]:
     """Single-point crossover between two parent tracks.
 
     Note: Crossover often breaks circuit closure, so offspring will need
@@ -413,8 +419,8 @@ def crossover(parent1: list[int], parent2: list[int]) -> tuple[list[int], list[i
         return parent1.copy(), parent2.copy()
 
     # Choose crossover points in mutable regions
-    point1 = random.randint(start1, end1 - 1) if end1 > start1 else start1
-    point2 = random.randint(start2, end2 - 1) if end2 > start2 else start2
+    point1 = rng.randint(start1, end1 - 1) if end1 > start1 else start1
+    point2 = rng.randint(start2, end2 - 1) if end2 > start2 else start2
 
     # Create offspring
     child1 = parent1[:point1] + parent2[point2:]
@@ -423,7 +429,11 @@ def crossover(parent1: list[int], parent2: list[int]) -> tuple[list[int], list[i
     return child1, child2
 
 
-def generate_random_track(min_length: int = 8, max_length: int = 30) -> list[int]:
+def generate_random_track(
+    rng: random.Random,
+    min_length: int = 8,
+    max_length: int = 30,
+) -> list[int]:
     """Generate a random track with station and attempt to close it.
 
     Uses valid slope and banked sequences to ensure proper transitions.
@@ -435,23 +445,23 @@ def generate_random_track(min_length: int = 8, max_length: int = 30) -> list[int
     Returns:
         Random track segment list (may not be closed)
     """
-    target_length = random.randint(min_length, max_length)
+    target_length = rng.randint(min_length, max_length)
 
     # Start with station
     segments = [BEGIN_STATION, END_STATION]
 
     # Add random segments, slope sequences, and banked sequences
     while len(segments) - 2 < target_length:
-        choice = random.random()
+        choice = rng.random()
         if choice < 0.25:  # 25% chance for slope sequence
-            sequence = random.choice(SLOPE_SEQUENCES)
+            sequence = rng.choice(SLOPE_SEQUENCES)
             segments.extend(sequence)
         elif choice < 0.40:  # 15% chance for banked sequence
-            sequence = random.choice(BANKED_SEQUENCES)
+            sequence = rng.choice(BANKED_SEQUENCES)
             segments.extend(sequence)
         else:  # 60% chance for simple segment
-            segments.append(random.choice(SIMPLE_SEGMENTS))
+            segments.append(rng.choice(SIMPLE_SEGMENTS))
 
     # Try to repair
-    repaired = repair_circuit(segments)
+    repaired = repair_circuit(segments, rng)
     return repaired if repaired is not None else segments

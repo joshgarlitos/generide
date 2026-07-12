@@ -7,10 +7,12 @@ Usage:
 """
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
 from rct2 import td6
+from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve
 from rct2.fitness import ProxyFitness
 from rct2.generate import (
@@ -20,35 +22,7 @@ from rct2.generate import (
     calculate_space_required,
     create_simple_circuit,
 )
-from rct2.geometry import Position, is_closed_circuit, validate_track
 from rct2.td6 import Entrance, Ride, TrackElement
-
-
-# Slope segments that can have chain lift
-CHAIN_LIFT_SEGMENTS = {
-    0x04,  # 25_deg_up
-    0x05,  # 60_deg_up
-    0x06,  # flat_to_25_deg_up
-    0x07,  # 25_deg_up_to_60_deg_up
-    0x08,  # 60_deg_up_to_25_deg_up
-    0x09,  # 25_deg_up_to_flat
-}
-
-
-def _find_first_hill_indices(segments: list[int]) -> set[int]:
-    """Find indices of the first uphill sequence after the station."""
-    in_hill = False
-    hill_indices = set()
-
-    for i, seg in enumerate(segments):
-        if seg in CHAIN_LIFT_SEGMENTS:
-            in_hill = True
-            hill_indices.add(i)
-        elif in_hill:
-            # We've exited the first hill
-            break
-
-    return hill_indices
 
 
 def create_ride_from_segments(
@@ -59,7 +33,7 @@ def create_ride_from_segments(
     template = td6.load(template_path)
 
     # Find the first hill to add chain lift
-    first_hill = _find_first_hill_indices(segments)
+    first_hill = default_lift_indices(segments)
 
     # Create track elements with chain lift on first hill
     elements = [
@@ -147,8 +121,23 @@ def main():
         action="store_true",
         help="Print progress during evolution",
     )
+    parser.add_argument(
+        "--rng-seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducible runs (default: random)",
+    )
 
     args = parser.parse_args()
+
+    # Setup RNG with seed
+    if args.rng_seed is None:
+        rng_seed = random.randint(0, 2**31 - 1)
+    else:
+        rng_seed = args.rng_seed
+    rng = random.Random(rng_seed)
+    print(f"RNG seed: {rng_seed}")
+    print()
 
     # Determine template path
     template_path = args.template
@@ -197,6 +186,7 @@ def main():
     # Run evolution
     stats = evolve(
         seed=seed,
+        rng=rng,
         fitness_fn=fitness_fn,
         population_size=args.population,
         generations=args.generations,
@@ -214,7 +204,7 @@ def main():
     print(f"  Best track valid: {best.is_valid()}")
 
     # Validate the best track
-    result = validate_track(Position(), best.segments)
+    result = validate_construction(best.segments)
     if result.valid:
         print("  Validation: PASSED")
     else:
@@ -222,21 +212,13 @@ def main():
         for issue in result.issues:
             print(f"    - {issue.code}: {issue.message}")
 
-    # Save if valid
-    if best.is_valid():
-        ride = create_ride_from_segments(best.segments, template_path)
-        td6.save(ride, args.output)
-        print(f"\nSaved evolved track to: {args.output}")
-    else:
-        print("\nWarning: Best track is not a valid closed circuit.")
-        print("Attempting to save anyway (may not load in OpenRCT2)...")
-        try:
-            ride = create_ride_from_segments(best.segments, template_path)
-            td6.save(ride, args.output)
-            print(f"Saved to: {args.output}")
-        except Exception as e:
-            print(f"Failed to save: {e}", file=sys.stderr)
-            sys.exit(1)
+    if not result.valid:
+        print("\nNo construction-valid track was found; nothing was exported.", file=sys.stderr)
+        sys.exit(1)
+
+    ride = create_ride_from_segments(best.segments, template_path)
+    td6.save(ride, args.output)
+    print(f"\nSaved evolved track to: {args.output}")
 
 
 if __name__ == "__main__":

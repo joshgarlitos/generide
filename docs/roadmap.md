@@ -1,71 +1,69 @@
 # Roadmap
 
-This page covers the roadmap for generide. It breaks the plan out into the key phases and the related success criteria for each phase.
+## The vision
 
-## Goal
+In **generide**, I am building a tool that generates roller coasters for RollerCoaster Tycoon based on parameters such as the space the ride needs to fit within, the ride ratings I want it to hit (such as its level of excitement), and a target cost range. The generated coaster should work in the game.
 
-The goal is to generate coasters that behave well inside OpenRCT2's own mechanics and fit the constraints I hand the algorithm.
+The game scores rides for excitement, intensity, and nausea. The goal is not to create the biggest possible numbers. It is to generate a ride within a requested range, such as exciting but not painfully intense, while keeping it inside a specific plot of land.
 
-There are two key constraints:
+## What works today
 
-1. A bounding volume. I give the generator a footprint and a height ceiling, and it builds a coaster that fits inside them without overhanging the plot or going over the height limit.
-2. A target range for the ride ratings. The game scores every ride on excitement, intensity, and nausea, so I can tell the generator the envelope I want, like excitement above some floor and intensity and nausea under some ceiling, and it evolves toward that.
+The project can read and write the game's track-design files, reconstruct a coaster's shape in three dimensions, detect basic geometry problems, and export new files with valid checksums. A real 89-piece ride closes exactly when traced through the geometry code.
 
-With both constraints in place, generide works as a generator I can configure for each run. I give it a space and a target rating range, and it hands back a valid `.td6` that the game loads and rates inside those bounds. The ratings are numbers the game computes on its own, so the algorithm has a concrete target to optimize against.
+It can also build a coaster from a Python list and evolve new layouts with a genetic algorithm. The algorithm keeps a population of designs, combines and mutates them, and favors the ones that score better. Generated rides have been loaded and run in OpenRCT2.
 
-## Approach
+That proves the full path works:
 
-I'm building bottom-up, one module at a time, each one testable on its own. The alternative is to generate a coaster first and then try to work out whether the bug is in the generator, the format encoder, or the geometry, which sounds like the worst week of my year. So the format comes first, then the geometry, then authoring a coaster by hand, then generation. Nothing higher up the stack gets built until the layer under it round-trips cleanly.
+```text
+Python track -> validated layout -> game file -> working ride in OpenRCT2
+```
 
-## Phases
+## Now: prove evolution is doing useful work
 
-### Phase 1: Format round-trip (in progress)
+Construction rules live in one place. `rct2/construction.py` checks circuit closure, collisions, bounds, slope and bank transitions, chain lift, and estimated energy, and generation, fitness, and export all use the same answer about whether a ride can be built.
 
-The goal here is to prove I understand the `.td6` format end to end. I decode a ride into Python, encode it back, and check that the bytes match. The RLE layer already round-trips an exported ride, and the TD6 decode/encode round-trips a Mine Train ride byte for byte, with 16 tests passing. What's left is closing out the remaining fields and running the whole fixture set instead of just the one ride.
+Evolution is now reproducible. Every run has a seed, which the CLI prints whether you provide one or not. Two runs with the same seed produce identical results, which means interesting tracks can be recreated and failures can be debugged. All random-using functions take an `rng: random.Random` parameter instead of calling the global `random` module.
 
-Done when every sample ride in `data/sample_rides/` round-trips byte-identical through `rle.py` and `td6.py`, with the load-bearing fields asserted one by one so a silent corruption can't slip past a raw byte compare.
+One gap remains. The mutation operators still carry their own copies of the rules and only insert slopes and banked turns from a small list of pre-built sequences. Steep slope pieces are defined in the segment data but no mutation can ever produce them, so the algorithm cannot discover a steep drop. I want mutations to ask the validator what is legal at a given point in the track and insert any segment that fits, which keeps every offspring buildable and opens up the full piece vocabulary.
 
-### Phase 2: Track geometry (complete)
+The benchmark (issue #4) is now unblocked. It will compare the genetic algorithm with random generation using the same amount of work and the same random sequence. This matters because "the score went up" is not enough; I want to know whether evolution is finding better rides than chance.
 
-Given a track piece, plus the track's current position and heading, work out where the next piece ends up. This is the layer that turns a flat array of bytes into a coaster with a shape in space.
+A small track renderer supports visualization. A top-down drawing of the occupied tiles, colored by elevation, plus a fitness curve per run, means I can see what a track looks like without loading the game, and every experiment produces figures I can use in the devlog.
 
-Two of my references are unreliable. The community spec is mostly right but occasionally just wrong, and the Go implementation I'm cross-checking uses `Sin` where it means `Cos`, which rotates every coaster 90 degrees without ever failing loudly. So I'm deriving the geometry math from first principles and checking it against exported rides rather than porting it.
+## Next: teach it what makes a ride good
 
-Done when I can walk an exported ride's track segments through `geometry.py` and the computed path closes its own circuit back at the station, within tolerance. If a coaster's geometry doesn't reconcile, I have it wrong.
+Today, fitness is an educated guess based on track length, hills, turns, and variety. That helps produce coaster-like shapes, but it is not the same calculation the game uses.
 
-All 89 segments in the exported Mine Train fixture return to the exact starting
-position, elevation, and heading. Its 224 occupied cells have no exact 3D
-overlaps, its calculated footprint matches the TD6 dimensions after rotation,
-and the unified validator checks closure, known geometry, collisions, footprint,
-height, and minimum elevation.
+The next major capability is evaluating excitement, intensity, and nausea. There is a catch in how the game computes these. Ratings are not a function of the track layout alone. The game runs a test lap and derives the ratings from stats it gathers along the way, like maximum speed, g-forces, and drop count. Reproducing the ratings in Python therefore means reproducing the physics simulation too, and keeping it in sync with a game that is still being developed.
 
-### Phase 3: Hand-authored coaster (not started)
+So the plan is a hybrid. A cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. The game's headless mode and plugin API should make it possible to place a track, run the test, and read the ratings back without automating the UI. I can use known rides to check both against reality.
 
-Build a coaster in Python by hand, meaning I write the track out myself rather than generating it, then encode it and load it in OpenRCT2. This is the first time the whole stack runs forward instead of round-tripping, and the first thing worth showing anyone.
+Once that works, a user will be able to request something like:
 
-Done when the game opens the file as a valid ride, with no errors, and it stays on the map.
+```text
+Fit inside 18 x 15 tiles
+Excitement above 6
+Intensity below 8
+Nausea below 5
+```
 
-### Phase 4: Generator (not started)
+The algorithm can then evolve toward a specific kind of ride instead of a vague idea of "more coaster."
 
-This is where the constraints come in. A genetic algorithm evolves coasters against a fitness function built from the game's excitement, intensity, and nausea ratings, plus the two parameters I care about, the bounding volume the coaster has to fit inside and the target rating range it's aiming for. The game outputs the ratings, so the signal is computable. The work is shaping the fitness function and the genome so the search converges on valid, well-behaved rides.
+## Later: make the results richer
 
-Done when, given a space and a target rating range, the generator reliably returns valid, loadable coasters that fall inside both and beat a random baseline.
+After validation and ratings are reliable, the project can explore better mutation strategies, more track pieces, additional coaster types, faster parallel evaluation, saved evolution runs, and visual tools for understanding why a design passed or failed.
 
-## Out of scope (for now)
+Presentation can grow too: names, colors, scenery, and batches of different finalists from the same request. Those enhancements become worthwhile once the generator can consistently produce rides that are valid, fit the available land, and match the experience the user asked for.
 
-Things I've parked so the current phase stays the current phase:
+## Current status
 
-- Fitness tuning and genome design, which wait for Phase 4 (months out)
-- Ride types beyond the first coaster type I get working
-- A CLI or any UX wrapper, until there's something worth wrapping
-- Visualizing coasters outside the game
-- Speeding up RLE or geometry, unless a test is slow
-
-## Status
-
-| Phase | Goal | Status |
-|------|------|--------|
-| 1 | Round-trip a `.td6` through Python | In progress |
-| 2 | Track segment geometry | Complete |
-| 3 | Hand-author a coaster, load it in-game | Not started |
-| 4 | Constraint-driven generator | Not started |
+| Area | Status |
+|---|---|
+| Read and write OpenRCT2 track files | Complete |
+| Reconstruct and validate track geometry | Complete |
+| Generate and run a new coaster in OpenRCT2 | Complete |
+| Evolve coasters using approximate fitness | Working prototype |
+| Shared construction validation | Complete |
+| Reproducible evolution with seeded RNG | Complete |
+| Benchmark GA vs random search | Next |
+| Optimize for actual game ratings | Planned |

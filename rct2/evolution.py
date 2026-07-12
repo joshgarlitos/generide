@@ -8,8 +8,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from rct2.construction import validate_construction
 from rct2.fitness import FitnessFunction, ProxyFitness
-from rct2.geometry import Position, is_closed_circuit
 from rct2.mutations import (
     BEGIN_STATION,
     END_STATION,
@@ -28,8 +28,8 @@ class Individual:
     fitness: float = 0.0
 
     def is_valid(self) -> bool:
-        """Check if this individual forms a valid closed circuit."""
-        return is_closed_circuit(Position(), self.segments)
+        """Check whether this individual passes all construction rules."""
+        return validate_construction(self.segments).valid
 
 
 @dataclass
@@ -51,7 +51,7 @@ class Population:
         return sum(ind.fitness for ind in self.individuals) / len(self.individuals)
 
     def valid_count(self) -> int:
-        """Return the number of valid (closed circuit) individuals."""
+        """Return the number of construction-valid individuals."""
         return sum(1 for ind in self.individuals if ind.is_valid())
 
 
@@ -80,6 +80,7 @@ def _create_initial_population(
     seed: list[int],
     population_size: int,
     fitness_fn: FitnessFunction,
+    rng: random.Random,
 ) -> Population:
     """Create initial population from seed and random variations."""
     individuals = []
@@ -92,16 +93,16 @@ def _create_initial_population(
 
     # Fill rest with mutations of seed and random tracks
     while len(individuals) < population_size:
-        if random.random() < 0.7:
+        if rng.random() < 0.7:
             # Mutate seed
-            mutated = mutate(seed_with_station, rate=0.3)
+            mutated = mutate(seed_with_station, rng, rate=0.3)
             mutated = _ensure_station(mutated)
         else:
             # Generate random track
-            mutated = generate_random_track()
+            mutated = generate_random_track(rng)
 
         # Try to repair
-        repaired = repair_circuit(mutated)
+        repaired = repair_circuit(mutated, rng)
         if repaired is not None:
             mutated = repaired
 
@@ -114,10 +115,11 @@ def _create_initial_population(
 
 def _tournament_select(
     population: Population,
+    rng: random.Random,
     tournament_size: int = 3,
 ) -> Individual:
     """Select an individual using tournament selection."""
-    candidates = random.sample(population.individuals, min(tournament_size, len(population.individuals)))
+    candidates = rng.sample(population.individuals, min(tournament_size, len(population.individuals)))
     return max(candidates, key=lambda ind: ind.fitness)
 
 
@@ -126,23 +128,24 @@ def _create_offspring(
     parent2: Individual,
     mutation_rate: float,
     fitness_fn: FitnessFunction,
+    rng: random.Random,
 ) -> list[Individual]:
     """Create offspring from two parents via crossover and mutation."""
     offspring = []
 
     # Crossover
-    child1_segs, child2_segs = crossover(parent1.segments, parent2.segments)
+    child1_segs, child2_segs = crossover(parent1.segments, parent2.segments, rng)
 
     for child_segs in [child1_segs, child2_segs]:
         # Ensure station
         child_segs = _ensure_station(child_segs)
 
         # Mutate
-        child_segs = mutate(child_segs, rate=mutation_rate)
+        child_segs = mutate(child_segs, rng, rate=mutation_rate)
         child_segs = _ensure_station(child_segs)
 
         # Try to repair
-        repaired = repair_circuit(child_segs)
+        repaired = repair_circuit(child_segs, rng)
         if repaired is not None:
             child_segs = repaired
 
@@ -155,6 +158,7 @@ def _create_offspring(
 
 def evolve(
     seed: list[int],
+    rng: random.Random,
     fitness_fn: Optional[FitnessFunction] = None,
     population_size: int = 50,
     generations: int = 100,
@@ -167,6 +171,7 @@ def evolve(
 
     Args:
         seed: Initial track segment list to evolve from
+        rng: Random number generator for reproducible runs
         fitness_fn: Fitness evaluation function (defaults to ProxyFitness)
         population_size: Number of individuals in population
         generations: Number of evolution generations
@@ -182,7 +187,7 @@ def evolve(
         fitness_fn = ProxyFitness()
 
     # Initialize population
-    population = _create_initial_population(seed, population_size, fitness_fn)
+    population = _create_initial_population(seed, population_size, fitness_fn, rng)
 
     fitness_history = []
     valid_ratio_history = []
@@ -212,9 +217,9 @@ def evolve(
 
         # Fill rest with offspring
         while len(next_gen) < population_size:
-            parent1 = _tournament_select(population, tournament_size)
-            parent2 = _tournament_select(population, tournament_size)
-            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn)
+            parent1 = _tournament_select(population, rng, tournament_size)
+            parent2 = _tournament_select(population, rng, tournament_size)
+            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn, rng)
             next_gen.extend(offspring)
 
         # Trim to population size
@@ -235,6 +240,7 @@ def evolve(
 def evolve_until(
     seed: list[int],
     target_fitness: float,
+    rng: random.Random,
     fitness_fn: Optional[FitnessFunction] = None,
     max_generations: int = 1000,
     population_size: int = 50,
@@ -245,6 +251,7 @@ def evolve_until(
     Args:
         seed: Initial track segment list
         target_fitness: Stop when fitness reaches this value
+        rng: Random number generator for reproducible runs
         fitness_fn: Fitness evaluation function
         max_generations: Maximum generations to run
         population_size: Number of individuals in population
@@ -256,7 +263,7 @@ def evolve_until(
     if fitness_fn is None:
         fitness_fn = ProxyFitness()
 
-    population = _create_initial_population(seed, population_size, fitness_fn)
+    population = _create_initial_population(seed, population_size, fitness_fn, rng)
     fitness_history = []
     valid_ratio_history = []
 
@@ -276,9 +283,9 @@ def evolve_until(
         next_gen = population.individuals[:2]  # Elitism
 
         while len(next_gen) < population_size:
-            parent1 = _tournament_select(population)
-            parent2 = _tournament_select(population)
-            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn)
+            parent1 = _tournament_select(population, rng)
+            parent2 = _tournament_select(population, rng)
+            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn, rng)
             next_gen.extend(offspring)
 
         population = Population(individuals=next_gen[:population_size])

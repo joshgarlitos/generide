@@ -1,5 +1,7 @@
 """Tests for genetic algorithm evolution."""
 
+import random
+
 import pytest
 
 from rct2.evolution import (
@@ -41,6 +43,11 @@ class TestIndividual:
         segments = [BEGIN_STATION, END_STATION, 0x00]
         ind = Individual(segments=segments)
         assert not ind.is_valid()
+
+    def test_individual_is_invalid_for_bad_bank_transition(self):
+        segments = create_simple_circuit()
+        segments[2] = 0x2D
+        assert not Individual(segments=segments).is_valid()
 
 
 class TestPopulation:
@@ -90,8 +97,9 @@ class TestEvolve:
 
     def test_evolution_returns_stats(self):
         """evolve should return EvolutionStats."""
+        rng = random.Random(42)
         seed = create_simple_circuit()
-        stats = evolve(seed, generations=5, population_size=10)
+        stats = evolve(seed, rng, generations=5, population_size=10)
 
         assert isinstance(stats, EvolutionStats)
         assert stats.generations == 5
@@ -100,11 +108,13 @@ class TestEvolve:
 
     def test_evolution_improves_fitness(self):
         """Fitness should generally improve over generations."""
+        rng = random.Random(42)
         seed = create_simple_circuit()
         fitness_fn = ProxyFitness()
 
         stats = evolve(
             seed,
+            rng,
             fitness_fn=fitness_fn,
             generations=20,
             population_size=20,
@@ -119,8 +129,10 @@ class TestEvolve:
         """Population should maintain some valid circuits."""
         seed = create_simple_circuit()
 
+        rng = random.Random(42)
         stats = evolve(
             seed,
+            rng,
             generations=10,
             population_size=20,
         )
@@ -132,8 +144,10 @@ class TestEvolve:
         """The best individual should form a valid closed circuit."""
         seed = create_simple_circuit()
 
+        rng = random.Random(42)
         stats = evolve(
             seed,
+            rng,
             generations=30,
             population_size=30,
             elitism=5,  # Keep more good ones
@@ -156,8 +170,10 @@ class TestEvolve:
         def callback(gen, pop):
             generations_seen.append(gen)
 
+        rng = random.Random(42)
         evolve(
             seed,
+            rng,
             generations=5,
             population_size=10,
             progress_callback=callback,
@@ -172,8 +188,10 @@ class TestEvolve:
         fitness_fn = ProxyFitness()
 
         # Run with high elitism
+        rng = random.Random(42)
         stats = evolve(
             seed,
+            rng,
             fitness_fn=fitness_fn,
             generations=10,
             population_size=20,
@@ -191,6 +209,7 @@ class TestEvolveUntil:
 
     def test_evolve_until_stops_at_target(self):
         """Should stop when target fitness is reached."""
+        rng = random.Random(42)
         seed = create_simple_circuit()
         fitness_fn = ProxyFitness()
         initial = fitness_fn.evaluate(seed)
@@ -199,6 +218,7 @@ class TestEvolveUntil:
         stats = evolve_until(
             seed,
             target_fitness=initial + 1,
+            rng=rng,
             fitness_fn=fitness_fn,
             max_generations=100,
             population_size=20,
@@ -210,11 +230,13 @@ class TestEvolveUntil:
 
     def test_evolve_until_respects_max_generations(self):
         """Should stop at max_generations if target not reached."""
+        rng = random.Random(42)
         seed = create_simple_circuit()
 
         stats = evolve_until(
             seed,
             target_fitness=float("inf"),  # Impossible target
+            rng=rng,
             max_generations=5,
             population_size=10,
         )
@@ -238,8 +260,10 @@ class TestFitnessFunction:
                 return len(segments)
 
         custom_fn = CustomFitness()
+        rng = random.Random(42)
         evolve(
             seed,
+            rng,
             fitness_fn=custom_fn,
             generations=3,
             population_size=5,
@@ -275,8 +299,10 @@ class TestPopulationDiversity:
             for ind in pop.individuals:
                 seen.add(tuple(ind.segments))
 
+        rng = random.Random(42)
         evolve(
             seed,
+            rng,
             generations=10,
             population_size=20,
             progress_callback=callback,
@@ -286,23 +312,60 @@ class TestPopulationDiversity:
         assert len(seen) > 5
 
 
+class TestReproducibility:
+    """Tests for reproducible evolution with seeded RNG."""
+
+    def test_same_seed_produces_identical_results(self):
+        """Two runs with same seed should produce identical EvolutionStats."""
+        seed = create_simple_circuit()
+
+        # Run 1
+        rng1 = random.Random(12345)
+        stats1 = evolve(
+            seed,
+            rng1,
+            generations=10,
+            population_size=20,
+            mutation_rate=0.1,
+        )
+
+        # Run 2 with same seed
+        rng2 = random.Random(12345)
+        stats2 = evolve(
+            seed,
+            rng2,
+            generations=10,
+            population_size=20,
+            mutation_rate=0.1,
+        )
+
+        # Results should be identical
+        assert stats1.best_fitness == stats2.best_fitness
+        assert stats1.fitness_history == stats2.fitness_history
+        assert stats1.valid_ratio_history == stats2.valid_ratio_history
+        assert stats1.best_individual.segments == stats2.best_individual.segments
+
+
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
 
     def test_evolution_with_minimal_seed(self):
         """Should handle minimal (station-only) seed."""
         seed = [BEGIN_STATION, END_STATION]
-        stats = evolve(seed, generations=5, population_size=10)
+        rng = random.Random(42)
+        stats = evolve(seed, rng, generations=5, population_size=10)
         assert stats.best_individual is not None
 
     def test_evolution_with_small_population(self):
         """Should work with very small population."""
         seed = create_simple_circuit()
-        stats = evolve(seed, generations=3, population_size=3)
+        rng = random.Random(42)
+        stats = evolve(seed, rng, generations=3, population_size=3)
         assert stats.best_individual is not None
 
     def test_evolution_with_one_generation(self):
         """Should work with single generation."""
         seed = create_simple_circuit()
-        stats = evolve(seed, generations=1, population_size=10)
+        rng = random.Random(42)
+        stats = evolve(seed, rng, generations=1, population_size=10)
         assert len(stats.fitness_history) == 1

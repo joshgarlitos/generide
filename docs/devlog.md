@@ -4,6 +4,26 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-07-12 — Seeded RNG for reproducible evolution
+
+The GA worked, but every run was a black box. If an interesting track evolved, I couldn't recreate it. If a bug appeared, I couldn't debug it. The backlog called for reproducible runs before investing in a benchmark, and that meant threading a seeded RNG through the entire pipeline.
+
+**The change.** Every function that called `random.choice()`, `random.randint()`, or `random.sample()` now takes an `rng: random.Random` parameter. That covers `mutate()`, `crossover()`, `repair_circuit()`, `generate_random_track()` in `mutations.py`, and `_create_initial_population()`, `_tournament_select()`, `_create_offspring()`, `evolve()`, and `evolve_until()` in `evolution.py`. The CLI takes a `--rng-seed` argument. If you don't provide one, it generates a random seed and prints it, so any run can be recreated.
+
+The pattern is mechanical. Add the parameter, replace `random.X()` with `rng.X()`, pass it down the call chain. The transformation took about an hour. The tests took longer.
+
+**The tests.** Every test that called a random-using function broke. The fix was consistent: create `rng = random.Random(42)` at the top of each test and pass it to the function. The seed doesn't matter for individual tests; what matters is that the behavior is deterministic. I added a reproducibility test that runs `evolve()` twice with the same seed and asserts the `EvolutionStats` match exactly: same fitness, same history, same best individual.
+
+**What it proves.** Two runs with `--rng-seed 123` produce identical output. Fitness, segment sequences, everything. That means debugging is now possible. If a track fails to place in OpenRCT2, I can recreate it. If a fitness score looks wrong, I can step through the exact same execution. The benchmark (issue #4) can now run fair trials where both the GA and random search see the same random sequence.
+
+**What it doesn't solve.** Reproducibility across Python versions or platforms isn't guaranteed. Python's `random.Random` uses the Mersenne Twister, which is stable within a version but not contractually frozen across updates. For this project, that's fine. The goal is debugging and local comparison, not cryptographic determinism.
+
+**The print.** The CLI prints the seed on every run, even when you don't ask for one. That line exists so you never lose an interesting result. If a track evolves with unexpectedly high fitness, the seed is right there in the terminal output. Copy it, rerun with `--rng-seed`, get the same track.
+
+This unblocks the benchmark and makes evolution debuggable. Small change, high return.
+
+---
+
 ## 2026-07-11 — Phase 4: The genetic algorithm learns to build real coasters
 
 The GA is working. Tracks evolve, export to TD6, and load in OpenRCT2. Getting there required learning, the hard way, that RCT2's track system has rules the game enforces but never explains.
