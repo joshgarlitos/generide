@@ -2,47 +2,18 @@
 
 **Procedurally generating roller coasters for OpenRCT2.**
 
-I grew up sinking weekends into RollerCoaster Tycoon 2. Twenty-some years later, OpenRCT2 keeps the lights on. Same game, modern OS, no crashes when you accidentally summon 400 guests. What it doesn't have is an AI that builds coasters for you. So I'm writing one.
+generide is a Python tool that reads, validates, generates, and evolves RollerCoaster Tycoon 2 track designs. It produces checksummed `.td6` files that OpenRCT2 can load directly.
 
-generide is a Python tool that emits `.td6` files — the format OpenRCT2 uses to save and share individual ride designs. The long-term plan is a genetic algorithm that evolves coasters players actually want to ride. The short-term plan is more humbling: convince the game that the file I just wrote is a real coaster.
+The project started as a binary-format exercise: decode a real ride, encode it again, and prove the bytes survive. It now has an end-to-end generation pipeline and a working genetic algorithm. Evolved Mine Train coasters can be exported, placed, and run in OpenRCT2.
 
-## Where this stands today
+## Current status
 
-Phase 1 was about reading and writing the binary format itself. Before I can generate a coaster, I have to prove I understand the format end-to-end. The cleanest proof is a round-trip — take a real `.td6` file, decode it into Python, encode it back, check the bytes match. If they match, I'm right. If they don't, I'm lying to myself. They match.
-
-As of right now:
-- RLE compression layer: **done**, round-trip tested over a real exported ride
-- TD6 decode/encode: **done**, a real Mine Train ride round-trips byte-for-byte (16 tests passing)
-- Geometry (Phase 2): done; the 89-piece Mine Train fixture passes unified validation
-- Generation: not yet
-
-## How it works
-
-A `.td6` file is a Russian doll. Outer layer: a custom run-length encoding scheme RCT2 has used since 1999. Inner layer: a flat array of bytes at specific offsets — ride type at 0x00, train count at 0x4c, lift hill speed packed into the bottom 5 bits of 0xa2. Some fields are bit-packed because in 1999, every byte mattered. (In 2026, every byte still kinda matters, actually.)
-
-The stack:
-
-```
-compressed .td6 file
-       ↕  rle.py       ← custom RLE compress/decompress
-decompressed bytes
-       ↕  td6.py       ← byte offsets ↔ Ride dataclass
-Ride object
-       ↕  geometry.py  ← Phase 2: where does each track piece land?
-Validated coaster
-       ↕  generator    ← Phase 4: genetic algorithm
-A coaster that doesn't fall off the map
-```
-
-Each layer is its own module, testable in isolation. I'm building bottom-up because the alternative — generate a coaster, then debug whether the bug is in the generator, the format encoder, or the geometry — sounds like the worst week of my year.
-
-## What's interesting under the hood
-
-**Reverse-engineering a binary format with no spec.** OpenRCT2 is open source, but the TD6 format itself was never officially documented. The reference I'm working from is community-maintained, mostly accurate, and occasionally just wrong. I'm cross-checking against a Go implementation (kevinburke/rct) that — and this is real — uses `math.Sin` where it means `math.Cos`. That kind of bug doesn't fail loudly. It just makes every generated coaster geometrically wrong by 90 degrees of rotation. I'm not porting that code.
-
-**Custom RLE.** RCT2 has its own run-length encoding flavor: one control byte tells you whether the next chunk is literal data (up to 128 bytes) or a single byte repeated (2 to 129 times). Twenty lines of Python. Easy to write, easy to get off-by-one on, easy to verify with a round-trip test.
-
-**A real GA problem buried in Phase 4.** What does "fun coaster" mean as a fitness function? The game itself outputs excitement, intensity, and nausea ratings, so there's a computable signal. But optimizing the GA against the game's own ratings is a different problem than optimizing for "would a human pay to ride this." That gap is the actual research question. Phase 4 is months away. I'm already excited.
+- TD6 read/write, RLE compression, and checksum generation are complete.
+- Track geometry closes a real 89-piece Mine Train exactly and validates occupancy and bounds.
+- Python-authored tracks export with stations, entrances, exits, and valid checksums.
+- The genetic algorithm evolves closed tracks with slope, banking, lift-hill, collision, energy, and footprint constraints.
+- Fitness currently uses geometric proxies. It does not yet optimize OpenRCT2's actual excitement, intensity, and nausea ratings.
+- The test suite contains 118 passing tests.
 
 ## Quickstart
 
@@ -53,23 +24,85 @@ pip install -r requirements.txt
 pytest
 ```
 
-That's it. You don't need OpenRCT2 installed to develop — the test fixtures are real `.td6` files exported from the game and checked in under `data/sample_rides/`.
+Generate the hand-authored test circuit:
+
+```bash
+python generate_coaster.py simple_coaster.td6
+```
+
+Run a short evolution and export its best track:
+
+```bash
+python evolve_coaster.py \
+  --generations 100 \
+  --population 50 \
+  --verbose \
+  --output evolved.td6
+```
+
+Both commands use `data/sample_rides/manic_miner_test.td6` as the default Mine Train template. Generated `.td6` files can be placed in the OpenRCT2 track-design directory and selected in game.
+
+## How it fits together
+
+```text
+.td6 file
+   ↕ checksum.py + rle.py
+compressed TD6 data
+   ↕ td6.py
+Ride and TrackElement objects
+   ↕ segments.py + geometry.py
+validated track geometry
+   ↕ generate.py
+loadable generated ride
+   ↕ mutations.py + fitness.py + evolution.py
+evolved coaster
+```
+
+The genome is a list of TD6 segment IDs. Mutation operators insert, delete, replace, and recombine track pieces while preserving the station and treating slope and bank transitions as valid sequences. A proxy fitness function rewards length, elevation changes, turn balance, and segment variety while heavily penalizing invalid geometry and physics.
+
+## Project layout
+
+```text
+rct2/
+  checksum.py    TD6 checksum computation
+  rle.py         RCT2 run-length compression
+  td6.py         TD6 parsing, serialization, load, and save
+  segments.py    Track-piece geometry and occupancy definitions
+  geometry.py    Position tracing, bounds, collision, and validation
+  construction.py Shared slope, bank, lift, energy, and geometry validation
+  generate.py    Ride construction from Python segment lists
+  mutations.py   Mutation, crossover, random tracks, and repair
+  fitness.py     Proxy fitness and track-rule checks
+  evolution.py   Population management and evolution loops
+tests/            Unit and fixture-based regression tests
+data/sample_rides/ Real OpenRCT2 exports used as fixtures and templates
+```
+
+See [docs/architecture.md](docs/architecture.md) for the module contracts and data flow, [docs/roadmap.md](docs/roadmap.md) for current priorities, and [docs/devlog.md](docs/devlog.md) for the development record.
 
 ## Roadmap
 
 | Phase | Goal | Status |
-|-------|------|--------|
-| 1 | Round-trip a real `.td6` file through Python | RLE done; TD6 in progress |
-| 2 | Track segment geometry — given a piece, where does the next one land? | Done |
-| 3 | Hand-author a coaster in Python, load it in-game | Not started |
-| 4 | Genetic algorithm | Not started |
+|---|---|---|
+| 1 | Read and write real TD6 files faithfully | Complete |
+| 2 | Reconstruct and validate track geometry | Complete |
+| 3 | Author a coaster in Python and run it in OpenRCT2 | Complete |
+| 4 | Evolve constrained coasters with a genetic algorithm | In progress |
 
-Each phase is gated on the previous one passing real tests, not on me feeling good about it.
+Phase 4's engine works, but the original success criterion is broader: optimize toward requested OpenRCT2 ride-rating ranges, reliably satisfy user-supplied bounds, and demonstrate improvement over a random baseline.
 
 ## References
 
-- [TD6 format notes](https://github.com/UnknownShadow200/RCTTechDepot-Archive/blob/master/td4.html) — community-maintained spec, mostly accurate
-- [kevinburke/rct](https://github.com/kevinburke/rct) — Go implementation. Useful for file format scaffolding. Don't port the geometry math.
-- [OpenRCT2](https://openrct2.io) — the open-source game this targets
-- [docs/architecture.md](docs/architecture.md) — module-by-module breakdown for contributors
-- [docs/phase1-spec.md](docs/phase1-spec.md) — the working spec for the current phase
+- [TD6 format notes](https://github.com/UnknownShadow200/RCTTechDepot-Archive/blob/master/td4.html)
+- [kevinburke/rct](https://github.com/kevinburke/rct)
+- [OpenRCT2](https://openrct2.io)
+
+## License
+
+Copyright (C) 2026 Josh Garlitos
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
