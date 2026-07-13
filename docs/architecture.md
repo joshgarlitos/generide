@@ -1,114 +1,147 @@
 # Architecture
 
-The [README](../README.md) covers what generide is and why. This doc covers how the code is structured for anyone who wants to read or modify it.
+This document describes how generide moves between raw TD6 files, Python ride objects, validated geometry, and evolved tracks. The [README](../README.md) covers setup and everyday usage.
 
-## The layered model
+## Layered model
 
-generide is built bottom-up as a stack of independent layers. Each layer takes the output of the layer below and turns it into something more structured. Each is independently testable: RLE has no idea what a ride is, TD6 has no idea what RLE is doing underneath it, the `Ride` object has no idea what bit offsets it came from.
-
+```text
+Evolution                    rct2/evolution.py
+  tournament selection, elitism, generations
+        ↕
+Genome operations + fitness rct2/mutations.py, rct2/fitness.py
+  segment-list mutation, crossover, repair, proxy scoring
+        ↕
+Ride generation             rct2/generate.py
+  segment lists become Ride objects with stations and entrances
+        ↕
+Geometry                    rct2/segments.py, rct2/geometry.py
+  movement, occupancy, bounds, closure, validation
+Construction rules          rct2/construction.py
+  slope, bank, lift, energy, and export validity
+        ↕
+TD6 model and serialization rct2/td6.py
+  headers, elements, entrances, scenery
+        ↕
+Compression and integrity   rct2/rle.py, rct2/checksum.py
+        ↕
+Checksummed .td6 file
 ```
-┌──────────────────────────────────────┐
-│  Generator (Phase 4)                 │  GA evolves Ride objects
-├──────────────────────────────────────┤
-│  Geometry (Phase 2)                  │  Validates a Ride is physically sound
-├──────────────────────────────────────┤
-│  Segment definitions                 │  Per-piece deltas (forward, sideways,
-│  (rct2/segments.py)                  │  elevation, direction)
-├──────────────────────────────────────┤
-│  Ride / TrackElement dataclasses     │  Pythonic representation
-│  (rct2/td6.py)                       │
-├──────────────────────────────────────┤
-│  TD6 byte layout (rct2/td6.py)       │  Fields at known offsets
-├──────────────────────────────────────┤
-│  RLE compression (rct2/rle.py)       │  Bytes ↔ bytes
-├──────────────────────────────────────┤
-│  Raw .td6 file                       │  ~3 KB binary blob
-└──────────────────────────────────────┘
+
+Each layer can be tested independently. A geometry failure does not require debugging compression, and a mutation failure does not require loading OpenRCT2.
+
+## Core data flow
+
+### Reading an existing ride
+
+```text
+.td6 bytes
+  → split and verify 4-byte checksum
+  → RLE-decompress payload
+  → parse fixed header fields
+  → parse 2-byte track elements until 0xFF
+  → parse 6-byte entrance and exit records until 0xFF
+  → preserve remaining scenery bytes
+  → Ride
 ```
+
+Use `td6.load(path)` for this complete operation. Lower-level `td6.decode()` accepts compressed content without the trailing checksum.
+
+### Writing a generated ride
+
+```text
+list[int] segment genome
+  → geometry validation
+  → TrackElement objects
+  → template-backed Ride header and vehicle data
+  → calculated footprint and station entrances
+  → TD6 serialization
+  → RLE compression
+  → checksum append
+  → .td6 file
+```
+
+Use `generate.generate_ride()` to construct the `Ride` and `td6.save()` to write it.
+
+### Evolving a ride
+
+`evolution.evolve()` starts from a seed segment list, creates a population, scores each individual, selects parents by tournament, applies crossover and mutation, attempts circuit repair, and preserves the best individuals through elitism. The exported genome remains a plain list of TD6 segment IDs.
 
 ## Module reference
 
 ### `rct2/rle.py`
 
-RCT2's custom run-length encoding. Two functions, no state:
+Implements RCT2's custom run-length compression. RLE has multiple valid encodings for the same decompressed data, so format round-trip tests compare decompressed bytes.
 
-- `decompress(data: bytes) -> bytes`
-- `compress(data: bytes) -> bytes`
+### `rct2/checksum.py`
 
-The encoding: each chunk starts with a control byte. If `c < 128`, the next `c + 1` bytes are literal data. If `c >= 128`, the next byte is repeated `257 - c` times. That's the whole format. Round-trip-tested against a real `.td6` fixture.
+Computes the 32-bit TD6 checksum over compressed file content using the RCT2 rolling sum, bit rotation, and TD6 magic value. `append()` and `strip()` operate on complete file bytes.
 
-### `rct2/td6.py` (in progress)
+### `rct2/td6.py`
 
-Translates decompressed bytes into a `Ride` dataclass and back. Field offsets are documented in the [Phase 1 spec](phase1-spec.md). Two main functions:
+Defines `Ride`, `TrackElement`, and `Entrance`. It parses named header fields while retaining the raw header so unparsed bytes survive round trips. Scenery remains opaque. The primary file APIs are:
 
-- `decode(compressed_data: bytes) -> Ride` — handles RLE internally, returns a fully parsed `Ride`
-- `encode(ride: Ride) -> bytes` — produces compressed bytes ready to write to disk
+- `load(path) -> Ride`
+- `save(ride, path) -> None`
+- `decode(compressed) -> Ride`
+- `encode(ride) -> bytes`
 
-Anything after the track-element terminator (entrance/exit positions, scenery) is kept as opaque `remainder` bytes and written back verbatim. This is a deliberate Phase 1 shortcut — see Design decisions below.
+### `rct2/segments.py`
 
-### `rct2/segments.py` (planned for Phase 2)
+Stores immutable geometry for the Mine Train segment types currently supported. Each definition includes endpoint movement, elevation, heading change, and occupied tile footprint. Unknown IDs fail explicitly.
 
-Per-piece geometry deltas: when you place a "25° up" piece pointing east, how does the next piece's position and direction differ from the current one? Ported from kevinburke/rct, with corrections. The data tables in that codebase are correct; the math functions that operate on them are not. Use the tables, re-derive the math.
+### `rct2/geometry.py`
 
-### `rct2/geometry.py` (planned for Phase 2)
+Provides position advancement, complete-track tracing, occupancy, bounds, collision reporting, and `validate_track()`. Validation returns structured issue codes rather than a bare boolean.
 
-Walks a sequence of track elements and computes per-piece positions. Validates that the track forms a closed circuit, doesn't collide with itself, and stays within map bounds.
+### `rct2/generate.py`
 
-## Data flow
+Builds generated rides using a real Mine Train file as a template for vehicle and unparsed header data. It replaces the track, calculates dimensions, adds entrance and exit records, and leaves scenery empty.
 
-A complete read-then-write cycle:
+### `rct2/construction.py`
 
+Combines geometry with slope, bank, chain-lift, and estimated-energy rules. Generation, evolution, fitness, and CLI export use its structured result as the shared definition of a construction-valid ride.
+
+### `rct2/mutations.py`
+
+Implements insert, delete, replace, swap, mutation, crossover, random-track creation, and circuit repair. Slope and banked pieces are inserted as compatible sequences to avoid combinations OpenRCT2 rejects.
+
+### `rct2/fitness.py`
+
+Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus `ProxyFitness` and `WeightedProxyFitness`. The proxy rewards geometric qualities and penalizes invalid or impractical tracks. It does not reproduce OpenRCT2 ride ratings.
+
+### `rct2/evolution.py`
+
+Owns `Individual`, `Population`, evolution statistics, population initialization, tournament selection, elitism, and the main evolution loops.
+
+## Design decisions
+
+**Python over Go.** Iteration speed matters more than raw throughput for a few hundred segments per ride.
+
+**TD6 over TD4.** OpenRCT2 and RCT2 are the targets. TD4 is the RCT1 format.
+
+**Template-backed generation.** Generated rides reuse a known-good Mine Train header and vehicle data. This narrows current generation to one ride type while avoiding guesses about unrelated TD6 fields.
+
+**Opaque data by default.** Unparsed header bytes and scenery survive round trips. Fields become structured only when generation needs to control them.
+
+**Segment lists as genomes.** A list of integer IDs maps directly to TD6 track elements, stays easy to inspect, and works with straightforward mutation and crossover operators.
+
+**Proxy fitness before game ratings.** Geometry-based scoring made it possible to prove the GA and export pipeline without automating the game. It is an intermediate signal, not the final definition of ride quality.
+
+## Known limitations
+
+- Only the initial Mine Train segment set has complete geometry support.
+- Generated rides depend on a template TD6 for header and vehicle data.
+- Scenery is not generated.
+- Collision checks operate on exact occupied cells rather than full clearance volumes.
+- Energy is estimated rather than simulated with OpenRCT2 physics.
+- Fitness does not yet use the game's excitement, intensity, and nausea ratings.
+- Mutations keep their own copies of the construction rules and insert slopes and banked turns only from fixed pre-built sequences; steep slope pieces (0x05, 0x07, 0x08) are defined but unreachable by any mutation.
+- Evolution uses the global `random` module with no seed, so runs are not reproducible.
+
+## Testing
+
+The test suite covers binary round trips, checksum reproduction, real-fixture geometry and construction validation, generation, mutation, fitness behavior, population management, and evolution. Run it with:
+
+```bash
+pytest
 ```
-.td6 bytes
-    │
-    │  td6.decode()
-    │    ├─ rle.decompress()
-    │    ├─ parse header fields at fixed offsets
-    │    ├─ parse track elements until 0xFF terminator
-    │    └─ stash remainder bytes opaque
-    ▼
-Ride object  ──── (Phase 2) ────►  validated by geometry.py
-    │
-    │  td6.encode()
-    │    ├─ serialize header fields back to offsets
-    │    ├─ serialize track elements + 0xFF terminator
-    │    ├─ append remainder bytes verbatim
-    │    └─ rle.compress()
-    ▼
-.td6 bytes  (round-trip target: decompresses to the same bytes as the input)
-```
-
-## Design decisions and rationale
-
-**Python over Go.** The reference implementation (kevinburke/rct) is Go. Python wins for this project because the iteration loop on binary format work is faster — interactive REPL exploration of byte patterns beats compile-test cycles. The performance penalty is irrelevant at this scale: a coaster has a few hundred segments, not a few million.
-
-**TD6, not TD4.** TD4 is the RCT1 format. TD6 is the RCT2 / OpenRCT2 format. OpenRCT2 is the target, so TD6.
-
-**Opaque `remainder` bytes.** The Phase 1 round-trip test only requires faithful read/write of the format, not full understanding of every byte. Everything after the track-element terminator gets stored as raw bytes and written back unchanged. This works for round-tripping but is a known limitation for Phase 3: a generated coaster needs real entrance/exit data, which means either parsing this section properly or splicing generated track into a template ride's remainder.
-
-**Mine Train as the starting ride type.** Same choice kevinburke/rct made, so more reference data exists for cross-checking. Once Phase 1 is solid, supporting other ride types is mostly a matter of which track segments are allowed.
-
-**Round-trip first, generation later.** Building bottom-up means each phase has a hard pass/fail criterion before the next one starts. Phase 1: bytes match. Phase 2: computed positions match a known-good ride. Phase 3: the game loads it. Phase 4: the GA produces a coaster a human would actually ride.
-
-## Gotchas
-
-**Renaming the project breaks the venv.** The venv records the absolute path to its Python interpreter. If you `mv` the project directory, the interpreter symlink breaks silently — commands fail with `bad interpreter: ... no such file or directory`. Fix: `rm -rf .venv && python3 -m venv .venv && pip install -r requirements.txt`.
-
-**The last 4 bytes of every `.td6` are a checksum.** Phase 1 ignores it — we strip it on read and don't regenerate it on write. OpenRCT2 will reject files with bad checksums, so Phase 3 needs to compute checksums the game will accept.
-
-**RLE has multiple valid encodings of the same data.** A run of identical bytes can be encoded as a run *or* as a literal — both decompress identically. So re-compressing a file won't necessarily reproduce byte-identical output to the original, even when the code is correct. Round-trip tests must compare *decompressed* bytes, not raw compressed bytes. (Full explanation in the [Phase 1 spec](phase1-spec.md).) This also means a byte-identical re-compression is *not* guaranteed for free — if the Phase 3 checksum turns out to require it, our compressor would need to match RCT2's exact run/literal boundary choices.
-
-**Bit-packed fields hide multiple values in one byte.** Examples: `control_flags` at offset 0x4b packs load type into bits 0-2 plus several boolean flags above; `circuits_and_lift_speed` at 0xa2 packs circuit count into the top 3 bits and lift speed into the bottom 5. Always read these as raw bytes first and unpack into structured fields second.
-
-**kevinburke/rct is a reference, not a transplant donor.** Its TD6 read/write structure is sound. Its geometry math has real bugs: `Advance()` panics on valid input, `cosdeg()` uses `math.Sin` instead of `math.Cos`, collision detection uses bounding boxes instead of per-tile occupancy, `Mutate()` is empty. Read it for structure. Re-derive the math.
-
-## Adding a new phase
-
-Each phase gets its own spec doc in `docs/phaseN-spec.md`. The pattern:
-
-1. Write the spec first. Field tables, byte layouts, function signatures, success criterion.
-2. Write the tests against the spec.
-3. Write the implementation.
-4. Pass.
-
-The spec is the contract. If you find yourself wanting to write code before the spec, the spec isn't clear enough yet.

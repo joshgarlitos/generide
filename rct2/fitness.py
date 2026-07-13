@@ -7,96 +7,14 @@ running the game.
 
 from typing import Optional, Protocol, Set, Tuple
 
+from rct2 import construction
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
 
 
-# Slope state tracking for transition validation
-SLOPE_TRANSITIONS = {
-    # segment_id: (required_slope_state, resulting_slope_state)
-    # slope_state: 'flat', 'up', 'down'
-    0x04: ('up', 'up'),           # 25_deg_up - must be on upslope, stays up
-    0x05: ('steep_up', 'steep_up'),  # 60_deg_up
-    0x06: ('flat', 'up'),         # flat_to_25_deg_up - starts upslope
-    0x07: ('up', 'steep_up'),     # 25_deg_up_to_60_deg_up
-    0x08: ('steep_up', 'up'),     # 60_deg_up_to_25_deg_up
-    0x09: ('up', 'flat'),         # 25_deg_up_to_flat - ends upslope
-    0x0A: ('down', 'down'),       # 25_deg_down
-    0x0B: ('steep_down', 'steep_down'),  # 60_deg_down
-    0x0C: ('flat', 'down'),       # flat_to_25_deg_down
-    0x0D: ('down', 'steep_down'), # 25_deg_down_to_60_deg_down
-    0x0E: ('steep_down', 'down'), # 60_deg_down_to_25_deg_down
-    0x0F: ('down', 'flat'),       # 25_deg_down_to_flat
-}
-
-# Segments that require flat slope state
-FLAT_ONLY_SEGMENTS = {
-    0x00,  # flat
-    0x10, 0x11,  # quarter turns 5
-    0x2A, 0x2B,  # quarter turns 3
-    0x16, 0x17,  # banked quarter turns 5
-    0x2C, 0x2D,  # banked quarter turns 3
-    0x12, 0x13, 0x14, 0x15,  # bank transitions
-    0x20, 0x21,  # banked
-    0x63, 0xD8,  # brakes
-    0x01, 0x02, 0x03,  # stations
-}
-
-# Bank state tracking for transition validation
-# segment_id: (required_bank_state, resulting_bank_state)
-# bank_state: 'flat', 'left', 'right'
-BANK_TRANSITIONS = {
-    0x12: ('flat', 'left'),      # flat_to_left_bank
-    0x13: ('flat', 'right'),     # flat_to_right_bank
-    0x14: ('left', 'flat'),      # left_bank_to_flat
-    0x15: ('right', 'flat'),     # right_bank_to_flat
-    0x20: ('left', 'left'),      # left_bank (maintains)
-    0x21: ('right', 'right'),    # right_bank (maintains)
-    0x16: ('left', 'left'),      # banked_left_quarter_turn_5_tiles
-    0x17: ('right', 'right'),    # banked_right_quarter_turn_5_tiles
-    0x2C: ('left', 'left'),      # banked_left_quarter_turn_3_tiles
-    0x2D: ('right', 'right'),    # banked_right_quarter_turn_3_tiles
-    # Bank-to-slope transitions
-    0x18: ('left', 'flat'),      # left_bank_to_25_deg_up (ends bank, starts slope)
-    0x19: ('right', 'flat'),     # right_bank_to_25_deg_up
-    0x1A: ('flat', 'left'),      # 25_deg_up_to_left_bank (ends slope, starts bank)
-    0x1B: ('flat', 'right'),     # 25_deg_up_to_right_bank
-    0x1C: ('left', 'flat'),      # left_bank_to_25_deg_down
-    0x1D: ('right', 'flat'),     # right_bank_to_25_deg_down
-    0x1E: ('flat', 'left'),      # 25_deg_down_to_left_bank
-    0x1F: ('flat', 'right'),     # 25_deg_down_to_right_bank
-}
-
-# Segments that require flat bank state (no banking)
-FLAT_BANK_SEGMENTS = {
-    0x00,  # flat
-    0x10, 0x11,  # quarter turns 5 (unbanked)
-    0x2A, 0x2B,  # quarter turns 3 (unbanked)
-    0x04, 0x05, 0x06, 0x07, 0x08, 0x09,  # up slopes
-    0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,  # down slopes
-    0x63, 0xD8,  # brakes
-    0x01, 0x02, 0x03,  # stations
-}
-
-
 def count_slope_violations(segments: list[int]) -> int:
     """Count invalid slope transitions in a segment sequence."""
-    violations = 0
-    slope_state = 'flat'
-
-    for seg_id in segments:
-        if seg_id in SLOPE_TRANSITIONS:
-            required, resulting = SLOPE_TRANSITIONS[seg_id]
-            if slope_state != required:
-                violations += 1
-            slope_state = resulting
-        elif seg_id in FLAT_ONLY_SEGMENTS:
-            if slope_state != 'flat':
-                violations += 1
-            slope_state = 'flat'
-        # Unknown segments - assume they work in any state
-
-    return violations
+    return construction.count_slope_violations(segments)
 
 
 def count_bank_violations(segments: list[int]) -> int:
@@ -107,36 +25,7 @@ def count_bank_violations(segments: list[int]) -> int:
     - Flat segments when track is banked (without transition)
     - Left bank segments when track is right-banked (and vice versa)
     """
-    violations = 0
-    bank_state = 'flat'
-
-    for seg_id in segments:
-        if seg_id in BANK_TRANSITIONS:
-            required, resulting = BANK_TRANSITIONS[seg_id]
-            if bank_state != required:
-                violations += 1
-            bank_state = resulting
-        elif seg_id in FLAT_BANK_SEGMENTS:
-            if bank_state != 'flat':
-                violations += 1
-            bank_state = 'flat'
-        # Unknown segments - assume they work in any bank state
-
-    return violations
-
-
-# Segments that can have chain lift (upward slopes)
-CHAIN_LIFT_SEGMENTS = {
-    0x04,  # 25_deg_up
-    0x05,  # 60_deg_up
-    0x06,  # flat_to_25_deg_up
-    0x07,  # 25_deg_up_to_60_deg_up
-    0x08,  # 60_deg_up_to_25_deg_up
-    0x09,  # 25_deg_up_to_flat
-}
-
-# Friction loss per segment (in elevation units) - rough estimate
-FRICTION_PER_SEGMENT = 0.1
+    return construction.count_bank_violations(segments)
 
 
 def find_first_hill(segments: list[int]) -> Optional[Tuple[int, int]]:
@@ -145,32 +34,12 @@ def find_first_hill(segments: list[int]) -> Optional[Tuple[int, int]]:
     Returns:
         Tuple of (start_index, end_index) or None if no hill found.
     """
-    start = None
-    for i, seg_id in enumerate(segments):
-        if seg_id in CHAIN_LIFT_SEGMENTS:
-            if start is None:
-                start = i
-        elif start is not None:
-            # End of first hill
-            return (start, i)
-
-    if start is not None:
-        return (start, len(segments))
-    return None
+    return construction.find_first_hill(segments)
 
 
 def check_first_hill_has_lift(segments: list[int], lift_indices: set[int]) -> bool:
     """Check if the first hill has chain lift enabled."""
-    first_hill = find_first_hill(segments)
-    if first_hill is None:
-        return True  # No hill, no problem
-
-    start, end = first_hill
-    # At least one segment in the first hill should have lift
-    for i in range(start, end):
-        if i in lift_indices:
-            return True
-    return False
+    return construction.check_first_hill_has_lift(segments, lift_indices)
 
 
 def estimate_energy_violations(
@@ -190,46 +59,7 @@ def estimate_energy_violations(
     Returns:
         Tuple of (violation_count, first_hill_has_lift)
     """
-    if lift_indices is None:
-        # Default: assume first hill has chain lift
-        first_hill = find_first_hill(segments)
-        if first_hill:
-            lift_indices = set(range(first_hill[0], first_hill[1]))
-        else:
-            lift_indices = set()
-
-    violations = 0
-    current_elevation = 0
-    max_elevation_with_lift = 0  # Highest point reached with chain assist
-    segments_since_lift = 0
-
-    for i, seg_id in enumerate(segments):
-        # Get elevation change for this segment
-        if seg_id in SEGMENTS:
-            elevation_delta = SEGMENTS[seg_id].elevation_delta
-        else:
-            elevation_delta = 0
-
-        current_elevation += elevation_delta
-
-        if i in lift_indices:
-            # Chain lift - we can reach this height "for free"
-            max_elevation_with_lift = max(max_elevation_with_lift, current_elevation)
-            segments_since_lift = 0
-        else:
-            segments_since_lift += 1
-
-            # Calculate available energy (max height minus friction losses)
-            friction_loss = segments_since_lift * FRICTION_PER_SEGMENT
-            available_height = max_elevation_with_lift - friction_loss
-
-            # If current elevation exceeds available energy, we'd valley
-            if current_elevation > available_height + 0.5:  # Small buffer
-                violations += 1
-
-    first_hill_ok = check_first_hill_has_lift(segments, lift_indices)
-
-    return violations, first_hill_ok
+    return construction.estimate_energy_violations(segments, lift_indices)
 
 
 class FitnessFunction(Protocol):
@@ -314,6 +144,13 @@ class ProxyFitness:
             Fitness score (higher is better)
         """
         score = 0.0
+        construction_result = construction.validate_construction(
+            segments,
+            max_width=self.max_width,
+            max_depth=self.max_depth,
+        )
+        if not construction_result.valid:
+            score -= 10000
 
         # Length: reward longer tracks up to ideal, slight penalty beyond
         length = len(segments)

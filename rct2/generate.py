@@ -8,12 +8,11 @@ from pathlib import Path
 from typing import Union
 
 from rct2 import td6
+from rct2.construction import default_lift_indices, validate_construction
 from rct2.geometry import (
     Heading,
     Position,
-    is_closed_circuit,
     track_bounds,
-    validate_track,
 )
 from rct2.td6 import Entrance, Ride, TrackElement
 
@@ -119,28 +118,25 @@ def generate_ride(
     Raises:
         ValueError: If segments don't form a closed circuit
     """
-    # Validate the circuit
-    result = validate_track(Position(), segments)
+    result = validate_construction(segments)
     if not result.valid:
         issues = ", ".join(f"{i.code}: {i.message}" for i in result.issues)
         raise ValueError(f"Invalid track: {issues}")
-
-    if not is_closed_circuit(Position(), segments):
-        raise ValueError("Track must form a closed circuit")
 
     # Load template
     template = td6.load(template_path)
 
     # Create track elements from segment IDs
+    lift_indices = default_lift_indices(segments)
     elements = [
         TrackElement(
             segment_type=seg,
-            chain_lift=(seg == BEGIN_STATION),  # Chain lift on station
+            chain_lift=(seg == BEGIN_STATION or index in lift_indices),
             inverted=False,
             colour_scheme=0,
             cable_lift=False,
         )
-        for seg in segments
+        for index, seg in enumerate(segments)
     ]
 
     # Calculate entrance/exit positions

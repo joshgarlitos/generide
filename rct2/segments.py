@@ -2,6 +2,10 @@
 
 Movement deltas use a local frame: forward follows the incoming heading and
 right is perpendicular to it. Elevation uses RCT2 height units.
+
+The segment data tables are ported from kevinburke/rct
+(https://github.com/kevinburke/rct), Copyright (c) 2015 Kevin Burke,
+MIT License. See the LICENSE file at the repository root.
 """
 
 from dataclasses import dataclass

@@ -126,6 +126,13 @@ def test_generate_ride_rejects_invalid_track():
         generate_ride([FLAT], TEMPLATE)
 
 
+def test_generate_ride_rejects_closed_track_with_invalid_banking():
+    segments = create_simple_circuit()
+    segments[2] = 0x2D
+    with pytest.raises(ValueError, match="bank_transition"):
+        generate_ride(segments, TEMPLATE)
+
+
 def test_generated_ride_saves_and_loads():
     """A generated ride can be saved and loaded back."""
     segments = create_simple_circuit()
