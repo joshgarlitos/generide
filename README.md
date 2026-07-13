@@ -1,6 +1,6 @@
 # generide
 
-**Procedurally generating roller coasters that actually run in OpenRCT2.**
+**Evolving playable roller coasters for RollerCoaster Tycoon 2.**
 
 generide is a Python tool for reading, validating, generating, and evolving RollerCoaster Tycoon 2 (RCT2) track designs. It works directly with the game's `.td6` format and produces checksummed files that can be loaded into [OpenRCT2](https://openrct2.io).
 
