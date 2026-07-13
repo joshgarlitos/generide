@@ -4,6 +4,24 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-07-12 — Benchmark: evolution beats random search
+
+The GA was producing better scores than the starting track, but that doesn't prove it's better than random generation at equal cost. I needed to know whether the complexity of crossover, mutation, and selection was earning its keep, or whether I could get the same results by generating a thousand random tracks and picking the best one.
+
+**The setup.** Both approaches get the same evaluation budget: 1,000 fitness calls. Evolution uses a population of 50 over 19 generations (50 initial + 50×19 = 1,000 evaluations). Random search generates 1,000 tracks and keeps the best. Each approach runs 20 seeded trials, and the results get compared on mean fitness, median, range, and validity.
+
+**The results.** Evolution wins decisively. Mean fitness is 143.3 for evolution versus -4,423.8 for random search. The random baseline is dragged down by open circuits, which get a -10,000 penalty. Evolution produces valid closed tracks 100% of the time (20/20 trials). Random search produces valid tracks 95% of the time (19/20 trials), and when it fails, it fails catastrophically.
+
+Looking at just the valid tracks, evolution still wins. Its median is 137.5 versus 49.5 for random, and its minimum (109.0) is higher than random's median. The evolutionary process isn't just filtering out bad tracks. It's consistently finding better ones.
+
+**Why evolution works here.** Random generation with repair can close a circuit, but it has no mechanism to improve beyond that. Evolution does. Crossover combines successful patterns from different tracks, and mutation explores variations on what already works. The repair operator helps both approaches, but only evolution uses the repair output as a building block for the next generation.
+
+**What this means.** The GA is doing useful work. It's not just elaborately rejecting bad candidates. It's actively searching for better ones, and the tournament selection and elitism are preserving improvements across generations. That justifies the added complexity and makes further investment in the evolutionary approach worthwhile.
+
+The benchmark script is committed at `benchmark_evolution.py`. Running it with different budgets, population sizes, or mutation rates will show where the tradeoffs sit, but the baseline comparison is clear: evolution earns its complexity.
+
+---
+
 ## 2026-07-12 — Seeded RNG for reproducible evolution
 
 The GA worked, but every run was a black box. If an interesting track evolved, I couldn't recreate it. If a bug appeared, I couldn't debug it. The backlog called for reproducible runs before investing in a benchmark, and that meant threading a seeded RNG through the entire pipeline.
