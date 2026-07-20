@@ -7,6 +7,16 @@ attempting to maintain valid closed circuits.
 import random
 from typing import Optional
 
+from rct2.construction import (
+    BANK_TRANSITIONS,
+    SLOPE_TRANSITIONS,
+    bank_closing_path,
+    bank_state_at,
+    legal_bank_segments,
+    legal_slope_segments,
+    slope_closing_path,
+    slope_state_at,
+)
 from rct2.geometry import (
     Heading,
     Position,
@@ -22,39 +32,6 @@ FLAT_SEGMENTS = [0x00]
 TURN_LEFT_FLAT = [0x10, 0x2A]   # unbanked quarter turns left (5-tile, 3-tile)
 TURN_RIGHT_FLAT = [0x11, 0x2B]  # unbanked quarter turns right
 BRAKES = [0x63, 0xD8]  # brakes, block brakes
-
-# Valid slope sequences (must be inserted as complete units)
-# Each sequence starts and ends on flat track
-SLOPE_SEQUENCES = [
-    # Small hills
-    [0x06, 0x09],                    # flat→up, up→flat (small bump)
-    [0x0C, 0x0F],                    # flat→down, down→flat (small dip)
-    # Medium hills
-    [0x06, 0x04, 0x09],              # flat→up, up, up→flat
-    [0x0C, 0x0A, 0x0F],              # flat→down, down, down→flat
-    # Larger hills
-    [0x06, 0x04, 0x04, 0x09],        # flat→up, up, up, up→flat
-    [0x0C, 0x0A, 0x0A, 0x0F],        # flat→down, down, down, down→flat
-    # Up then down (hill)
-    [0x06, 0x04, 0x09, 0x0C, 0x0A, 0x0F],  # up slope then down slope
-    # Down then up (valley)
-    [0x0C, 0x0A, 0x0F, 0x06, 0x04, 0x09],  # down slope then up slope
-]
-
-# Valid banked turn sequences (must be inserted as complete units)
-# Each sequence starts and ends on flat (unbanked) track
-BANKED_SEQUENCES = [
-    # Left banked turns
-    [0x12, 0x16, 0x14],              # flat→left_bank, banked_left_turn_5, left_bank→flat
-    [0x12, 0x2C, 0x14],              # flat→left_bank, banked_left_turn_3, left_bank→flat
-    [0x12, 0x20, 0x16, 0x14],        # flat→left_bank, left_bank, banked_left_turn_5, left_bank→flat
-    [0x12, 0x16, 0x16, 0x14],        # double banked left turn
-    # Right banked turns
-    [0x13, 0x17, 0x15],              # flat→right_bank, banked_right_turn_5, right_bank→flat
-    [0x13, 0x2D, 0x15],              # flat→right_bank, banked_right_turn_3, right_bank→flat
-    [0x13, 0x21, 0x17, 0x15],        # flat→right_bank, right_bank, banked_right_turn_5, right_bank→flat
-    [0x13, 0x17, 0x17, 0x15],        # double banked right turn
-]
 
 # Simple segments that can be inserted individually (all work on flat track, no banking)
 SIMPLE_SEGMENTS = FLAT_SEGMENTS + TURN_LEFT_FLAT + TURN_RIGHT_FLAT + BRAKES
@@ -154,15 +131,76 @@ def _insert_sequence(segments: list[int], position: int, sequence: list[int]) ->
     return result
 
 
+def _build_run(rng: random.Random, legal_fn, closing_fn, excluded: set) -> list[int]:
+    """Randomly walk a legality-query state machine from flat back to flat.
+
+    Used to build self-contained slope or bank runs from scratch. Combined
+    bank+slope segments (0x18-0x1F) are excluded so slope runs and bank runs
+    stay independent; mutating combined bank-slope track is out of scope here.
+    """
+    state = "flat"
+    run: list[int] = []
+    for _ in range(rng.randint(1, 4)):
+        options = {seg: nxt for seg, nxt in legal_fn(state).items() if seg not in excluded}
+        if not options:
+            break
+        segment = rng.choice(list(options))
+        run.append(segment)
+        state = options[segment]
+        if state == "flat":
+            break
+    run.extend(closing_fn(state))
+    return run
+
+
+def _build_slope_run(rng: random.Random) -> list[int]:
+    """Build a self-contained slope run (starts and ends flat)."""
+    return _build_run(rng, legal_slope_segments, slope_closing_path, BANK_TRANSITIONS)
+
+
+def _build_bank_run(rng: random.Random) -> list[int]:
+    """Build a self-contained banked-turn run (starts and ends flat)."""
+    return _build_run(rng, legal_bank_segments, bank_closing_path, SLOPE_TRANSITIONS)
+
+
+def _slope_bump(direction: str) -> list[int]:
+    """Smallest legal non-combo bump from flat to `direction` ("up"/"down") and back."""
+    entries = {
+        seg: nxt for seg, nxt in legal_slope_segments("flat").items()
+        if seg not in BANK_TRANSITIONS and nxt == direction
+    }
+    entry = min(entries)
+    return [entry] + slope_closing_path(entries[entry])
+
+
+def _insert_legal_run_or_continuation(
+    segments: list[int],
+    position: int,
+    rng: random.Random,
+    state_fn,
+    legal_fn,
+    excluded: set,
+    build_fn,
+) -> list[int]:
+    """Insert at `position`, respecting whatever slope/bank state is already there.
+
+    On flat ground, builds a whole new self-contained run. Mid-run, inserts a
+    single segment that legally continues from the current state, leaving the
+    existing downstream segments to close it as before.
+    """
+    state = state_fn(segments, position)
+    if state == "flat":
+        run = build_fn(rng)
+        return _insert_sequence(segments, position, run) if run else segments
+    options = {seg: nxt for seg, nxt in legal_fn(state).items() if seg not in excluded}
+    if not options:
+        return segments
+    return insert_segment(segments, position, rng.choice(list(options)))
+
+
 def _is_special_segment(seg_id: int) -> bool:
     """Check if a segment is part of a slope or bank (not safe to delete individually)."""
-    # Slope segments
-    slope_ids = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}
-    # Bank segments
-    bank_ids = {0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x20, 0x21, 0x2C, 0x2D}
-    # Bank-slope transitions
-    bank_slope_ids = {0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F}
-    return seg_id in slope_ids or seg_id in bank_ids or seg_id in bank_slope_ids
+    return seg_id in SLOPE_TRANSITIONS or seg_id in BANK_TRANSITIONS
 
 
 def mutate(
@@ -222,16 +260,20 @@ def mutate(
                 result = insert_segment(result, pos, new_seg)
 
             elif mutation_type == "insert_slope":
-                # Insert a complete slope sequence
+                # Insert a new hill, or continue one already at this position
                 pos = rng.randint(start, len(result))
-                sequence = rng.choice(SLOPE_SEQUENCES)
-                result = _insert_sequence(result, pos, sequence)
+                result = _insert_legal_run_or_continuation(
+                    result, pos, rng,
+                    slope_state_at, legal_slope_segments, BANK_TRANSITIONS, _build_slope_run,
+                )
 
             elif mutation_type == "insert_banked":
-                # Insert a complete banked turn sequence
+                # Insert a new banked turn, or continue one already at this position
                 pos = rng.randint(start, len(result))
-                sequence = rng.choice(BANKED_SEQUENCES)
-                result = _insert_sequence(result, pos, sequence)
+                result = _insert_legal_run_or_continuation(
+                    result, pos, rng,
+                    bank_state_at, legal_bank_segments, SLOPE_TRANSITIONS, _build_bank_run,
+                )
 
             elif mutation_type == "delete":
                 if len(result) > start + 1:  # Keep at least one mutable segment
@@ -359,16 +401,16 @@ def repair_circuit(
             segments_added += 1
             continue
 
-        # Fix elevation first if needed - use complete slope sequences
+        # Fix elevation first if needed - use the smallest legal slope bump
         if z_gap < 0:  # End is below start, need to go up
-            # Add a small up slope sequence: flat→up, up→flat
-            result.extend([0x06, 0x09])  # flat_to_25_deg_up, 25_deg_up_to_flat
-            segments_added += 2
+            bump = _slope_bump("up")
+            result.extend(bump)
+            segments_added += len(bump)
             continue
         elif z_gap > 0:  # End is above start, need to go down
-            # Add a small down slope sequence: flat→down, down→flat
-            result.extend([0x0C, 0x0F])  # flat_to_25_deg_down, 25_deg_down_to_flat
-            segments_added += 2
+            bump = _slope_bump("down")
+            result.extend(bump)
+            segments_added += len(bump)
             continue
 
         # Determine which direction we should be heading to get to start
@@ -450,15 +492,13 @@ def generate_random_track(
     # Start with station
     segments = [BEGIN_STATION, END_STATION]
 
-    # Add random segments, slope sequences, and banked sequences
+    # Add random segments, slope runs, and banked runs
     while len(segments) - 2 < target_length:
         choice = rng.random()
-        if choice < 0.25:  # 25% chance for slope sequence
-            sequence = rng.choice(SLOPE_SEQUENCES)
-            segments.extend(sequence)
-        elif choice < 0.40:  # 15% chance for banked sequence
-            sequence = rng.choice(BANKED_SEQUENCES)
-            segments.extend(sequence)
+        if choice < 0.25:  # 25% chance for a slope run
+            segments.extend(_build_slope_run(rng))
+        elif choice < 0.40:  # 15% chance for a banked run
+            segments.extend(_build_bank_run(rng))
         else:  # 60% chance for simple segment
             segments.append(rng.choice(SIMPLE_SEGMENTS))
 
