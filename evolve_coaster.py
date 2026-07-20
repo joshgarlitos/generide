@@ -9,12 +9,13 @@ Usage:
 import argparse
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from rct2 import td6
+from rct2 import physics, td6
 from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve
-from rct2.fitness import ProxyFitness
+from rct2.fitness import PhysicsFitness, ProxyFitness, RatingTargets
 from rct2.generate import (
     BEGIN_STATION,
     END_STATION,
@@ -83,8 +84,8 @@ def main():
     parser.add_argument(
         "--output", "-o",
         type=Path,
-        default=Path("evolved.td6"),
-        help="Output TD6 file path (default: evolved.td6)",
+        default=None,
+        help="Output TD6 file path (default: generide-<timestamp>.td6)",
     )
     parser.add_argument(
         "--generations", "-g",
@@ -117,6 +118,33 @@ def main():
         help="Template TD6 file for ride header data",
     )
     parser.add_argument(
+        "--fitness",
+        choices=["proxy", "physics"],
+        default="proxy",
+        help="Fitness function: geometric proxy or physics simulation (default: proxy)",
+    )
+    parser.add_argument(
+        "--target-excitement",
+        type=str,
+        default=None,
+        metavar="MIN:MAX",
+        help="Excitement window for physics fitness, e.g. 5:7",
+    )
+    parser.add_argument(
+        "--target-intensity",
+        type=str,
+        default=None,
+        metavar="MIN:MAX",
+        help="Intensity window for physics fitness",
+    )
+    parser.add_argument(
+        "--target-nausea",
+        type=str,
+        default=None,
+        metavar="MIN:MAX",
+        help="Nausea window for physics fitness",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Print progress during evolution",
@@ -129,6 +157,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.output is None:
+        args.output = Path(f"generide-{datetime.now():%Y%m%d-%H%M%S}.td6")
 
     # Setup RNG with seed
     if args.rng_seed is None:
@@ -164,7 +195,26 @@ def main():
         print(f"Using {seed_path} as seed ({len(seed)} segments)")
 
     # Create fitness function
-    fitness_fn = ProxyFitness()
+    def parse_window(raw):
+        if raw is None:
+            return None
+        low, _, high = raw.partition(":")
+        return (float(low), float(high))
+
+    if args.fitness == "physics":
+        windows = (
+            parse_window(args.target_excitement),
+            parse_window(args.target_intensity),
+            parse_window(args.target_nausea),
+        )
+        targets = None
+        if any(w is not None for w in windows):
+            targets = RatingTargets(
+                excitement=windows[0], intensity=windows[1], nausea=windows[2],
+            )
+        fitness_fn = PhysicsFitness(targets=targets)
+    else:
+        fitness_fn = ProxyFitness()
 
     # Progress callback
     def progress(gen, pop):
@@ -202,6 +252,18 @@ def main():
     best = stats.best_individual
     print(f"  Best track length: {len(best.segments)} segments")
     print(f"  Best track valid: {best.is_valid()}")
+
+    if args.fitness == "physics":
+        stats = physics.simulate(best.segments)
+        ratings = physics.rate(stats)
+        print(f"  Simulated max speed: {stats.max_speed:.1f} m/s")
+        print(f"  Drops: {stats.drop_count} (total {stats.total_drop_height:.0f} height units)")
+        print(f"  Airtime: {stats.airtime:.1f}s, lateral g: {stats.max_lateral_g:.2f}")
+        print(f"  Circuit completed: {stats.completed}")
+        print(
+            f"  Approx ratings: excitement={ratings.excitement:.2f}, "
+            f"intensity={ratings.intensity:.2f}, nausea={ratings.nausea:.2f}"
+        )
 
     # Validate the best track
     result = validate_construction(best.segments)

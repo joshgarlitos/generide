@@ -4,6 +4,30 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-07-19 — A physics simulation replaces the geometric guesswork
+
+The fitness function now simulates the ride instead of counting track pieces. A new `rct2/physics.py` walks the track with an energy-method velocity model, collects ride stats (max speed, drops, g-forces, airtime), and maps them to approximate excitement, intensity, and nausea ratings. A new `PhysicsFitness` class scores tracks on those ratings. This is the first half of the hybrid plan from the last Phase 4 entry: a cheap Python approximation during evolution, with headless OpenRCT2 as ground truth later.
+
+**The model.** Segments carry integer RCT2 units, so the simulation converts once at the boundary and runs in meters and seconds: 3 meters per tile, 0.75 meters per height unit. The train leaves the station at chain lift speed (about 2.2 m/s). On lift segments the speed floor is the lift speed. Everywhere else the update is the energy equation: exit speed squared equals entry speed squared, plus twice gravity times the drop, minus a rolling friction term proportional to the segment's length. If speed falls below 1 m/s off-lift, the train stalls and the ride is marked incomplete, with the stall index recorded.
+
+Segment lengths and turn radii don't exist in the segment data, so they're derived. Straight pieces get the hypotenuse of their run and rise. Turns get a radius from their displacement shape (5-tile quarter turns curve at about 2.5 tiles, 3-tile turns at 1.5), and unknown shapes fall back to a straight piece rather than raising, because the GA can propose anything. Lateral g is v squared over radius; banked turns absorb a fixed 0.67 g of it. Vertical g comes from slope angle changes between consecutive segments, approximated as an arc spanning the segment. That's the crudest part of the model, so it lives in one isolated helper that the calibration phase can replace without touching anything else.
+
+**The ratings.** `rate()` maps stats to excitement, intensity, and nausea using a module-level `RATING_WEIGHTS` table shaped like OpenRCT2's per-ride-type contributions: base values plus weighted terms for speed, drops, g extremes, and airtime. The numbers are placeholders. The structure that matters is the penalties: intensity above 10 and lateral g above 2.8 slash excitement, which pushes the search away from rides that would rate as painful in the game. Calibration against the game is a data change, not a code change.
+
+**The fitness.** `PhysicsFitness` implements the same protocol as `ProxyFitness`, which stays untouched and remains the default. It reuses `validate_construction` for penalties, then adds a graded stall penalty: stalling at segment 40 scores better than stalling at segment 5, so evolution has a gradient toward completing the circuit instead of a cliff. With no targets, it maximizes excitement minus overload penalties. With a `RatingTargets` argument, it scores linear distance outside requested (min, max) windows per rating, which is the interface the roadmap's "excitement above 6, intensity below 8" request will use. The CLI grew `--fitness physics` and `--target-excitement/--target-intensity/--target-nausea MIN:MAX` flags, and prints the winner's simulated stats and ratings.
+
+**Lesson one: the fixture ride kept the model honest.** The first version stalled the real Manic Miner track three segments out of the station. Friction at 0.02 per meter ate the launch speed before the train reached the lift hill, because the model didn't know stations drive the train. Two fixes: station segments now act as powered pieces like the chain lift, and friction dropped to 0.01. This is exactly why the fixture test exists. A model that fails a ride the game runs fine is wrong, no matter how reasonable its constants look.
+
+**Lesson two: the intensity cap bit my own test.** The rating monotonicity test asserted that a bigger hill always means more excitement. It doesn't. The bigger hill pushed intensity past 10, the cap kicked in, and excitement dropped below the smaller hill's. The model was behaving as designed and the test expectation was wrong. Good sign, actually: the penalty that's supposed to shape the search away from extreme rides demonstrably does.
+
+**One performance note.** The first draft called `slope_state_at()` inside the simulation loop, which replays the track prefix every segment: quadratic in track length, multiplied by every fitness call in every generation. The state now steps incrementally through the loop. Fitness runs sit in evolution's hot path, so this class of mistake compounds fast.
+
+**The numbers.** 147 tests pass, 13 of them new, covering energy limits (drop speed bounded by sqrt(2gh)), lateral g scaling with speed and shrinking with banking, drop counting, rating monotonicity below the caps, and the fixture ride completing with sane stats. A 30-generation run evolved a valid 38-segment track that completes its simulated circuit at 10.3 m/s max with approximate ratings of excitement 5.54, intensity 7.77, nausea 5.48.
+
+**What's next.** Load an evolved track in OpenRCT2 and compare the game's ratings against the proxy's. That's the first calibration data point, and it will tell me how far the placeholder weights are from reality before any headless automation gets built.
+
+---
+
 ## 2026-07-12 — Benchmark: evolution beats random search
 
 The GA was producing better scores than the starting track, but that doesn't prove it's better than random generation at equal cost. I needed to know whether the complexity of crossover, mutation, and selection was earning its keep, or whether I could get the same results by generating a thousand random tracks and picking the best one.

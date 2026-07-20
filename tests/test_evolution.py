@@ -125,6 +125,25 @@ class TestEvolve:
         initial_fitness = fitness_fn.evaluate(seed)
         assert stats.best_fitness >= initial_fitness - 50  # Allow some variance
 
+    def test_evolution_with_physics_fitness_smoke(self):
+        """Evolution runs to completion with the physics-based fitness."""
+        import math
+
+        from rct2.fitness import PhysicsFitness
+
+        rng = random.Random(42)
+        seed = create_simple_circuit()
+        stats = evolve(
+            seed,
+            rng,
+            fitness_fn=PhysicsFitness(),
+            generations=5,
+            population_size=10,
+        )
+
+        assert isinstance(stats, EvolutionStats)
+        assert math.isfinite(stats.best_fitness)
+
     def test_evolution_maintains_some_valid_circuits(self):
         """Population should maintain some valid circuits."""
         seed = create_simple_circuit()

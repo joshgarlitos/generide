@@ -5,9 +5,10 @@ ProxyFitness scores tracks based on geometric properties without
 running the game.
 """
 
+from dataclasses import dataclass
 from typing import Optional, Protocol, Set, Tuple
 
-from rct2 import construction
+from rct2 import construction, physics
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
 
@@ -277,5 +278,89 @@ class WeightedProxyFitness:
 
         if length < self.min_length:
             score -= (self.min_length - length) * self.short_penalty_per_segment
+
+        return score
+
+
+@dataclass
+class RatingTargets:
+    """Optional (min, max) windows for each ride rating.
+
+    A None window means that rating is unconstrained.
+    """
+
+    excitement: Optional[Tuple[float, float]] = None
+    intensity: Optional[Tuple[float, float]] = None
+    nausea: Optional[Tuple[float, float]] = None
+
+
+def _window_distance(value: float, window: Optional[Tuple[float, float]]) -> float:
+    """Linear distance outside a (min, max) window; 0 when inside or unset."""
+    if window is None:
+        return 0.0
+    low, high = window
+    if value < low:
+        return low - value
+    if value > high:
+        return value - high
+    return 0.0
+
+
+class PhysicsFitness:
+    """Scores tracks by simulated ride physics and approximate ratings.
+
+    Runs the physics walk from rct2.physics over each candidate, rates the
+    resulting stats, and scores either open-ended excitement (default) or
+    distance from requested rating windows. Construction violations and
+    stalls are penalized with a gradient so evolution can climb out of them.
+    """
+
+    def __init__(
+        self,
+        targets: Optional[RatingTargets] = None,
+        validity_weight: float = 50.0,
+        target_weight: float = 20.0,
+        max_width: int = 30,
+        max_depth: int = 30,
+    ) -> None:
+        self.targets = targets
+        self.validity_weight = validity_weight
+        self.target_weight = target_weight
+        self.max_width = max_width
+        self.max_depth = max_depth
+
+    def evaluate(self, segments: list[int]) -> float:
+        score = 0.0
+
+        result = construction.validate_construction(
+            segments,
+            max_width=self.max_width,
+            max_depth=self.max_depth,
+        )
+        score -= self.validity_weight * len(result.issues)
+
+        stats = physics.simulate(segments, lift_indices=set(result.lift_indices))
+        if not stats.completed:
+            # Graded stall penalty: stalling later is better than stalling
+            # early, so the GA has a gradient toward completing the circuit.
+            progress = (stats.stall_index or 0) / max(1, len(segments))
+            score -= self.validity_weight * 4 * (1.0 - progress)
+
+        ratings = physics.rate(stats)
+        if self.targets is None:
+            score += ratings.excitement * 10
+            score -= max(0.0, ratings.intensity - physics.RATING_WEIGHTS["intensity_cap"]) * 5
+            score -= max(0.0, ratings.nausea - 7.0) * 5
+        else:
+            score += ratings.excitement  # mild tiebreaker inside windows
+            score -= self.target_weight * _window_distance(
+                ratings.excitement, self.targets.excitement
+            )
+            score -= self.target_weight * _window_distance(
+                ratings.intensity, self.targets.intensity
+            )
+            score -= self.target_weight * _window_distance(
+                ratings.nausea, self.targets.nausea
+            )
 
         return score
