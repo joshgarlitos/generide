@@ -4,17 +4,20 @@ import random
 
 import pytest
 
+import rct2.mutations
+from rct2.construction import BANK_TRANSITIONS, SLOPE_TRANSITIONS, bank_state_at, slope_state_at
 from rct2.geometry import Position, is_closed_circuit
 from rct2.generate import create_simple_circuit
 from rct2.mutations import (
-    BANKED_SEQUENCES,
     BEGIN_STATION,
     END_STATION,
     FLAT_SEGMENTS,
     SIMPLE_SEGMENTS,
-    SLOPE_SEQUENCES,
     TURN_LEFT,
     TURN_RIGHT,
+    _build_bank_run,
+    _build_slope_run,
+    _slope_bump,
     crossover,
     delete_segment,
     generate_random_track,
@@ -24,6 +27,14 @@ from rct2.mutations import (
     replace_segment,
     swap_segments,
 )
+
+
+class TestNoDuplicatedLegalityData:
+    """construction.py must be the single source of truth for slope/bank rules."""
+
+    def test_no_canned_slope_or_bank_tables_in_mutations(self):
+        assert not hasattr(rct2.mutations, "SLOPE_SEQUENCES")
+        assert not hasattr(rct2.mutations, "BANKED_SEQUENCES")
 
 
 class TestBasicOperations:
@@ -101,6 +112,29 @@ class TestBasicOperations:
         assert original[1] == 0x00  # Unchanged
 
 
+class TestBuildRuns:
+    """Tests for the run-building helpers that back insert_slope/insert_banked."""
+
+    def test_build_slope_run_starts_and_ends_flat(self):
+        rng = random.Random(42)
+        for _ in range(50):
+            run = _build_slope_run(rng)
+            assert slope_state_at(run) == "flat"
+
+    def test_build_bank_run_starts_and_ends_flat(self):
+        rng = random.Random(42)
+        for _ in range(50):
+            run = _build_bank_run(rng)
+            assert bank_state_at(run) == "flat"
+
+    def test_build_slope_run_can_reach_steep_pieces(self):
+        rng = random.Random(1)
+        found = set()
+        for _ in range(500):
+            found.update(_build_slope_run(rng))
+        assert {0x05, 0x07, 0x08} & found
+
+
 class TestMutateFunction:
     """Tests for the high-level mutate function."""
 
@@ -117,12 +151,11 @@ class TestMutateFunction:
         """Mutated segments should be from the valid set."""
         rng = random.Random(42)
         segments = create_simple_circuit()
-        # Build set of all valid segments (simple + slope + banked sequences)
-        valid_segments = set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
-        for seq in SLOPE_SEQUENCES:
-            valid_segments.update(seq)
-        for seq in BANKED_SEQUENCES:
-            valid_segments.update(seq)
+        # Build set of all valid segments (simple + any legal slope/bank piece)
+        valid_segments = (
+            set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
+            | set(SLOPE_TRANSITIONS) | set(BANK_TRANSITIONS)
+        )
 
         for _ in range(10):
             mutated = mutate(segments, rng, rate=0.3)
@@ -166,6 +199,11 @@ class TestRepairCircuit:
         repaired = repair_circuit(closed, rng)
         assert repaired is not None
         assert is_closed_circuit(Position(), repaired)
+
+    def test_slope_bump_matches_original_hardcoded_pairs(self):
+        """The derived elevation bump should match the old literal pairs."""
+        assert _slope_bump("up") == [0x06, 0x09]
+        assert _slope_bump("down") == [0x0C, 0x0F]
 
     def test_repair_returns_none_on_failure(self):
         """Repair should return None if it can't close the circuit."""
@@ -242,11 +280,10 @@ class TestGenerateRandomTrack:
     def test_generate_random_track_uses_valid_segments(self):
         """Generated tracks should use valid segment types."""
         rng = random.Random(42)
-        valid = set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
-        for seq in SLOPE_SEQUENCES:
-            valid.update(seq)
-        for seq in BANKED_SEQUENCES:
-            valid.update(seq)
+        valid = (
+            set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
+            | set(SLOPE_TRANSITIONS) | set(BANK_TRANSITIONS)
+        )
         for _ in range(5):
             track = generate_random_track(rng)
             for seg in track:
@@ -255,6 +292,26 @@ class TestGenerateRandomTrack:
 
 class TestIntegration:
     """Integration tests combining multiple operations."""
+
+    def test_steep_slope_pieces_are_reachable_end_to_end(self):
+        """Steep slope pieces (0x05/0x07/0x08) must be producible via the
+        public mutate()/generate_random_track() entry points, not just the
+        internal run-builder (acceptance criterion #1 of issue #2)."""
+        steep = {0x05, 0x07, 0x08}
+        found = set()
+        for seed in range(200):
+            rng = random.Random(seed)
+            found.update(generate_random_track(rng))
+            if found & steep:
+                break
+        if not found & steep:
+            original = create_simple_circuit()
+            for seed in range(200):
+                rng = random.Random(seed)
+                found.update(mutate(original, rng, rate=0.5))
+                if found & steep:
+                    break
+        assert found & steep
 
     def test_mutate_simple_circuit_often_stays_valid(self):
         """Mutating a valid circuit should often produce another valid circuit."""

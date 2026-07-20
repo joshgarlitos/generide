@@ -65,25 +65,112 @@ class ConstructionResult:
         return sum(issue.code == code for issue in self.issues)
 
 
+def _step_slope(state: str, segment: int) -> Tuple[str, Optional[str]]:
+    """Advance slope state by one segment.
+
+    Returns (resulting_state, required_state) where required_state is None
+    when the segment is unconstrained by slope (state passes through unchanged).
+    """
+    if segment in SLOPE_TRANSITIONS:
+        required, resulting = SLOPE_TRANSITIONS[segment]
+        return resulting, required
+    if segment in FLAT_ONLY_SEGMENTS:
+        return "flat", "flat"
+    return state, None
+
+
+def _step_bank(state: str, segment: int) -> Tuple[str, Optional[str]]:
+    """Advance bank state by one segment.
+
+    Returns (resulting_state, required_state) where required_state is None
+    when the segment is unconstrained by banking (state passes through unchanged).
+    """
+    if segment in BANK_TRANSITIONS:
+        required, resulting = BANK_TRANSITIONS[segment]
+        return resulting, required
+    if segment in FLAT_BANK_SEGMENTS:
+        return "flat", "flat"
+    return state, None
+
+
+def slope_state_at(segments: list[int], position: Optional[int] = None) -> str:
+    """Slope state after replaying segments[:position] (or the full list)."""
+    state = "flat"
+    for segment in segments[:position]:
+        state, _ = _step_slope(state, segment)
+    return state
+
+
+def bank_state_at(segments: list[int], position: Optional[int] = None) -> str:
+    """Bank state after replaying segments[:position] (or the full list)."""
+    state = "flat"
+    for segment in segments[:position]:
+        state, _ = _step_bank(state, segment)
+    return state
+
+
+def legal_slope_segments(state: str) -> dict[int, str]:
+    """Segments that can legally follow the given slope state, mapped to the
+    resulting state each would produce."""
+    return {
+        segment: resulting
+        for segment, (required, resulting) in SLOPE_TRANSITIONS.items()
+        if required == state
+    }
+
+
+def legal_bank_segments(state: str) -> dict[int, str]:
+    """Segments that can legally follow the given bank state, mapped to the
+    resulting state each would produce."""
+    return {
+        segment: resulting
+        for segment, (required, resulting) in BANK_TRANSITIONS.items()
+        if required == state
+    }
+
+
+def _closing_path(state: str, legal_fn, excluded: Set[int]) -> list[int]:
+    """Shortest sequence of non-excluded segments back to 'flat', via BFS."""
+    if state == "flat":
+        return []
+    frontier = [(state, [])]
+    visited = {state}
+    while frontier:
+        current_state, path = frontier.pop(0)
+        for segment, resulting in legal_fn(current_state).items():
+            if segment in excluded:
+                continue
+            next_path = path + [segment]
+            if resulting == "flat":
+                return next_path
+            if resulting not in visited:
+                visited.add(resulting)
+                frontier.append((resulting, next_path))
+    return []
+
+
+def slope_closing_path(state: str) -> list[int]:
+    """Shortest sequence of non-combo slope segments back to flat."""
+    return _closing_path(state, legal_slope_segments, set(BANK_TRANSITIONS))
+
+
+def bank_closing_path(state: str) -> list[int]:
+    """Shortest sequence of non-combo bank segments back to flat."""
+    return _closing_path(state, legal_bank_segments, set(SLOPE_TRANSITIONS))
+
+
 def _slope_issues(segments: list[int]) -> list[ValidationIssue]:
     issues = []
     state = "flat"
     for index, segment in enumerate(segments):
-        if segment in SLOPE_TRANSITIONS:
-            required, resulting = SLOPE_TRANSITIONS[segment]
-            if state != required:
-                issues.append(ValidationIssue(
-                    "slope_transition",
-                    f"segment {index} (0x{segment:02X}) requires slope {required}, found {state}",
-                ))
-            state = resulting
-        elif segment in FLAT_ONLY_SEGMENTS:
-            if state != "flat":
-                issues.append(ValidationIssue(
-                    "slope_transition",
-                    f"segment {index} (0x{segment:02X}) requires flat track, found {state}",
-                ))
-            state = "flat"
+        resulting, required = _step_slope(state, segment)
+        if required is not None and state != required:
+            reason = "flat track" if required == "flat" else f"slope {required}"
+            issues.append(ValidationIssue(
+                "slope_transition",
+                f"segment {index} (0x{segment:02X}) requires {reason}, found {state}",
+            ))
+        state = resulting
     if state != "flat":
         issues.append(ValidationIssue(
             "slope_transition",
@@ -96,21 +183,14 @@ def _bank_issues(segments: list[int]) -> list[ValidationIssue]:
     issues = []
     state = "flat"
     for index, segment in enumerate(segments):
-        if segment in BANK_TRANSITIONS:
-            required, resulting = BANK_TRANSITIONS[segment]
-            if state != required:
-                issues.append(ValidationIssue(
-                    "bank_transition",
-                    f"segment {index} (0x{segment:02X}) requires bank {required}, found {state}",
-                ))
-            state = resulting
-        elif segment in FLAT_BANK_SEGMENTS:
-            if state != "flat":
-                issues.append(ValidationIssue(
-                    "bank_transition",
-                    f"segment {index} (0x{segment:02X}) requires unbanked track, found {state}",
-                ))
-            state = "flat"
+        resulting, required = _step_bank(state, segment)
+        if required is not None and state != required:
+            reason = "unbanked track" if required == "flat" else f"bank {required}"
+            issues.append(ValidationIssue(
+                "bank_transition",
+                f"segment {index} (0x{segment:02X}) requires {reason}, found {state}",
+            ))
+        state = resulting
     if state != "flat":
         issues.append(ValidationIssue(
             "bank_transition",
