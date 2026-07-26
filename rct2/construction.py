@@ -1,4 +1,25 @@
-"""Construction rules shared by generation, fitness, and evolution."""
+"""Construction rules shared by generation, fitness, and evolution.
+
+Buildability versus completability
+----------------------------------
+`validate_construction` answers "would the game reject this track?" It does not
+answer "would a train get around it?" Those are different questions, and this
+module deliberately only owns the first.
+
+`create_simple_circuit()` is the proof: a flat, liftless 8-segment loop that
+OpenRCT2 will happily let you build, and that no train can run. It is valid
+here, and `rct2.physics.simulate` reports it stalling at segment 5. Both are
+right. Folding a stall check into `.valid` would make the project's own seed
+track invalid and start every evolution run from an illegal individual.
+
+So completability lives in `energy_stall_index` below, outside `.valid`, for
+callers that must stay physics-free. `rct2.physics.simulate` remains the
+authority; `energy_stall_index` is a cheap conservative screen that agrees with
+it on where a train dies. `physics` imports this module, so the dependency
+cannot run the other way — `tests/test_construction.py` pins the shared
+constants against `physics` instead, so the two models cannot drift apart
+silently.
+"""
 
 from dataclasses import dataclass
 from typing import Optional, Set, Tuple
@@ -49,6 +70,16 @@ FLAT_BANK_SEGMENTS = {
 
 CHAIN_LIFT_SEGMENTS = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09}
 FRICTION_PER_SEGMENT = 0.1
+
+# Station pieces drive the train, exactly as a chain lift does.
+STATION_SEGMENTS = {0x01, 0x02, 0x03}
+
+# Kinetic energy expressed as head (height the train could still climb), in
+# RCT2 height units. Derived from physics.py: v^2 / 2g, converted out of meters
+# by HEIGHT_UNIT_M. A train leaves the station or the lift at LIFT_SPEED_MS and
+# is considered stalled below MIN_SPEED_MS.
+LIFT_HEAD = 0.329  # physics.LIFT_SPEED_MS -> head
+STALL_HEAD = 0.068  # physics.MIN_SPEED_MS -> head
 
 
 @dataclass(frozen=True)
@@ -226,6 +257,14 @@ def check_first_hill_has_lift(segments: list[int], lift_indices: set[int]) -> bo
 
 
 def _energy_issues(segments: list[int], lift_indices: set[int]) -> list[ValidationIssue]:
+    """Segments that climb higher than the lift could ever carry the train.
+
+    This is the reachable-height check only. `available` floors at zero on
+    purpose: that floor is what keeps this scoped to climbs, so a track sitting
+    at or below the datum is never flagged here no matter how much friction has
+    accumulated. Running out of speed on the flat is a different failure, and
+    `energy_stall_index` owns it — see the module docstring.
+    """
     issues = []
     elevation = 0
     powered_height = 0
@@ -245,6 +284,45 @@ def _energy_issues(segments: list[int], lift_indices: set[int]) -> list[Validati
                 f"{available:.1f} estimated energy available",
             ))
     return issues
+
+
+def energy_stall_index(
+    segments: list[int],
+    lift_indices: Optional[Set[int]] = None,
+) -> Optional[int]:
+    """Index of the first segment where the train would run out of speed.
+
+    Tracks the train's kinetic energy as head — the height it could still climb
+    — in RCT2 height units. Climbing spends head, descending returns it, and
+    every unpowered segment pays FRICTION_PER_SEGMENT. Chain lift and station
+    pieces drive the train, so they restore head instead of spending it. The
+    train stalls once head falls below STALL_HEAD.
+
+    Unlike `_energy_issues`, nothing floors the budget at zero, so this catches
+    a train dying on flat ground from accumulated friction as well as one that
+    fails to crest a hill.
+
+    This is a screen, not an adjudicator, and it is deliberately not part of
+    `validate_construction` — a stalling track is still buildable. Callers that
+    can afford the real simulation should use `rct2.physics.simulate`, whose
+    per-segment arc lengths make it strictly more accurate than the flat
+    per-segment friction charged here.
+
+    Returns:
+        The index of the first stalling segment, or None if the train gets
+        all the way around.
+    """
+    resolved = default_lift_indices(segments) if lift_indices is None else set(lift_indices)
+    head = LIFT_HEAD
+    for index, segment in enumerate(segments):
+        if index in resolved or segment in STATION_SEGMENTS:
+            head = max(head, LIFT_HEAD)
+            continue
+        head -= SEGMENTS.get(segment, SEGMENTS[0x00]).elevation_delta
+        head -= FRICTION_PER_SEGMENT
+        if head < STALL_HEAD:
+            return index
+    return None
 
 
 def count_slope_violations(segments: list[int]) -> int:

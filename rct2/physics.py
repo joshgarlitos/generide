@@ -41,8 +41,9 @@ _SLOPE_ANGLE_RAD = {
 # Turn pieces that are banked (felt lateral g is reduced on these).
 _BANKED_TURNS = {0x16, 0x17, 0x2C, 0x2D, 0x5A, 0x5E}
 
-# Station pieces drive the train at lift speed, like a chain lift.
-_STATION_SEGMENTS = {0x01, 0x02, 0x03}
+# Station pieces drive the train at lift speed, like a chain lift. Shared with
+# construction.energy_stall_index so both energy models agree on what is powered.
+_STATION_SEGMENTS = construction.STATION_SEGMENTS
 
 
 @dataclass(frozen=True)
