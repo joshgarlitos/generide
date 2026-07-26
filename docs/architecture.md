@@ -99,7 +99,7 @@ Builds generated rides using a real Mine Train file as a template for vehicle an
 
 ### `rct2/construction.py`
 
-Combines geometry with slope, bank, chain-lift, and estimated-energy rules. Generation, evolution, fitness, and CLI export use its structured result as the shared definition of a construction-valid ride.
+Combines geometry with slope, bank, chain-lift, and estimated-energy rules. Generation, evolution, fitness, and CLI export use its structured result as the shared definition of a construction-valid ride. It also exposes `energy_stall_index`, a completability screen that sits deliberately outside that result — see "Buildable is not runnable" below.
 
 ### `rct2/mutations.py`
 
@@ -127,6 +127,12 @@ Owns `Individual`, `Population`, evolution statistics, population initialization
 
 **Proxy fitness before game ratings.** Geometry-based scoring made it possible to prove the GA and export pipeline without automating the game. It is an intermediate signal, not the final definition of ride quality.
 
+**Buildable is not runnable.** `validate_construction` answers whether OpenRCT2 would reject a track, and nothing more. Whether a train actually gets around it is a separate question, because the two genuinely come apart: `create_simple_circuit()`, the seed every evolution run starts from, is a flat liftless loop the game builds without complaint and no train can complete. Making a stall a construction issue would mark that seed illegal and start the GA from an invalid individual.
+
+So completability lives outside `.valid`. `rct2/physics.py` is the authority — it walks real arc lengths per segment. `construction.energy_stall_index` is a cheap conservative screen carrying the same energy accounting in RCT2 height units, for callers like `ProxyFitness` that must stay physics-free. The screen exists to be pessimistic in the safe direction: over a corpus of evolved, random, and fixture tracks it never passed a track the simulation stalls, at the cost of rejecting a few the simulation completes.
+
+The two models cannot import each other (`physics` depends on `construction`), so a test pins the shared constants across the boundary rather than letting them drift.
+
 ## Known limitations
 
 - Only the initial Mine Train segment set has complete geometry support.
@@ -134,6 +140,7 @@ Owns `Individual`, `Population`, evolution statistics, population initialization
 - Scenery is not generated.
 - Collision checks operate on exact occupied cells rather than full clearance volumes.
 - Energy is estimated rather than simulated with OpenRCT2 physics.
+- `construction.energy_stall_index` charges a flat friction cost per segment while `physics.simulate` charges per meter of arc length, so the screen overcharges straights and undercharges wide turns. The real Mine Train fixture clears it by only ~0.6 segments of coasting; a legitimate ride with a longer run-in to its lift hill could be flagged as stalling when it would not. Sharing one arc-length model between the two would remove the discrepancy.
 - Fitness does not yet use the game's excitement, intensity, and nausea ratings.
 - Mutations keep their own copies of the construction rules and insert slopes and banked turns only from fixed pre-built sequences; steep slope pieces (0x05, 0x07, 0x08) are defined but unreachable by any mutation.
 - Evolution uses the global `random` module with no seed, so runs are not reproducible.
