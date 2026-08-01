@@ -77,7 +77,15 @@ python evolve_coaster.py \
   --output evolved.td6
 ```
 
-Both commands use `data/sample_rides/manic_miner_test.td6` as a template for the Mine Train vehicle and header data. To use the result, copy the generated file to `~/Documents/OpenRCT2/track/`, open a Mine Train ride in OpenRCT2, and select the design from the Track Designs menu.
+Both commands use `data/sample_rides/manic_miner_test.td6` as a template for the Mine Train vehicle and header data. To use the result, copy the generated file into OpenRCT2's `track` folder, restart the game if it is already open, then start a Mine Train ride and pick the design from the Track Designs menu. The designs are saved against that ride type, so they will not show up under any other coaster.
+
+The `track` folder lives inside OpenRCT2's user directory, which differs by platform:
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Application Support/OpenRCT2/track/` |
+| Windows | `%USERPROFILE%\Documents\OpenRCT2\track\` |
+| Linux | `~/.config/OpenRCT2/track/` |
 
 ## How evolution works
 
