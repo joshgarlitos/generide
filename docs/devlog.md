@@ -4,6 +4,97 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-01 — I put a ride in the game, and found out the fitness function was pointed backwards
+
+I built a generated coaster in OpenRCT2 and read what the game thought of it. That is the first ground truth this project has ever had. It went badly, then worse, and then it turned into the clearest path forward I have had in months.
+
+### The first real numbers
+
+`generide-physics-7`, in the game:
+
+| | our model | the game |
+|---|---|---|
+| Excitement | 5.88 | 0.24 |
+| Intensity | 9.53 | 0.28 |
+| Nausea | 6.78 | 0.19 |
+
+About 25 times out.
+
+The physics underneath held up much better. We predicted 11.6 m/s top speed against the game's 21 mph, which is 9.4, so roughly 23 percent high. Drop count and drop height were close. What was broken was the table that converts measured stats into ratings, which nothing had ever checked.
+
+And the game was right. 616 feet of track, a 9 foot drop, no airtime. Excitement of 0.24 is an honest score for that.
+
+### The station was never a platform
+
+Two things looked wrong to me in the game. The boarding platform was only two tiles long, and there was a bare empty square beside it.
+
+Both had the same cause. `MIDDLE_STATION` (0x03) has been defined in the segment data since the beginning and no code ever emitted it. Our station was `BEGIN` immediately followed by `END`, which is the shortest thing the format expresses and is degenerate: the game reserves station footprint with no middle piece to render on. The real Mine Train export uses `BEGIN, MIDDLE, MIDDLE, END`.
+
+Default platform is now 6 tiles and settable with `--station-length`. Three separate places assumed exactly two pieces and would have chewed the middles back out. The one I would never have found by reading was in `evolution.py`: it checked whether element 1 was `END_STATION` and spliced one in when it was not, so on a track starting `BEGIN, MIDDLE` it inserted an END where a middle belonged. I only caught it because I regenerated a ride after fixing the other two and it still came out with a two tile station.
+
+### Two bugs the longer station flushed out
+
+Neither was caused by the station work. Lengthening the platform just made them visible.
+
+**The physics fitness scored open circuits better than real ones.** `simulate()` walks the segment list once and reports `completed` when the train reaches the end without stalling. A short open stub does exactly that, because the station drives it the whole way. The only cost was one generic issue at `validity_weight`. So a station plus four flats scored -15.7 and a genuine closed circuit scored -53.2, and evolution converged on stubs.
+
+A longer station made it worse by giving stubs more powered track, which is how it surfaced: physics-evolved tracks dropped to 2 of 5 construction-valid at mean length 20. `ProxyFitness` was unaffected the whole time, because its open circuit penalty is a flat 10000 rather than a graded weight. Giving `PhysicsFitness` the same took it back to 5 of 5 at mean length 37.6.
+
+**The entrance and exit could be walled inside the track.** Placement was pinned one tile east of the platform no matter which way the loop ran, so any track curving east enclosed both structures and no guest could reach the ride. The seed circuit turns right, so it has been sealing in its own entrance since the day it was written. Placement now tries both sides and takes one that flood fills to open ground.
+
+### The model was not just wrong, it was backwards
+
+A second ride gave a second data point: the game said 1.02 excitement where we said 5.36.
+
+Then I remembered something I should have checked in Phase 1. TD6 headers store the ratings the game assigned, and `data/sample_rides/manic_miner_test.td6` is a real export. The answer had been sitting in the repository the entire time.
+
+| Ride | game excitement | ours |
+|---|---|---|
+| Manic Miner, real and hand built | 6.10 | 0.10 |
+| generide-v3 | 1.02 | 5.36 |
+| generide-physics-7 | 0.24 | 5.88 |
+
+The game ranks those three in exactly the reverse order we do.
+
+The mechanism is a chain. Our intensity reads about 3.3 times high, so on the real Mine Train it returns 21.7 against the game's 6.5. That blows past our `intensity_cap` of 10. The cap exists to slash excitement for punishing rides, so it fires, and a genuinely good coaster comes out at 0.10. Meanwhile a flat boring loop stays under the cap and scores 5.36.
+
+So `PhysicsFitness` has been actively selecting against good coasters. Every drop and every bit of speed pushed intensity toward a threshold that destroyed the score, and over 150 generations the algorithm learned the lesson we accidentally taught it. The rides are not boring because the search got unlucky. They are boring because the objective was inverted and the search did its job well.
+
+Worth recording that I got this wrong twice before getting it right. I first called the uncalibrated ratings a scaling problem, then a throttling problem. They were an inversion, which is a different and much worse thing.
+
+### There are 204 answers sitting on the disk
+
+The game ships 204 track designs inside the RCT Classic app bundle, and every one stores the ratings the game gave it.
+
+We can simulate 7 of them. Our segment table knows 46 pieces; those designs use 193 we have never defined. I measured the payoff curve, and adding the 60 most common missing pieces still only reaches 49 of 204. It is a long tail.
+
+### The header carries the stats too
+
+The file stores more than the ratings. It stores what the game measured, which is the same set of numbers the in-game ratings window displays.
+
+Bytes `0x55` and `0x56`, divided by 4, are the maximum positive and negative vertical g. Three independent checks agree: Manic Miner stores 8, giving 2.00g; the two in-game screenshots of our own rides showed 1.96g and 1.87g, which would store as 7 or 8; and across all 204 designs the values stay in a plausible range with the negative field always small and negative.
+
+That matters twice over. It means the calibration data does not depend on simulating anything, so the segment vocabulary stops being a blocker. And it immediately explains the inversion:
+
+| Design | game max +g | ours |
+|---|---|---|
+| Manic Miner | 2.00 | 5.01 |
+| Penguin Paradise | 2.00 | 7.50 |
+| Penguin Toboggan | 2.00 | 7.88 |
+| Creaky Dips | 1.75 | 4.48 |
+
+Our g-force model reads two to four times high. Inflated g produces inflated intensity, inflated intensity trips the cap, the cap destroys excitement. One bad number at the bottom of the stack inverted the whole objective.
+
+### What changes
+
+The roadmap said calibration waits on running OpenRCT2 headless. It does not. A few hundred real designs with real ratings and real measured stats are already on disk, and reading them is a parsing problem rather than an automation problem. Headless OpenRCT2 is still the right long term oracle for scoring new candidates, but it is no longer what stands between us and weights that mean something.
+
+The immediate work, in order: finish decoding the header stat fields against the OpenRCT2 source rather than inferring offsets from six samples, fix the g-force model against real values, then fit the rating weights on the full set.
+
+One lesson I keep paying for. This is the third time in this project that the answer was already inside an artifact I had, and I went looking for a way to generate the answer instead. The header gap trap in Phase 1, the completability split last week, and now a calibration dataset that shipped with the game. Read the file first.
+
+---
+
 ## 2026-08-01 — Buildable is not runnable, and a fitness function that was lying
 
 Two fitness bugs landed today. The first one had been quietly poisoning every evolution run. The second had never hurt anything, because nobody had used the broken code yet.
