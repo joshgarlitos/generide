@@ -39,10 +39,12 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Checks closure, collisions, bounds, slope and bank transitions, chain lift placement, and estimated energy.
 - Builds new Mine Train rides with stations, entrances, exits, and valid checksums.
 - Evolves tracks using mutation, crossover, tournament selection, and elitism.
+- Asks the validator which pieces are legal at each point during mutation, so the full piece vocabulary is reachable, including steep drops.
+- Simulates the ride with an energy-method velocity model to get speed, drops, g-forces, and airtime, and reports whether a train can finish the circuit.
 - Supports seeded runs so an interesting result or failure can be reproduced.
-- Has 119 passing tests, including regression tests against real OpenRCT2 exports.
+- Has 158 passing tests, including regression tests against real OpenRCT2 exports.
 
-Generated and evolved tracks have been placed and run in OpenRCT2. Fitness still uses geometric proxies such as length, elevation changes, turn balance, and segment variety. It does not yet reproduce the game's ride-rating calculations.
+Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. There is also a physics-based fitness that turns simulated ride stats into excitement, intensity, and nausea numbers, but its rating weights are placeholders that have not been calibrated against the game.
 
 ## Try it
 
@@ -75,17 +77,27 @@ python evolve_coaster.py \
   --output evolved.td6
 ```
 
-Both commands use `data/sample_rides/manic_miner_test.td6` as a template for the Mine Train vehicle and header data. To use the result, copy the generated file to `~/Documents/OpenRCT2/track/`, open a Mine Train ride in OpenRCT2, and select the design from the Track Designs menu.
+Both commands use `data/sample_rides/manic_miner_test.td6` as a template for the Mine Train vehicle and header data. To use the result, copy the generated file into OpenRCT2's `track` folder, restart the game if it is already open, then start a Mine Train ride and pick the design from the Track Designs menu. The designs are saved against that ride type, so they will not show up under any other coaster.
+
+The `track` folder lives inside OpenRCT2's user directory, which differs by platform:
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Application Support/OpenRCT2/track/` |
+| Windows | `%USERPROFILE%\Documents\OpenRCT2\track\` |
+| Linux | `~/.config/OpenRCT2/track/` |
 
 ## How evolution works
 
 Each coaster is represented as a list of TD6 segment IDs. That list is both a compact genetic representation and a direct description of the track written to the final file.
 
-The evolutionary loop creates a population, scores each candidate, selects parents through tournament selection, applies crossover and mutation, and carries the strongest candidates into the next generation. Mutations can insert, delete, replace, swap, and recombine pieces. Slope and bank transitions are currently inserted as complete legal sequences because OpenRCT2 treats them as stateful construction operations.
+The evolutionary loop creates a population, scores each candidate, selects parents through tournament selection, applies crossover and mutation, and carries the strongest candidates into the next generation. Mutations can insert, delete, replace, swap, and recombine pieces.
+
+Slope and banking are stateful in RCT2. A piece that exits a climb is only legal if the track is already climbing, so a mutation that drops one in at random usually produces something the game refuses to build. Mutations handle that by asking the validator which pieces are legal at the chosen point and picking from what it returns, which keeps offspring buildable while leaving the whole piece vocabulary reachable, steep drops included. An earlier version inserted slopes and banked turns only as complete pre-built sequences, which was safe but meant some pieces could never appear at all.
 
 The proxy fitness function rewards coaster-like qualities while applying strong penalties to designs that cannot be built or completed. Construction validation is shared across generation, scoring, and export so those parts of the program use the same definition of a valid ride.
 
-The current mutation system is intentionally conservative. It can build working tracks, but it cannot yet reach every supported piece, including steep drops. The next mutation design will ask the validator which pieces are legal at a specific point instead of choosing from a small collection of pre-built sequences.
+Buildable and runnable are tracked separately, because they genuinely come apart. A flat loop with no chain lift is something OpenRCT2 will let you build and no train can get around. Construction validation answers only the first question, and a cheap energy screen alongside it catches trains that would run out of speed, so evolution stops rewarding tracks that stall.
 
 ## Development approach
 
@@ -107,7 +119,8 @@ rct2/
   construction.py   Shared slope, bank, lift, energy, and geometry rules
   generate.py       Ride construction from Python segment lists
   mutations.py      Mutation, crossover, random tracks, and repair
-  fitness.py        Proxy fitness and track-rule checks
+  physics.py        Ride simulation, stats, and approximate ratings
+  fitness.py        Proxy fitness, physics fitness, and track-rule checks
   evolution.py      Population management and evolution loops
 tests/               Unit and fixture-based regression tests
 data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
@@ -124,7 +137,7 @@ For a deeper look, see the [architecture guide](docs/architecture.md), [roadmap]
 | 3 | Author a coaster in Python and run it in OpenRCT2 | Complete |
 | 4 | Evolve constrained coasters with a genetic algorithm | In progress |
 
-The immediate priorities are to benchmark evolution against random search, expand mutation beyond fixed slope and bank sequences, and connect candidate evaluation to real OpenRCT2 ride ratings. The longer-term goal is to accept constraints such as footprint, cost, excitement, intensity, and nausea, then generate a working ride that fits them.
+Evolution has been benchmarked against random search and wins clearly, and mutation now reaches the full piece vocabulary. The immediate priority is connecting candidate evaluation to real OpenRCT2 ride ratings. The physics model already produces excitement, intensity, and nausea numbers, but nothing has checked them against the game, so the weights behind them are still guesses. The longer-term goal is to accept constraints such as footprint, cost, excitement, intensity, and nausea, then generate a working ride that fits them.
 
 ## References
 

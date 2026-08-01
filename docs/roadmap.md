@@ -24,19 +24,23 @@ Construction rules live in one place. `rct2/construction.py` checks circuit clos
 
 Evolution is now reproducible. Every run has a seed, which the CLI prints whether you provide one or not. Two runs with the same seed produce identical results, which means interesting tracks can be recreated and failures can be debugged. All random-using functions take an `rng: random.Random` parameter instead of calling the global `random` module.
 
-One gap remains. The mutation operators still carry their own copies of the rules and only insert slopes and banked turns from a small list of pre-built sequences. Steep slope pieces are defined in the segment data but no mutation can ever produce them, so the algorithm cannot discover a steep drop. I want mutations to ask the validator what is legal at a given point in the track and insert any segment that fits, which keeps every offspring buildable and opens up the full piece vocabulary.
+Mutations no longer carry their own copy of the rules. They ask the validator what is legal at the chosen point and insert any segment that fits, so every offspring stays buildable and the whole piece vocabulary is reachable. Steep slope pieces used to be defined in the segment data with no way for a mutation to produce one, which meant the algorithm could never discover a steep drop. It can now.
 
-The benchmark (issue #4) is now unblocked. It will compare the genetic algorithm with random generation using the same amount of work and the same random sequence. This matters because "the score went up" is not enough; I want to know whether evolution is finding better rides than chance.
+The benchmark answered the question it was built for. Evolution and random search each got 1,000 fitness evaluations across 20 seeded trials, and evolution won clearly: mean fitness 143.3 against -4,423.8, valid closed circuits in 20 of 20 trials against 19 of 20, and a minimum score higher than random search's median. Crossover and selection are doing real work rather than elaborately filtering bad candidates.
 
-A small track renderer supports visualization. A top-down drawing of the occupied tiles, colored by elevation, plus a fitness curve per run, means I can see what a track looks like without loading the game, and every experiment produces figures I can use in the devlog.
+Buildable and runnable are now separate questions, which they had to become. `validate_construction` answers only whether the game would accept the track. Whether a train can actually get around it belongs to the physics model, with a cheap energy screen standing in wherever the simulation is too expensive to run. Before that split, tracks evolved by the default fitness passed construction validation every time and completed their circuit about one time in ten.
+
+Still to do here: a small track renderer. A top-down drawing of the occupied tiles, colored by elevation, plus a fitness curve per run, would let me see what a track looks like without loading the game and give every experiment a figure I can put in the devlog.
 
 ## Next: teach it what makes a ride good
 
-Today, fitness is an educated guess based on track length, hills, turns, and variety. That helps produce coaster-like shapes, but it is not the same calculation the game uses.
+The default fitness is still an educated guess based on track length, hills, turns, and variety. That helps produce coaster-like shapes, but it is not the same calculation the game uses.
 
-The next major capability is evaluating excitement, intensity, and nausea. There is a catch in how the game computes these. Ratings are not a function of the track layout alone. The game runs a test lap and derives the ratings from stats it gathers along the way, like maximum speed, g-forces, and drop count. Reproducing the ratings in Python therefore means reproducing the physics simulation too, and keeping it in sync with a game that is still being developed.
+Half of the answer is built. `rct2/physics.py` walks the track with an energy-method velocity model, collects the stats a test lap would produce (maximum speed, drops, g-forces, airtime), and maps them to excitement, intensity, and nausea. `PhysicsFitness` scores tracks on those numbers and can target requested ranges per rating.
 
-So the plan is a hybrid. A cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. The game's headless mode and plugin API should make it possible to place a track, run the test, and read the ratings back without automating the UI. I can use known rides to check both against reality.
+The other half is missing, and it is the half that makes the numbers mean anything. The mapping from stats to ratings uses placeholder weights that no one has checked against the game. Ratings in RCT2 are not a function of the track layout alone; the game runs a test lap and derives them from what it observes, so reproducing them in Python means reproducing the physics too, and keeping it in sync with a game that is still being developed.
+
+So the plan is a hybrid. The cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. The game's headless mode and plugin API should make it possible to place a track, run the test, and read the ratings back without automating the UI. Known rides from `data/sample_rides/` give me a way to check both against reality. The first useful measurement is small: load one evolved track in the game and see how far the placeholder ratings sit from the real ones.
 
 Once that works, a user will be able to request something like:
 
@@ -65,5 +69,10 @@ Presentation can grow too: names, colors, scenery, and batches of different fina
 | Evolve coasters using approximate fitness | Working prototype |
 | Shared construction validation | Complete |
 | Reproducible evolution with seeded RNG | Complete |
-| Benchmark GA vs random search | Next |
-| Optimize for actual game ratings | Planned |
+| Benchmark GA vs random search | Complete |
+| Validator-driven mutation across the full piece vocabulary | Complete |
+| Approximate physics simulation and ride stats | Complete |
+| Completability separated from buildability | Complete |
+| Calibrate ratings against headless OpenRCT2 | Next |
+| Track renderer and per-run plots | Planned |
+| Accept a request with footprint and rating targets | Planned |
