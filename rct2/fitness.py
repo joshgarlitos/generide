@@ -110,20 +110,21 @@ def count_segment_variety(segments: list[int]) -> int:
     return len(set(segments))
 
 
-class ProxyFitness:
-    """Scores tracks based on geometric properties without running the game.
+class WeightedProxyFitness:
+    """Proxy fitness with every reward and penalty exposed as a weight.
 
-    Rewards:
-    - Track length (up to a point)
-    - Elevation changes (hills make coasters exciting)
-    - Balanced turns (left and right)
-    - Segment variety (using different piece types)
+    This is the whole proxy scoring implementation. `ProxyFitness` is this
+    class with the tuned default weights, so anything measured here transfers
+    directly to the default the CLI and the GA use. There is deliberately no
+    second copy of the scoring rules: an earlier version of this class scored
+    geometry only and silently skipped every construction-validity penalty,
+    which meant weights tuned here produced tracks the game would reject.
 
-    Penalties:
-    - Open circuits (track must close)
-    - Excessive footprint (track too large)
-    - Too short (boring rides)
-    - Stalling before the circuit closes
+    Rewards track length (up to `ideal_length`), elevation changes, balanced
+    left/right turns, and segment variety. Penalizes construction invalidity,
+    open circuits, excessive footprint, collisions, going below ground, illegal
+    slope and bank transitions, energy shortfalls, a first hill with no chain
+    lift, stalling before the circuit closes, and being too short.
 
     Scoring stays physics-free: the stall penalty comes from
     `construction.energy_stall_index`, a cheap screen, not from
@@ -133,15 +134,50 @@ class ProxyFitness:
 
     def __init__(
         self,
+        # Footprint and length configuration
         max_width: int = 30,
         max_depth: int = 30,
         ideal_length: int = 50,
+        min_length: int = 8,
+        # Rewards
+        length_weight: float = 2.0,
+        over_length_penalty: float = 0.5,
+        elevation_weight: float = 5.0,
+        turn_balance_weight: float = 3.0,
+        variety_weight: float = 2.0,
+        # Penalties
+        invalid_construction_penalty: float = 10000.0,
+        open_circuit_penalty: float = 10000.0,
+        bounds_penalty_per_tile: float = 10.0,
+        collision_penalty_per_tile: float = 50.0,
+        underground_penalty_per_unit: float = 20.0,
+        slope_violation_penalty: float = 100.0,
+        bank_violation_penalty: float = 100.0,
+        energy_violation_penalty: float = 50.0,
+        missing_lift_penalty: float = 200.0,
         stall_penalty: float = 500.0,
+        short_penalty_per_segment: float = 20.0,
     ) -> None:
         self.max_width = max_width
         self.max_depth = max_depth
         self.ideal_length = ideal_length
+        self.min_length = min_length
+        self.length_weight = length_weight
+        self.over_length_penalty = over_length_penalty
+        self.elevation_weight = elevation_weight
+        self.turn_balance_weight = turn_balance_weight
+        self.variety_weight = variety_weight
+        self.invalid_construction_penalty = invalid_construction_penalty
+        self.open_circuit_penalty = open_circuit_penalty
+        self.bounds_penalty_per_tile = bounds_penalty_per_tile
+        self.collision_penalty_per_tile = collision_penalty_per_tile
+        self.underground_penalty_per_unit = underground_penalty_per_unit
+        self.slope_violation_penalty = slope_violation_penalty
+        self.bank_violation_penalty = bank_violation_penalty
+        self.energy_violation_penalty = energy_violation_penalty
+        self.missing_lift_penalty = missing_lift_penalty
         self.stall_penalty = stall_penalty
+        self.short_penalty_per_segment = short_penalty_per_segment
 
     def evaluate(self, segments: list[int]) -> float:
         """Evaluate fitness of a track segment sequence.
@@ -159,61 +195,61 @@ class ProxyFitness:
             max_depth=self.max_depth,
         )
         if not construction_result.valid:
-            score -= 10000
+            score -= self.invalid_construction_penalty
 
         # Length: reward longer tracks up to ideal, slight penalty beyond
         length = len(segments)
         if length <= self.ideal_length:
-            score += length * 2
+            score += length * self.length_weight
         else:
-            score += self.ideal_length * 2
-            score -= (length - self.ideal_length) * 0.5
+            score += self.ideal_length * self.length_weight
+            score -= (length - self.ideal_length) * self.over_length_penalty
 
         # Elevation changes: reward hills
         elevation_changes = count_elevation_changes(segments)
-        score += elevation_changes * 5
+        score += elevation_changes * self.elevation_weight
 
         # Turns: reward balanced turns (both directions)
         left_turns = count_turns(segments, direction="left")
         right_turns = count_turns(segments, direction="right")
-        score += min(left_turns, right_turns) * 3
+        score += min(left_turns, right_turns) * self.turn_balance_weight
 
         # Variety: unique segment types used
         unique_segments = count_segment_variety(segments)
-        score += unique_segments * 2
+        score += unique_segments * self.variety_weight
 
         # Penalties
         if not is_closed_circuit(Position(), segments):
-            score -= 10000  # Heavy penalty for open circuits
+            score -= self.open_circuit_penalty  # Heavy penalty for open circuits
 
         bounds = track_bounds(Position(), segments)
         if bounds.width > self.max_width or bounds.depth > self.max_depth:
             excess_width = max(0, bounds.width - self.max_width)
             excess_depth = max(0, bounds.depth - self.max_depth)
-            score -= (excess_width + excess_depth) * 10
+            score -= (excess_width + excess_depth) * self.bounds_penalty_per_tile
 
         # Penalty for collisions (self-intersection)
         tiles = occupied_tiles(Position(), segments)
         overlaps = overlapping_tiles(tiles)
-        score -= len(overlaps) * 50  # Heavy penalty per collision
+        score -= len(overlaps) * self.collision_penalty_per_tile
 
         # Penalty for going below ground
         if bounds.min_z < 0:
-            score -= abs(bounds.min_z) * 20
+            score -= abs(bounds.min_z) * self.underground_penalty_per_unit
 
         # Penalty for invalid slope transitions
         slope_violations = count_slope_violations(segments)
-        score -= slope_violations * 100  # Heavy penalty - these cause build errors
+        score -= slope_violations * self.slope_violation_penalty
 
         # Penalty for invalid bank transitions
         bank_violations = count_bank_violations(segments)
-        score -= bank_violations * 100  # Heavy penalty - these cause build errors
+        score -= bank_violations * self.bank_violation_penalty
 
         # Penalty for energy/physics violations
         energy_violations, first_hill_ok = estimate_energy_violations(segments)
-        score -= energy_violations * 50  # Penalty for potential valleys
+        score -= energy_violations * self.energy_violation_penalty
         if not first_hill_ok:
-            score -= 200  # First hill must have chain lift
+            score -= self.missing_lift_penalty  # First hill must have chain lift
 
         # Penalty for stalling. Graded by how far the train got, so evolution
         # has a gradient toward completing the circuit instead of a cliff --
@@ -228,78 +264,34 @@ class ProxyFitness:
             score -= self.stall_penalty * (1.0 - progress)
 
         # Penalty for too short
-        if length < 8:
-            score -= (8 - length) * 20
-
-        return score
-
-
-class WeightedProxyFitness:
-    """Proxy fitness with configurable weights for experimentation."""
-
-    def __init__(
-        self,
-        length_weight: float = 2.0,
-        elevation_weight: float = 5.0,
-        turn_balance_weight: float = 3.0,
-        variety_weight: float = 2.0,
-        open_circuit_penalty: float = 10000.0,
-        bounds_penalty_per_tile: float = 10.0,
-        short_penalty_per_segment: float = 20.0,
-        max_width: int = 30,
-        max_depth: int = 30,
-        ideal_length: int = 50,
-        min_length: int = 8,
-    ) -> None:
-        self.length_weight = length_weight
-        self.elevation_weight = elevation_weight
-        self.turn_balance_weight = turn_balance_weight
-        self.variety_weight = variety_weight
-        self.open_circuit_penalty = open_circuit_penalty
-        self.bounds_penalty_per_tile = bounds_penalty_per_tile
-        self.short_penalty_per_segment = short_penalty_per_segment
-        self.max_width = max_width
-        self.max_depth = max_depth
-        self.ideal_length = ideal_length
-        self.min_length = min_length
-
-    def evaluate(self, segments: list[int]) -> float:
-        """Evaluate fitness with configurable weights."""
-        score = 0.0
-        length = len(segments)
-
-        # Length score
-        if length <= self.ideal_length:
-            score += length * self.length_weight
-        else:
-            score += self.ideal_length * self.length_weight
-            score -= (length - self.ideal_length) * (self.length_weight / 4)
-
-        # Elevation changes
-        score += count_elevation_changes(segments) * self.elevation_weight
-
-        # Turn balance
-        left_turns = count_turns(segments, direction="left")
-        right_turns = count_turns(segments, direction="right")
-        score += min(left_turns, right_turns) * self.turn_balance_weight
-
-        # Variety
-        score += count_segment_variety(segments) * self.variety_weight
-
-        # Penalties
-        if not is_closed_circuit(Position(), segments):
-            score -= self.open_circuit_penalty
-
-        bounds = track_bounds(Position(), segments)
-        if bounds.width > self.max_width or bounds.depth > self.max_depth:
-            excess = max(0, bounds.width - self.max_width)
-            excess += max(0, bounds.depth - self.max_depth)
-            score -= excess * self.bounds_penalty_per_tile
-
         if length < self.min_length:
             score -= (self.min_length - length) * self.short_penalty_per_segment
 
         return score
+
+
+class ProxyFitness(WeightedProxyFitness):
+    """Scores tracks based on geometric properties without running the game.
+
+    The default proxy fitness, used by the CLI and by `evolve()` when no
+    fitness function is given. This is `WeightedProxyFitness` with its tuned
+    default weights and nothing else; see that class for what is scored and
+    for the knobs to turn when experimenting.
+    """
+
+    def __init__(
+        self,
+        max_width: int = 30,
+        max_depth: int = 30,
+        ideal_length: int = 50,
+        stall_penalty: float = 500.0,
+    ) -> None:
+        super().__init__(
+            max_width=max_width,
+            max_depth=max_depth,
+            ideal_length=ideal_length,
+            stall_penalty=stall_penalty,
+        )
 
 
 @dataclass
