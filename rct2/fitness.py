@@ -123,6 +123,12 @@ class ProxyFitness:
     - Open circuits (track must close)
     - Excessive footprint (track too large)
     - Too short (boring rides)
+    - Stalling before the circuit closes
+
+    Scoring stays physics-free: the stall penalty comes from
+    `construction.energy_stall_index`, a cheap screen, not from
+    `rct2.physics.simulate`. That keeps this a genuine proxy and keeps it
+    comparable against PhysicsFitness.
     """
 
     def __init__(
@@ -130,10 +136,12 @@ class ProxyFitness:
         max_width: int = 30,
         max_depth: int = 30,
         ideal_length: int = 50,
+        stall_penalty: float = 500.0,
     ) -> None:
         self.max_width = max_width
         self.max_depth = max_depth
         self.ideal_length = ideal_length
+        self.stall_penalty = stall_penalty
 
     def evaluate(self, segments: list[int]) -> float:
         """Evaluate fitness of a track segment sequence.
@@ -206,6 +214,14 @@ class ProxyFitness:
         score -= energy_violations * 50  # Penalty for potential valleys
         if not first_hill_ok:
             score -= 200  # First hill must have chain lift
+
+        # Penalty for stalling. Graded by how far the train got, so evolution
+        # has a gradient toward completing the circuit instead of a cliff --
+        # the same shape PhysicsFitness uses for its stall penalty.
+        stall_index = construction.energy_stall_index(segments)
+        if stall_index is not None:
+            progress = stall_index / max(1, len(segments))
+            score -= self.stall_penalty * (1.0 - progress)
 
         # Penalty for too short
         if length < 8:
