@@ -74,6 +74,51 @@ FRICTION_PER_SEGMENT = 0.1
 # Station pieces drive the train, exactly as a chain lift does.
 STATION_SEGMENTS = {0x01, 0x02, 0x03}
 
+BEGIN_STATION = 0x02
+END_STATION = 0x01
+MIDDLE_STATION = 0x03
+
+# A platform is BEGIN, then middle pieces, then END. Two tiles is the shortest
+# the format expresses, but it is degenerate: the game reserves station
+# footprint with no middle piece to render on it, which shows up in-game as a
+# bare tile beside the platform. Real rides use middles — the Mine Train
+# fixture's station is BEGIN, MIDDLE, MIDDLE, END.
+DEFAULT_STATION_LENGTH = 6
+MIN_STATION_LENGTH = 2
+
+
+def build_station(length: int = DEFAULT_STATION_LENGTH) -> list[int]:
+    """Return the station pieces for a platform `length` tiles long.
+
+    Args:
+        length: Number of station tiles, at least MIN_STATION_LENGTH.
+
+    Raises:
+        ValueError: If length is below MIN_STATION_LENGTH.
+    """
+    if length < MIN_STATION_LENGTH:
+        raise ValueError(
+            f"station length must be at least {MIN_STATION_LENGTH}, got {length}"
+        )
+    return [BEGIN_STATION] + [MIDDLE_STATION] * (length - 2) + [END_STATION]
+
+
+def station_length(segments: list[int]) -> int:
+    """Length of the leading station run, or 0 if the track has no valid one.
+
+    Only counts a well-formed platform: BEGIN, then zero or more middles, then
+    END. Anything else returns 0, including a track that opens with a middle
+    piece or never closes the platform with an END.
+    """
+    if len(segments) < MIN_STATION_LENGTH or segments[0] != BEGIN_STATION:
+        return 0
+    index = 1
+    while index < len(segments) and segments[index] == MIDDLE_STATION:
+        index += 1
+    if index >= len(segments) or segments[index] != END_STATION:
+        return 0
+    return index + 1
+
 # Kinetic energy expressed as head (height the train could still climb), in
 # RCT2 height units. Derived from physics.py: v^2 / 2g, converted out of meters
 # by HEIGHT_UNIT_M. A train leaves the station or the lift at LIFT_SPEED_MS and

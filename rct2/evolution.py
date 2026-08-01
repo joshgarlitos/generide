@@ -8,11 +8,14 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from rct2.construction import validate_construction
+from rct2.construction import (
+    DEFAULT_STATION_LENGTH,
+    build_station,
+    station_length,
+    validate_construction,
+)
 from rct2.fitness import FitnessFunction, ProxyFitness
 from rct2.mutations import (
-    BEGIN_STATION,
-    END_STATION,
     crossover,
     generate_random_track,
     mutate,
@@ -66,14 +69,25 @@ class EvolutionStats:
     valid_ratio_history: list[float]
 
 
-def _ensure_station(segments: list[int]) -> list[int]:
-    """Ensure segments start with station pieces."""
-    result = segments.copy()
-    if len(result) == 0 or result[0] != BEGIN_STATION:
-        result.insert(0, BEGIN_STATION)
-    if len(result) < 2 or result[1] != END_STATION:
-        result.insert(1, END_STATION)
-    return result
+def _ensure_station(
+    segments: list[int],
+    length: int = DEFAULT_STATION_LENGTH,
+) -> list[int]:
+    """Ensure segments open with a well-formed station platform.
+
+    A platform is BEGIN, then middles, then END. Checking only the first two
+    pieces is not enough: on a track that already starts BEGIN, MIDDLE, ...
+    that test sees a middle where it wants an END and splices one in, which
+    cuts the platform down to two tiles and strands the remaining middles
+    outside it.
+
+    Args:
+        segments: Track to check.
+        length: Platform length to build when one has to be added.
+    """
+    if station_length(segments) > 0:
+        return segments.copy()
+    return build_station(length) + list(segments)
 
 
 def _create_initial_population(
@@ -81,12 +95,13 @@ def _create_initial_population(
     population_size: int,
     fitness_fn: FitnessFunction,
     rng: random.Random,
+    platform: int = DEFAULT_STATION_LENGTH,
 ) -> Population:
     """Create initial population from seed and random variations."""
     individuals = []
 
     # Add seed individual
-    seed_with_station = _ensure_station(seed)
+    seed_with_station = _ensure_station(seed, platform)
     seed_ind = Individual(segments=seed_with_station)
     seed_ind.fitness = fitness_fn.evaluate(seed_ind.segments)
     individuals.append(seed_ind)
@@ -96,10 +111,10 @@ def _create_initial_population(
         if rng.random() < 0.7:
             # Mutate seed
             mutated = mutate(seed_with_station, rng, rate=0.3)
-            mutated = _ensure_station(mutated)
+            mutated = _ensure_station(mutated, platform)
         else:
             # Generate random track
-            mutated = generate_random_track(rng)
+            mutated = generate_random_track(rng, station_tiles=platform)
 
         # Try to repair
         repaired = repair_circuit(mutated, rng)
@@ -129,6 +144,7 @@ def _create_offspring(
     mutation_rate: float,
     fitness_fn: FitnessFunction,
     rng: random.Random,
+    platform: int = DEFAULT_STATION_LENGTH,
 ) -> list[Individual]:
     """Create offspring from two parents via crossover and mutation."""
     offspring = []
@@ -138,11 +154,11 @@ def _create_offspring(
 
     for child_segs in [child1_segs, child2_segs]:
         # Ensure station
-        child_segs = _ensure_station(child_segs)
+        child_segs = _ensure_station(child_segs, platform)
 
         # Mutate
         child_segs = mutate(child_segs, rng, rate=mutation_rate)
-        child_segs = _ensure_station(child_segs)
+        child_segs = _ensure_station(child_segs, platform)
 
         # Try to repair
         repaired = repair_circuit(child_segs, rng)
@@ -187,7 +203,10 @@ def evolve(
         fitness_fn = ProxyFitness()
 
     # Initialize population
-    population = _create_initial_population(seed, population_size, fitness_fn, rng)
+    platform = station_length(seed) or DEFAULT_STATION_LENGTH
+    population = _create_initial_population(
+        seed, population_size, fitness_fn, rng, platform
+    )
 
     fitness_history = []
     valid_ratio_history = []
@@ -219,7 +238,9 @@ def evolve(
         while len(next_gen) < population_size:
             parent1 = _tournament_select(population, rng, tournament_size)
             parent2 = _tournament_select(population, rng, tournament_size)
-            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn, rng)
+            offspring = _create_offspring(
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform
+            )
             next_gen.extend(offspring)
 
         # Trim to population size
@@ -263,7 +284,10 @@ def evolve_until(
     if fitness_fn is None:
         fitness_fn = ProxyFitness()
 
-    population = _create_initial_population(seed, population_size, fitness_fn, rng)
+    platform = station_length(seed) or DEFAULT_STATION_LENGTH
+    population = _create_initial_population(
+        seed, population_size, fitness_fn, rng, platform
+    )
     fitness_history = []
     valid_ratio_history = []
 
@@ -285,7 +309,9 @@ def evolve_until(
         while len(next_gen) < population_size:
             parent1 = _tournament_select(population, rng)
             parent2 = _tournament_select(population, rng)
-            offspring = _create_offspring(parent1, parent2, mutation_rate, fitness_fn, rng)
+            offspring = _create_offspring(
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform
+            )
             next_gen.extend(offspring)
 
         population = Population(individuals=next_gen[:population_size])
