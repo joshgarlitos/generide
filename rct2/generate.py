@@ -4,6 +4,7 @@ Provides functions to create minimal coaster circuits and generate
 valid .td6 files that OpenRCT2 can load.
 """
 
+from collections import deque
 from pathlib import Path
 from typing import Union
 
@@ -22,6 +23,7 @@ from rct2.construction import (
 from rct2.geometry import (
     Heading,
     Position,
+    occupied_tiles,
     track_bounds,
 )
 from rct2.td6 import Entrance, Ride, TrackElement
@@ -62,7 +64,12 @@ def calculate_entrance_positions(segments: list[int]) -> tuple[Entrance, Entranc
     The station is the leading run of BEGIN, middles, END. Starting at the
     origin facing NORTH it occupies tiles (0, 0) through (0, n-1), so the
     entrance goes beside the first station tile and the exit beside the last.
-    Both sit one tile east and face WEST, back toward the platform.
+
+    Which side they go on depends on the track. Pinning them east regardless
+    of where the loop runs means that whenever the track happens to curve east
+    it encloses them, and guests cannot path to an entrance the coaster has
+    built a wall around. So try each side and take one where both structures
+    sit on free ground that connects to open space outside the ride.
 
     Args:
         segments: List of segment type IDs (must start with station segments)
@@ -80,22 +87,66 @@ def calculate_entrance_positions(segments: list[int]) -> tuple[Entrance, Entranc
             "optional MIDDLE_STATION pieces, then END_STATION"
         )
 
+    occupied = {(tile.x, tile.y) for tile in occupied_tiles(Position(), segments)}
+
+    # East of the platform faces WEST back at it, and vice versa.
+    sides = ((1, Heading.WEST), (-1, Heading.EAST))
+    chosen_offset, chosen_facing = sides[0]
+    for offset, facing in sides:
+        tiles = [(offset, 0), (offset, length - 1)]
+        if all(
+            tile not in occupied and _reaches_open_ground(tile, occupied)
+            for tile in tiles
+        ):
+            chosen_offset, chosen_facing = offset, facing
+            break
+
     # Coordinates are in sub-tile units (32 per tile).
     entrance = Entrance(
-        x=32,         # 1 tile east of the platform
-        y=0,          # Aligned with the first station piece
-        z=0,          # Ground level
-        direction=3,  # Facing WEST (toward the station)
+        x=chosen_offset * 32,
+        y=0,                          # Aligned with the first station piece
+        z=0,                          # Ground level
+        direction=int(chosen_facing),
         is_exit=False,
     )
     exit_ = Entrance(
-        x=32,                 # 1 tile east of the platform
-        y=(length - 1) * 32,  # Aligned with the last station piece
-        z=0,                  # Ground level
-        direction=3,          # Facing WEST (toward the station)
+        x=chosen_offset * 32,
+        y=(length - 1) * 32,          # Aligned with the last station piece
+        z=0,                          # Ground level
+        direction=int(chosen_facing),
         is_exit=True,
     )
     return entrance, exit_
+
+
+def _reaches_open_ground(
+    tile: tuple[int, int],
+    occupied: set[tuple[int, int]],
+) -> bool:
+    """Whether a guest could walk from `tile` to outside the ride's footprint.
+
+    Flood fill across free tiles. Escaping the track's bounding box means the
+    tile connects to the rest of the park; failing to means the coaster has
+    enclosed it and no queue can reach it.
+    """
+    if not occupied:
+        return True
+    xs = [x for x, _ in occupied]
+    ys = [y for _, y in occupied]
+    min_x, max_x = min(xs) - 2, max(xs) + 2
+    min_y, max_y = min(ys) - 2, max(ys) + 2
+
+    seen = {tile}
+    queue = deque([tile])
+    while queue:
+        x, y = queue.popleft()
+        if x <= min_x or x >= max_x or y <= min_y or y >= max_y:
+            return True
+        for neighbour in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if neighbour not in seen and neighbour not in occupied:
+                seen.add(neighbour)
+                queue.append(neighbour)
+    return False
 
 
 def calculate_space_required(segments: list[int]) -> tuple[int, int]:

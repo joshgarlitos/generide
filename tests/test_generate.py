@@ -9,6 +9,7 @@ from rct2 import td6
 from rct2.construction import validate_construction
 from rct2.generate import (
     BEGIN_STATION,
+    _reaches_open_ground,
     DEFAULT_STATION_LENGTH,
     END_STATION,
     FLAT,
@@ -22,6 +23,7 @@ from rct2.generate import (
     station_length,
 )
 from rct2.geometry import (
+    Heading,
     Position,
     is_closed_circuit,
     occupied_tiles,
@@ -71,16 +73,18 @@ def test_entrance_positions_sit_at_each_end_of_the_platform():
     segments = create_simple_circuit(station_length=6)
     entrance, exit_ = calculate_entrance_positions(segments)
 
-    # One tile east of the platform, both facing WEST back toward it.
-    assert entrance.x == 32
     assert entrance.y == 0        # beside the BEGIN piece
-    assert entrance.is_exit is False
-    assert entrance.direction == 3
-
-    assert exit_.x == 32
     assert exit_.y == 5 * 32      # beside the END piece, 6 tiles along
+    assert entrance.is_exit is False
     assert exit_.is_exit is True
-    assert exit_.direction == 3
+
+    # Both on the same side of the platform, one tile off it.
+    assert entrance.x == exit_.x
+    assert abs(entrance.x) == 32
+
+    # Facing back at the platform: east of it faces WEST, west of it faces EAST.
+    expected = Heading.WEST if entrance.x > 0 else Heading.EAST
+    assert entrance.direction == exit_.direction == int(expected)
 
 
 def test_entrance_positions_track_a_shorter_platform():
@@ -88,14 +92,34 @@ def test_entrance_positions_track_a_shorter_platform():
     assert exit_.y == 32
 
 
-def test_entrance_and_exit_tiles_stay_clear_of_track():
-    """The structures must not land on a tile the track already occupies."""
-    segments = create_simple_circuit(station_length=6)
-    entrance, exit_ = calculate_entrance_positions(segments)
-    occupied = {(t.x, t.y) for t in occupied_tiles(Position(), segments)}
+def test_entrance_and_exit_are_reachable_from_outside_the_ride():
+    """Guests cannot queue for an entrance the coaster has walled in.
 
-    for structure in (entrance, exit_):
-        assert (structure.x // 32, structure.y // 32) not in occupied
+    The seed circuit turns right, wrapping the track around the eastern column
+    beside the platform. Placing the structures there regardless would enclose
+    them, so placement has to pick the side that still connects to open ground.
+    """
+    for length in (2, 4, 6):
+        segments = create_simple_circuit(station_length=length)
+        entrance, exit_ = calculate_entrance_positions(segments)
+        occupied = {(t.x, t.y) for t in occupied_tiles(Position(), segments)}
+
+        for structure in (entrance, exit_):
+            tile = (structure.x // 32, structure.y // 32)
+            assert tile not in occupied, f"structure on track at {tile}"
+            assert _reaches_open_ground(tile, occupied), f"enclosed at {tile}"
+
+
+def test_entrance_placement_flips_side_when_the_track_encloses_one():
+    """A mirrored loop must push the structures to the opposite side."""
+    right_loop = create_simple_circuit(station_length=6)
+    left_loop = right_loop[:6] + [0x2A, 0x2A] + [FLAT] * 6 + [0x2A, 0x2A]
+
+    right_entrance, _ = calculate_entrance_positions(right_loop)
+    left_entrance, _ = calculate_entrance_positions(left_loop)
+
+    assert right_entrance.x == -left_entrance.x
+    assert right_entrance.direction != left_entrance.direction
 
 
 def test_entrance_positions_reject_invalid_segments():

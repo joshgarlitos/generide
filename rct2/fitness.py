@@ -332,12 +332,14 @@ class PhysicsFitness:
         targets: Optional[RatingTargets] = None,
         validity_weight: float = 50.0,
         target_weight: float = 20.0,
+        open_circuit_penalty: float = 10000.0,
         max_width: int = 30,
         max_depth: int = 30,
     ) -> None:
         self.targets = targets
         self.validity_weight = validity_weight
         self.target_weight = target_weight
+        self.open_circuit_penalty = open_circuit_penalty
         self.max_width = max_width
         self.max_depth = max_depth
 
@@ -350,6 +352,21 @@ class PhysicsFitness:
             max_depth=self.max_depth,
         )
         score -= self.validity_weight * len(result.issues)
+
+        # An open circuit is categorically different from the other issues, so
+        # it does not ride on validity_weight with everything else. The train
+        # would run off the end of the track; there is no ride to rate.
+        #
+        # It needs its own heavy penalty because the stall check below cannot
+        # catch it. `simulate` walks the segment list once and reports
+        # `completed` when the train reaches the end without stalling, and a
+        # short open stub does exactly that — the station drives it the whole
+        # way. So a station plus four flats scores better than a real closed
+        # circuit, which pays for real hills and real g-forces. Weighting this
+        # like a routine issue let the GA converge on stubs, and the longer the
+        # station the worse it got, since more of the track was powered.
+        if not is_closed_circuit(Position(), segments):
+            score -= self.open_circuit_penalty
 
         stats = physics.simulate(segments, lift_indices=set(result.lift_indices))
         if not stats.completed:
