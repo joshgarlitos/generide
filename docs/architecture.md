@@ -103,11 +103,15 @@ Combines geometry with slope, bank, chain-lift, and estimated-energy rules. Gene
 
 ### `rct2/mutations.py`
 
-Implements insert, delete, replace, swap, mutation, crossover, random-track creation, and circuit repair. Slope and banked pieces are inserted as compatible sequences to avoid combinations OpenRCT2 rejects.
+Implements insert, delete, replace, swap, mutation, crossover, random-track creation, and circuit repair. At each insertion or replacement point it asks `construction.py` which segments are legal given the current slope and bank state, then picks from what comes back, so offspring stay buildable without the mutation code holding its own copy of the rules. Every defined piece is reachable this way, including the steep slopes.
 
 ### `rct2/fitness.py`
 
-Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus `ProxyFitness` and `WeightedProxyFitness`. The proxy rewards geometric qualities and penalizes invalid or impractical tracks. It does not reproduce OpenRCT2 ride ratings.
+Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus the proxy and physics fitness classes. `WeightedProxyFitness` holds the entire proxy scoring implementation with every reward and penalty exposed as a constructor weight, and `ProxyFitness` is that class with the tuned defaults, so there is only one copy of the scoring rules to keep correct. The proxy rewards geometric qualities and penalizes tracks that are invalid, impractical, or would stall. It does not reproduce OpenRCT2 ride ratings; `PhysicsFitness` scores approximate ones from `physics.py`, but those weights are uncalibrated.
+
+### `rct2/physics.py`
+
+Walks the track with an energy-method velocity model in meters and seconds, collecting maximum speed, drops, g-forces, airtime, and whether the train completes the circuit. `rate()` maps those stats to approximate excitement, intensity, and nausea through a weights table shaped like OpenRCT2's per-ride-type contributions. It imports `construction.py` and never the reverse, and it is the authority on completability.
 
 ### `rct2/evolution.py`
 
@@ -141,9 +145,8 @@ The two models cannot import each other (`physics` depends on `construction`), s
 - Collision checks operate on exact occupied cells rather than full clearance volumes.
 - Energy is estimated rather than simulated with OpenRCT2 physics.
 - `construction.energy_stall_index` charges a flat friction cost per segment while `physics.simulate` charges per meter of arc length, so the screen overcharges straights and undercharges wide turns. The real Mine Train fixture clears it by only ~0.6 segments of coasting; a legitimate ride with a longer run-in to its lift hill could be flagged as stalling when it would not. Sharing one arc-length model between the two would remove the discrepancy.
-- Fitness does not yet use the game's excitement, intensity, and nausea ratings.
-- Mutations keep their own copies of the construction rules and insert slopes and banked turns only from fixed pre-built sequences; steep slope pieces (0x05, 0x07, 0x08) are defined but unreachable by any mutation.
-- Evolution uses the global `random` module with no seed, so runs are not reproducible.
+- Fitness does not use the game's excitement, intensity, and nausea ratings. `PhysicsFitness` produces approximate ones, but the weights behind them are placeholders that have never been checked against OpenRCT2.
+- `missing_lift_penalty` in proxy scoring can never fire, because the lift set it checks against is derived from the first hill it is checking. See issue #17.
 
 ## Testing
 

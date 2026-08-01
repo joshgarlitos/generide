@@ -4,6 +4,86 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-01 — Buildable is not runnable, and a fitness function that was lying
+
+Two fitness bugs landed today. The first one had been quietly poisoning every evolution run. The second had never hurt anything, because nobody had used the broken code yet.
+
+**The train that never finished.** Evolving with the default proxy fitness, population 30, 50 generations, produced tracks that passed construction validation every single time and completed their simulated circuit one time in ten. Ten seeds, one runnable coaster. The GA had been optimizing for something that looked like a coaster and could not be ridden.
+
+The cause was a gap between two energy checks. `_energy_issues` flagged segments that climbed higher than the lift could carry the train, and nothing else. A train that ran out of speed on flat ground from accumulated friction was invisible to it, so `validate_construction` and `physics.simulate` disagreed about whether a ride could be completed, and fitness believed the wrong one.
+
+**Why the obvious fix was wrong.** `_energy_issues` clamps its available-energy budget at zero, and that clamp looks exactly like the bug. Remove it and the flat-ground stall gets caught. It also fires on any flat track sitting at the datum, which flags `create_simple_circuit()`.
+
+That seed is a flat, liftless eight-segment loop. OpenRCT2 builds it without complaint and no train can run it; the simulation stalls it at segment 5. It is also the GA seed and the fixture underneath most of the test suite. Folding a stall check into `.valid` would have made the project's own starting point illegal.
+
+So the split I should have drawn months ago: `.valid` means the game would accept this track, and nothing more. Completability is a separate question owned by `physics.py`. For callers that have to stay physics-free, `construction.energy_stall_index()` carries the same energy accounting in height units as a cheap screen. It walks the train's kinetic energy as head with no floor, so friction death on the flat counts the same as failing to crest a hill.
+
+**Calibration, and the thin margin I want on record.** Against the simulation over a corpus of evolved, random, and fixture tracks, the screen agreed 69 times out of 72, up from 51. More importantly it never passed a track that actually stalls. I re-ran that on a fresh 82-track corpus with different seeds and got the same shape: 76 agreements, zero unsafe passes, six tracks rejected that would have completed. Erring conservative is the right direction for a screen.
+
+The part I do not love is how little room it has on real content. The real Mine Train clears the screen by 0.061 height units, which is about half a segment of coasting. The screen charges flat per-segment friction where the simulation charges per meter of arc length, so it overcharges straights and undercharges wide turns. A legitimate ride with a longer run-in to its lift hill could get falsely flagged. The clean fix is to share one arc-length model through `segments.py`. Writing it down here so I do not rediscover it by surprise.
+
+Wired in as a graded penalty, the same shape the physics fitness already used for stalls, completion went from 1 of 10 to 10 of 10. Tracks also got shorter, 50.8 segments down to 28.8, because the proxy now trades length for runnability. That is a real change in what the fitness wants, and it means the proxy-versus-physics comparison I ran last week was measuring a fitness function that no longer exists.
+
+**So I re-ran it, and the headline flipped.** Same ten trials, same settings:
+
+| Metric | Proxy (before) | Proxy (now) | Physics |
+|---|---|---|---|
+| Completes circuit | 10% | 100% | 100% |
+| Max speed (m/s) | 2.6 | 7.2 | 8.6 |
+| Drops | 0.0 | 0.3 | 0.8 |
+| Elevation changes | 4.4 | 7.3 | 11.2 |
+
+The finding I called damning last week, that physics-evolved tracks beat proxy-evolved tracks on the proxy's own metric, is gone. Each fitness now wins on its own scale: proxy-evolved tracks score 123.5 under the proxy against 91.8 for physics-evolved ones, and physics-evolved tracks score 50.6 under physics against 45.7. That is what two genuinely different objectives should look like, and it is what the benchmark was built to detect.
+
+The physics fitness still finds livelier rides, roughly twice the drops and half again the elevation changes. The difference is that it is no longer beating the proxy by exploiting a bug in it. It is winning on the axis it actually optimizes, which is a much less interesting result and a much healthier one.
+
+Chasing this also turned up a small piece of waste. `ProxyFitness.evaluate` was resolving the chain lift set three separate times per call, once inside `validate_construction` and twice more afterward, when the first call already returns it. Fitness runs on every individual in every generation, so that class of thing compounds. Fixed by passing the resolved set through, verified behavior-neutral over 300 tracks.
+
+**The second bug: a class that promised something it did not do.** `WeightedProxyFitness` is documented as proxy fitness with configurable weights for experimentation. It scored geometry only. No construction validation, no collisions, no slope or bank violations, no energy, no stalling. Tuning weights on it would have produced tracks the game rejects, and the results would not have transferred to the fitness the GA actually runs.
+
+Nothing in the repo referenced it, which is exactly why it rotted. It was written as a convenience for experiments I never got around to running, and then `ProxyFitness` grew six penalties it never got.
+
+The tempting fix was to copy the missing penalties across. That would have left two implementations of the same rules and guaranteed a repeat. Instead `WeightedProxyFitness` now holds the whole scoring implementation with every reward and penalty as a weight, and `ProxyFitness` is that class with the tuned defaults. One copy of the rules, nothing left to drift.
+
+Before committing I checked the refactor against the old `evaluate()` body copied verbatim, over 403 valid and invalid tracks. Zero score differences. The test that matters most pins the two classes together so a term added to one and not the other fails the build, and I confirmed it is not vacuous by simulating that drift and watching it catch.
+
+**Two things the tests taught me.** Writing a test that every weight actually reaches the score sounds like paperwork. It found two real things. Random track generation goes through the validator now, so it produces legal tracks and never exercises the slope or bank branches at all; those tests need hand-built broken tracks. And `missing_lift_penalty` can never fire. Scoring calls `estimate_energy_violations` with no lift set, so it falls back to `default_lift_indices`, which returns exactly the first hill's own indices, and then asks whether any of those indices is in that same set. Always true. It is dead code that has been sitting there looking like a safety net.
+
+I left the behavior alone and wrote a test documenting it rather than pretending the branch was covered. It becomes reachable only if scoring starts accepting real per-segment lift flags.
+
+**The lesson I keep relearning.** Both bugs are the same shape as the header-gap trap from Phase 1 and the `cosdeg` bug before it. Something is structurally correct and quietly incomplete, and the incompleteness is invisible until you check it against an independent source of truth. The round trip caught the first. The physics simulation caught this one. A fitness function with no second opinion will happily tell you it is doing great.
+
+---
+
+## 2026-07-26 — The benchmark that found a bug instead of an answer
+
+`PhysicsFitness` worked, but nothing established whether it changed the search in a way that mattered. Maybe the physics model finds tracks the proxy would never reach. Maybe it finds the same tracks by a slower route. So I built `benchmark_fitness.py` to measure it.
+
+**The design problem.** The two fitness functions score on incompatible scales, so comparing their raw numbers says nothing. What I wanted was cross-scoring: evolve a winner with each, then score every winner under both. If proxy-evolved tracks already score near the top under the physics fitness, the two are searching for the same thing. If they diverge, each is finding tracks the other misses. Both approaches get matched seeds so they start from the same random sequence and differ only in what they optimize.
+
+**What it found was not what I was looking for.** Ten trials at 50 generations, population 30:
+
+| Metric | Proxy | Physics |
+|---|---|---|
+| Completes circuit | 10% | 100% |
+| Max speed (m/s) | 2.6 | 8.6 |
+| Drops | 0.0 | 0.8 |
+| Elevation changes | 4.4 | 11.2 |
+
+Proxy-evolved tracks did not complete their circuit. One in ten. They passed `validate_construction` every time. The seed-42 winner was 56 segments spanning two height units, roughly a metre and a half of total elevation, stalling at segment 6 before the train ever reached its chain lift at segment 16. A flat oval with a bump in it. Max speed of 2.6 m/s is barely above the 2.2 m/s the lift pushes it out of the station at, and it never dropped at all.
+
+I set out to compare two search strategies and instead found that the default one had been optimizing for unrideable track this whole time.
+
+**Why the proxy settled there.** The penalty structure. An elevation change earns 5 points. An energy violation costs 50, and a missing first-hill chain lift costs 200. Hills are worth very little and risk a lot, so evolution found the safe local optimum: long, flat, twisty, and technically valid. The physics fitness rewards speed and drops directly, so it pushes into hills and collects the proxy's elevation points as a side effect.
+
+That produced the result I found most damning at the time. Physics-evolved tracks beat proxy-evolved tracks **on the proxy's own metric**, 160.6 to 146.3. The proxy was losing at its own game because the thing it was avoiding was not actually the thing that makes a track bad.
+
+**What I did not do.** I did not change either fitness function in this PR. It is a measurement script, and I wanted the measurement on record before touching the thing being measured. The obvious follow-up went in the notes: close the gap where `_energy_issues` calls a stalling track valid because it only checks climbs against the potential-energy budget and never a train that runs out of momentum on the flat.
+
+Worth being honest about the limits of this. Everything here is measured by my own physics model, so it establishes that the proxy and the physics model disagree. It does not establish that the physics model is right. Building one of these flat proxy tracks in OpenRCT2 and watching whether the train actually stalls is what would confirm it, and that is still on the list.
+
+---
+
 ## 2026-07-19 — A physics simulation replaces the geometric guesswork
 
 The fitness function now simulates the ride instead of counting track pieces. A new `rct2/physics.py` walks the track with an energy-method velocity model, collects ride stats (max speed, drops, g-forces, airtime), and maps them to approximate excitement, intensity, and nausea ratings. A new `PhysicsFitness` class scores tracks on those ratings. This is the first half of the hybrid plan from the last Phase 4 entry: a cheap Python approximation during evolution, with headless OpenRCT2 as ground truth later.
