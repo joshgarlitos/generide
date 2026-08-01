@@ -218,7 +218,11 @@ class ProxyFitness:
         # Penalty for stalling. Graded by how far the train got, so evolution
         # has a gradient toward completing the circuit instead of a cliff --
         # the same shape PhysicsFitness uses for its stall penalty.
-        stall_index = construction.energy_stall_index(segments)
+        # Reuse the lift set validate_construction already resolved rather than
+        # walking for the first hill again; this runs on every individual.
+        stall_index = construction.energy_stall_index(
+            segments, construction_result.lift_indices
+        )
         if stall_index is not None:
             progress = stall_index / max(1, len(segments))
             score -= self.stall_penalty * (1.0 - progress)
