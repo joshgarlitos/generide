@@ -81,20 +81,76 @@ All offsets below refer to the decompressed byte array.
 | 0x00 | 1 | `ride_type` | e.g. 0x11 = Mine Train |
 | 0x06 | 1 | `operating_mode` | 0 = normal, 1 = continuous circuit |
 | 0x07 | 1 | `color_scheme` | bits 0-1 = scheme, bit 3 = always 1 for RCT2 |
+| 0x4a | 1 | `total_air_time` | see scale caveat below |
 | 0x4b | 1 | `control_flags` | see control flags section below |
 | 0x4c | 1 | `num_trains` | |
 | 0x4d | 1 | `cars_per_train` | |
 | 0x4e | 1 | `min_wait_time` | |
 | 0x4f | 1 | `max_wait_time` | |
-| 0x51 | 1 | `max_speed` | |
-| 0x52 | 1 | `average_speed` | |
-| 0x5b | 1 | `excitement` | |
-| 0x5c | 1 | `intensity` | |
-| 0x5d | 1 | `nausea` | |
+| 0x51 | 1 | `max_speed` | × 2.25 for mph |
+| 0x52 | 1 | `average_speed` | × 2.25 for mph |
+| 0x53 | 2 | `ride_length` | uint16 little-endian, meters |
+| 0x55 | 1 | `max_positive_vertical_g` | × 0.32 for g |
+| 0x56 | 1 | `max_negative_vertical_g` | **signed**; × 0.32 for g |
+| 0x57 | 1 | `max_lateral_g` | × 0.32 for g |
+| 0x58 | 1 | `inversions` | count in low 5 bits; holes, on mini golf |
+| 0x59 | 1 | `drops` | **count in low 6 bits only** |
+| 0x5a | 1 | `highest_drop_height` | × 0.75 for meters |
+| 0x5b | 1 | `excitement` | ÷ 10 for the displayed rating |
+| 0x5c | 1 | `intensity` | ÷ 10 |
+| 0x5d | 1 | `nausea` | ÷ 10 |
 | 0x70 | 16 | `dat_data` | raw bytes, includes vehicle type string at 0x74 |
 | 0x80 | 1 | `x_space_required` | |
 | 0x81 | 1 | `y_space_required` | |
 | 0xa2 | 1 | `circuits_and_lift_speed` | top 3 bits = circuits, bottom 5 = lift speed |
+
+### Where these offsets and scales come from
+
+The layout is OpenRCT2's `TD6Track` struct in `src/openrct2/rct2/RCT2.h`, which
+carries the offsets as comments and ends with `static_assert(sizeof(TD6Track)
+== 0xA3)`. Offsets should be taken from there rather than inferred from sample
+files. Inferring produced two wrong answers before the struct settled them:
+`total_air_time` was assumed to sit with the other stats in the 0x53–0x5a block
+when it is actually at 0x4a, and 0x57 was unidentified when it is lateral g.
+
+The scale factors come from OpenRCT2's T6 exporter
+(`src/openrct2/rct2/T6Exporter.cpp`) and the constants it uses in
+`src/openrct2/rct12/RCT12.h`:
+
+| Constant | Value | Consequence |
+|---|---|---|
+| `kTD46RatingsMultiplier` | 10 | Runtime ratings are fixed-point hundredths, so a stored byte is the rating × 10. Stored 62 → 6.2. |
+| `kTD46GForcesMultiplier` | 32 | Same fixed-point runtime, so a stored byte is g × 100 ÷ 32. One unit is 0.32 g. |
+| `kRCT12RideNumDropsMask` | `0b00111111` | The drops byte packs the count into its low 6 bits. |
+| `kRCT12InversionAndHoleMask` | `0b00011111` | Inversions use the low 5 bits. |
+
+Speed (2.25 mph per unit) and ride length (meters) are documented by the
+[Tycoon Technical Depot](https://freerct.github.io/RCTTechDepot-Archive/TD6.html)
+rather than derived from the source, so they carry slightly weaker evidence
+than the four above.
+
+Three independent checks back the scales, which matters because a plausible
+wrong scale is invisible:
+
+- **Drops.** The shipped Manic Miner stores 70 in that byte. Masked, that is 6,
+  and our own physics model independently counts 6 drops on the same track. The
+  raw byte would be an absurd answer for an 89-piece ride.
+- **G-force.** The gentlest shipped designs read 0.96 g under × 0.32, which is
+  the ~1 g a rider feels sitting still. An earlier guess of ÷ 4 puts them at
+  0.75 g, below the resting floor, which no ride can report as a *maximum*.
+- **Speed.** Across five shipped designs we can simulate, our simulated max
+  speed divided by the stored value × 2.25 mph clusters at 1.05–1.10 — a
+  consistent small overestimate by our model, not a scale mismatch.
+
+`total_air_time` is exposed as the raw byte only. The exporter writes it as
+`(runtime × 123 + 512) / 1024`, but the runtime unit is not pinned down here,
+so no seconds conversion is offered rather than shipping a number that cannot
+be defended. The Technical Depot's "multiply by four for seconds" is not
+credible: it would make the fixture's stored 10 into 40 seconds of airtime on a
+Mine Train.
+
+Rides that generide authors carry zeros in all of these, because we never run a
+test lap. A zero means "not measured", not "measured as zero".
 
 ### Track data (starts at 0xa3)
 
