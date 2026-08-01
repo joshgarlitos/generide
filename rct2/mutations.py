@@ -9,13 +9,18 @@ from typing import Optional
 
 from rct2.construction import (
     BANK_TRANSITIONS,
+    BEGIN_STATION,
+    DEFAULT_STATION_LENGTH,
+    END_STATION,
     SLOPE_TRANSITIONS,
     bank_closing_path,
     bank_state_at,
+    build_station,
     legal_bank_segments,
     legal_slope_segments,
     slope_closing_path,
     slope_state_at,
+    station_length,
 )
 from rct2.geometry import (
     Heading,
@@ -39,10 +44,6 @@ SIMPLE_SEGMENTS = FLAT_SEGMENTS + TURN_LEFT_FLAT + TURN_RIGHT_FLAT + BRAKES
 # For backwards compatibility
 TURN_LEFT = TURN_LEFT_FLAT
 TURN_RIGHT = TURN_RIGHT_FLAT
-
-# Station segments that should not be mutated
-BEGIN_STATION = 0x02
-END_STATION = 0x01
 
 
 def insert_segment(segments: list[int], position: int, segment: int) -> list[int]:
@@ -111,15 +112,19 @@ def swap_segments(segments: list[int], pos1: int, pos2: int) -> list[int]:
 def _find_mutable_range(segments: list[int]) -> tuple[int, int]:
     """Find the range of indices that can be mutated (excluding station).
 
+    The whole leading station run is off limits, not just its first two pieces.
+    A platform is BEGIN, then middles, then END, and mutating a middle out of
+    the middle of it would leave the ride with a shorter platform than asked
+    for, or a malformed one.
+
     Returns:
         Tuple of (start_index, end_index) for mutable region
     """
-    # Skip BEGIN_STATION and END_STATION at the start
-    start = 0
-    if len(segments) > 0 and segments[0] == BEGIN_STATION:
-        start = 1
-    if len(segments) > 1 and segments[1] == END_STATION:
-        start = 2
+    start = station_length(segments)
+    if start == 0:
+        # No well-formed station; fall back to protecting a leading BEGIN piece
+        # so a partially built track still keeps its first element.
+        start = 1 if segments and segments[0] == BEGIN_STATION else 0
     return start, len(segments)
 
 
@@ -475,6 +480,7 @@ def generate_random_track(
     rng: random.Random,
     min_length: int = 8,
     max_length: int = 30,
+    station_tiles: int = DEFAULT_STATION_LENGTH,
 ) -> list[int]:
     """Generate a random track with station and attempt to close it.
 
@@ -483,17 +489,18 @@ def generate_random_track(
     Args:
         min_length: Minimum number of segments (excluding station)
         max_length: Maximum number of segments (excluding station)
+        station_tiles: Length of the station platform in tiles
 
     Returns:
         Random track segment list (may not be closed)
     """
     target_length = rng.randint(min_length, max_length)
 
-    # Start with station
-    segments = [BEGIN_STATION, END_STATION]
+    # Start with a full station platform
+    segments = build_station(station_tiles)
 
     # Add random segments, slope runs, and banked runs
-    while len(segments) - 2 < target_length:
+    while len(segments) - station_tiles < target_length:
         choice = rng.random()
         if choice < 0.25:  # 25% chance for a slope run
             segments.extend(_build_slope_run(rng))

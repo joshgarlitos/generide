@@ -5,7 +5,16 @@ import random
 import pytest
 
 import rct2.mutations
-from rct2.construction import BANK_TRANSITIONS, SLOPE_TRANSITIONS, bank_state_at, slope_state_at
+from rct2.construction import (
+    BANK_TRANSITIONS,
+    DEFAULT_STATION_LENGTH,
+    SLOPE_TRANSITIONS,
+    STATION_SEGMENTS,
+    bank_state_at,
+    build_station,
+    slope_state_at,
+    station_length,
+)
 from rct2.geometry import Position, is_closed_circuit
 from rct2.generate import create_simple_circuit
 from rct2.mutations import (
@@ -139,13 +148,14 @@ class TestMutateFunction:
     """Tests for the high-level mutate function."""
 
     def test_mutate_preserves_station(self):
-        """Mutation should not remove station segments."""
+        """Mutation must leave the whole platform intact, not just its first piece."""
         rng = random.Random(42)
         segments = create_simple_circuit()
+        platform = segments[:station_length(segments)]
         for _ in range(10):  # Multiple attempts
             mutated = mutate(segments, rng, rate=0.5)
-            assert mutated[0] == BEGIN_STATION
-            assert mutated[1] == END_STATION
+            assert mutated[:len(platform)] == platform
+            assert station_length(mutated) == DEFAULT_STATION_LENGTH
 
     def test_mutate_returns_valid_segments(self):
         """Mutated segments should be from the valid set."""
@@ -153,7 +163,7 @@ class TestMutateFunction:
         segments = create_simple_circuit()
         # Build set of all valid segments (simple + any legal slope/bank piece)
         valid_segments = (
-            set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
+            set(SIMPLE_SEGMENTS) | STATION_SEGMENTS
             | set(SLOPE_TRANSITIONS) | set(BANK_TRANSITIONS)
         )
 
@@ -233,11 +243,11 @@ class TestCrossover:
         """Offspring should start with station segments."""
         rng = random.Random(42)
         parent1 = create_simple_circuit()
-        parent2 = [BEGIN_STATION, END_STATION] + [TURN_RIGHT[0]] * 4
+        parent2 = build_station() + [TURN_RIGHT[0]] * 4
 
         child1, child2 = crossover(parent1, parent2, rng)
-        assert child1[0] == BEGIN_STATION
-        assert child1[1] == END_STATION
+        assert station_length(child1) == DEFAULT_STATION_LENGTH
+        assert station_length(child2) == DEFAULT_STATION_LENGTH
 
     def test_crossover_combines_genetic_material(self):
         """Offspring should contain segments from both parents."""
@@ -267,8 +277,7 @@ class TestGenerateRandomTrack:
         """Generated tracks should have station segments."""
         rng = random.Random(42)
         track = generate_random_track(rng)
-        assert track[0] == BEGIN_STATION
-        assert track[1] == END_STATION
+        assert station_length(track) == DEFAULT_STATION_LENGTH
 
     def test_generate_random_track_respects_length_bounds(self):
         """Generated tracks should be within length bounds."""
@@ -281,7 +290,7 @@ class TestGenerateRandomTrack:
         """Generated tracks should use valid segment types."""
         rng = random.Random(42)
         valid = (
-            set(SIMPLE_SEGMENTS) | {BEGIN_STATION, END_STATION}
+            set(SIMPLE_SEGMENTS) | STATION_SEGMENTS
             | set(SLOPE_TRANSITIONS) | set(BANK_TRANSITIONS)
         )
         for _ in range(5):

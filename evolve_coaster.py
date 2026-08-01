@@ -18,7 +18,9 @@ from rct2.evolution import evolve
 from rct2.fitness import PhysicsFitness, ProxyFitness, RatingTargets
 from rct2.generate import (
     BEGIN_STATION,
+    DEFAULT_STATION_LENGTH,
     END_STATION,
+    MIN_STATION_LENGTH,
     calculate_entrance_positions,
     calculate_space_required,
     create_simple_circuit,
@@ -112,6 +114,16 @@ def main():
         help="Seed track: 'simple' for simple circuit, or path to TD6 file",
     )
     parser.add_argument(
+        "--station-length",
+        type=int,
+        default=DEFAULT_STATION_LENGTH,
+        help=(
+            f"Station platform length in tiles "
+            f"(default: {DEFAULT_STATION_LENGTH}, minimum: {MIN_STATION_LENGTH}). "
+            f"Only applies to the generated seed circuit."
+        ),
+    )
+    parser.add_argument(
         "--template",
         type=Path,
         default=None,
@@ -183,8 +195,18 @@ def main():
 
     # Determine seed track
     if args.seed is None or args.seed == "simple":
-        seed = create_simple_circuit()
-        print("Using simple circuit as seed")
+        if args.station_length < MIN_STATION_LENGTH:
+            print(
+                f"Error: --station-length must be at least {MIN_STATION_LENGTH}, "
+                f"got {args.station_length}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        seed = create_simple_circuit(station_length=args.station_length)
+        print(
+            f"Using simple circuit as seed "
+            f"({args.station_length}-tile station platform)"
+        )
     else:
         seed_path = Path(args.seed)
         if not seed_path.exists():

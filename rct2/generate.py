@@ -4,50 +4,72 @@ Provides functions to create minimal coaster circuits and generate
 valid .td6 files that OpenRCT2 can load.
 """
 
+from collections import deque
 from pathlib import Path
 from typing import Union
 
 from rct2 import td6
-from rct2.construction import default_lift_indices, validate_construction
+from rct2.construction import (
+    BEGIN_STATION,
+    DEFAULT_STATION_LENGTH,
+    END_STATION,
+    MIDDLE_STATION,
+    MIN_STATION_LENGTH,
+    build_station,
+    default_lift_indices,
+    station_length,
+    validate_construction,
+)
 from rct2.geometry import (
     Heading,
     Position,
+    occupied_tiles,
     track_bounds,
 )
 from rct2.td6 import Entrance, Ride, TrackElement
 
 
-# Segment type constants for readability
-BEGIN_STATION = 0x02
-END_STATION = 0x01
+# Segment type constants for readability. Station structure lives in
+# construction.py, since what makes a valid platform is a construction rule.
 FLAT = 0x00
 RIGHT_QUARTER_TURN_3 = 0x2B
 
 
-def create_simple_circuit() -> list[int]:
-    """Return a minimal closed circuit with station.
+def create_simple_circuit(
+    station_length: int = DEFAULT_STATION_LENGTH,
+) -> list[int]:
+    """Return a minimal closed circuit with a station.
 
-    Layout: station + 4 right turns with 2 flats.
-    Forms an 8-segment closed loop that fits in roughly 4x6 tiles.
+    Layout: station, two right turns, a straight run back, two more right turns.
+    The straight run has to match the station's length for the loop to close,
+    since the station pieces are themselves straight and form one side of it.
+
+    Args:
+        station_length: Number of station tiles (default DEFAULT_STATION_LENGTH).
+
+    Returns:
+        A closed circuit of `2 * station_length + 4` segments.
     """
-    return [
-        BEGIN_STATION,      # Start station
-        END_STATION,        # End station
-        RIGHT_QUARTER_TURN_3,  # Turn 1 (heading NORTH -> EAST)
-        RIGHT_QUARTER_TURN_3,  # Turn 2 (EAST -> SOUTH)
-        FLAT,               # Straight south
-        FLAT,               # Straight south
-        RIGHT_QUARTER_TURN_3,  # Turn 3 (SOUTH -> WEST)
-        RIGHT_QUARTER_TURN_3,  # Turn 4 (WEST -> NORTH, returns to start)
-    ]
+    return (
+        build_station(station_length)
+        + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees around
+        + [FLAT] * station_length                       # back down the far side
+        + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees home
+    )
 
 
 def calculate_entrance_positions(segments: list[int]) -> tuple[Entrance, Entrance]:
     """Calculate entrance and exit positions adjacent to the station.
 
-    The station consists of BEGIN_STATION at position 0 and END_STATION at
-    position 1. Places entrance beside the first station piece and exit
-    beside the second.
+    The station is the leading run of BEGIN, middles, END. Starting at the
+    origin facing NORTH it occupies tiles (0, 0) through (0, n-1), so the
+    entrance goes beside the first station tile and the exit beside the last.
+
+    Which side they go on depends on the track. Pinning them east regardless
+    of where the loop runs means that whenever the track happens to curve east
+    it encloses them, and guests cannot path to an entrance the coaster has
+    built a wall around. So try each side and take one where both structures
+    sit on free ground that connects to open space outside the ride.
 
     Args:
         segments: List of segment type IDs (must start with station segments)
@@ -56,38 +78,84 @@ def calculate_entrance_positions(segments: list[int]) -> tuple[Entrance, Entranc
         Tuple of (entrance, exit) Entrance objects
 
     Raises:
-        ValueError: If segments don't start with proper station pieces
+        ValueError: If segments don't start with a well-formed station
     """
-    if len(segments) < 2:
-        raise ValueError("Track must have at least 2 segments for a station")
-    if segments[0] != BEGIN_STATION or segments[1] != END_STATION:
-        raise ValueError("Track must start with BEGIN_STATION and END_STATION")
+    length = station_length(segments)
+    if length == 0:
+        raise ValueError(
+            "Track must start with a station: BEGIN_STATION, "
+            "optional MIDDLE_STATION pieces, then END_STATION"
+        )
 
-    # Station occupies tiles (0, 0) and (0, 1) when starting at origin facing NORTH.
-    # Place entrance at tile (1, 0) facing WEST (direction 3) toward the station.
-    # Place exit at tile (1, 1) facing WEST toward the station.
+    occupied = {(tile.x, tile.y) for tile in occupied_tiles(Position(), segments)}
+
+    # East of the platform faces WEST back at it, and vice versa.
+    sides = ((1, Heading.WEST), (-1, Heading.EAST))
+    chosen_offset, chosen_facing = sides[0]
+    for offset, facing in sides:
+        tiles = [(offset, 0), (offset, length - 1)]
+        if all(
+            tile not in occupied and _reaches_open_ground(tile, occupied)
+            for tile in tiles
+        ):
+            chosen_offset, chosen_facing = offset, facing
+            break
+
     # Coordinates are in sub-tile units (32 per tile).
     entrance = Entrance(
-        x=32,         # 1 tile east of station
-        y=0,          # Aligned with begin_station
-        z=0,          # Ground level
-        direction=3,  # Facing WEST (toward station)
+        x=chosen_offset * 32,
+        y=0,                          # Aligned with the first station piece
+        z=0,                          # Ground level
+        direction=int(chosen_facing),
         is_exit=False,
     )
     exit_ = Entrance(
-        x=32,         # 1 tile east of station
-        y=32,         # Aligned with end_station
-        z=0,          # Ground level
-        direction=3,  # Facing WEST (toward station)
+        x=chosen_offset * 32,
+        y=(length - 1) * 32,          # Aligned with the last station piece
+        z=0,                          # Ground level
+        direction=int(chosen_facing),
         is_exit=True,
     )
     return entrance, exit_
 
 
-def calculate_space_required(segments: list[int]) -> tuple[int, int]:
-    """Calculate the x and y space required for the track.
+def _reaches_open_ground(
+    tile: tuple[int, int],
+    occupied: set[tuple[int, int]],
+) -> bool:
+    """Whether a guest could walk from `tile` to outside the ride's footprint.
 
-    Returns dimensions suitable for the TD6 header fields.
+    Flood fill across free tiles. Escaping the track's bounding box means the
+    tile connects to the rest of the park; failing to means the coaster has
+    enclosed it and no queue can reach it.
+    """
+    if not occupied:
+        return True
+    xs = [x for x, _ in occupied]
+    ys = [y for _, y in occupied]
+    min_x, max_x = min(xs) - 2, max(xs) + 2
+    min_y, max_y = min(ys) - 2, max(ys) + 2
+
+    seen = {tile}
+    queue = deque([tile])
+    while queue:
+        x, y = queue.popleft()
+        if x <= min_x or x >= max_x or y <= min_y or y >= max_y:
+            return True
+        for neighbour in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if neighbour not in seen and neighbour not in occupied:
+                seen.add(neighbour)
+                queue.append(neighbour)
+    return False
+
+
+def calculate_space_required(segments: list[int]) -> tuple[int, int]:
+    """Calculate the x and y space required for the ride.
+
+    Covers the entrance and exit as well as the track. They sit one tile off
+    the platform, outside the track's own bounds, and the game still has to
+    reserve room for them, so a width taken from `track_bounds` alone
+    under-reports what the ride actually needs.
 
     Args:
         segments: List of segment type IDs
@@ -96,7 +164,14 @@ def calculate_space_required(segments: list[int]) -> tuple[int, int]:
         Tuple of (x_space, y_space) in tiles
     """
     bounds = track_bounds(Position(), segments)
-    return bounds.width, bounds.depth
+    width, depth = bounds.width, bounds.depth
+    if station_length(segments):
+        entrance, exit_ = calculate_entrance_positions(segments)
+        for structure in (entrance, exit_):
+            tile_x, tile_y = structure.x // 32, structure.y // 32
+            width = max(width, tile_x - bounds.min_x + 1)
+            depth = max(depth, tile_y - bounds.min_y + 1)
+    return width, depth
 
 
 def generate_ride(
