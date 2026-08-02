@@ -4,6 +4,56 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-02 — Fitting the rating model, and finding out where the data runs out
+
+The rating weights are now fitted against 204 real track designs instead of being nine numbers somebody typed once. The headline number: ranking correlation against the game's real ratings went from 0.45 to 0.87 for excitement. But the more useful finding is where the fit stops working, and why.
+
+### What was actually broken
+
+Two things, and only one of them was the weights.
+
+The base constant was 2.9. Every ride started there before a single measurement was added, and plenty of real rides never reach 2.9 in total. So the formula could not express "this ride is bad."
+
+The bigger problem was structural. The old `rate()` subtracted from excitement whenever intensity passed a cap of 10. Our intensity readings were wildly inflated, so on the real Manic Miner it returned 21.7 against the game's 6.5, the cap fired, and a genuinely good coaster came out at 0.10 excitement. Every hill and every bit of speed pushed intensity up, tripped the cap, and cost excitement. That is the mechanism that taught evolution to build flat, short, cautious tracks. It was not a tuning problem, it was a sign error in what the objective rewarded.
+
+### Splitting prediction from preference
+
+The fix that mattered most was not a number. `rate()` now predicts what the game would say and nothing else, with the three ratings computed independently the way the game computes them. Wanting to avoid punishing rides is a preference about which tracks we like, so it moved into `PhysicsFitness` where the other preferences live.
+
+That separation is the same shape as the buildable-versus-runnable split from last week. Mixing "what is true" with "what I want" inside one function meant a bad estimate of the first silently corrupted the second, and there was no way to notice because both lived behind the same call.
+
+### The fit
+
+Least squares against `data/calibration.csv`, in the game's own units so each coefficient stays interpretable as points per mph rather than a compound of two conversions.
+
+Inside the range the designs cover, it is decent: r-squared 0.73 for excitement, 0.85 intensity, 0.61 nausea. Given the game's own measured stats for Manic Miner it predicts 6.00 against an actual 6.10.
+
+Ranking, which is what evolution actually consumes, improved more than absolute accuracy did:
+
+| | fitted | old |
+|---|---|---|
+| excitement | 0.87 | 0.45 |
+| intensity | 0.84 | 0.74 |
+| nausea | 0.58 | 0.49 |
+
+### Where the data runs out
+
+This is the part worth remembering. Every ride generide has produced scores below 200 of the 204 shipped designs. Only one shipped design scores below 1.02. None score below 0.25.
+
+So when the model is asked about our own output it is extrapolating past the edge of everything it learned from, and it reads two to four points high. I tried three model forms to fix that, including fitting through the origin and fitting in log space, and none of them extrapolated. Then I added our four in-game measured rides as training anchors and validated leave-one-out. That did not fix it either, which in hindsight is obvious arithmetic: four rows against 204 barely move a fit.
+
+The honest conclusion is that the shipped designs cannot teach the model about bad rides, because the game does not ship bad rides. The only source of data in that region is our own tracks, measured in the game. Each one Josh tests is worth more than any modelling cleverness, because it covers territory nothing else does.
+
+### What this does and does not fix
+
+It does not make our predictions accurate. Feeding our simulated stats into the new weights still overestimates, because our g-forces read high, which is the same issue as #23 and is now cleanly separated from this one. The proof that the weights themselves are fine is that swapping in the game's own stats for the same ride lands within 0.1.
+
+What it does fix is the direction of the objective. Evolution is no longer punished for speed and drops. On the same seed and settings that previously produced a 32-segment track topping out at 11.9 m/s, it now produces 78 segments at 18.9 m/s with more than double the drop height.
+
+Whether that is actually a better ride is a question only the game can answer, which is the whole lesson of the last three days.
+
+---
+
 ## 2026-08-02 — What the AI was good at, and what it couldn't do at all
 
 This entry isn't about the coaster. It's about how I've been working, because the last two days made the division of labour clearer than anything else on this project has.

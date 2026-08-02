@@ -333,6 +333,8 @@ class PhysicsFitness:
         validity_weight: float = 50.0,
         target_weight: float = 20.0,
         open_circuit_penalty: float = 10000.0,
+        intensity_ceiling: float = 9.0,
+        nausea_ceiling: float = 7.0,
         max_width: int = 30,
         max_depth: int = 30,
     ) -> None:
@@ -340,6 +342,8 @@ class PhysicsFitness:
         self.validity_weight = validity_weight
         self.target_weight = target_weight
         self.open_circuit_penalty = open_circuit_penalty
+        self.intensity_ceiling = intensity_ceiling
+        self.nausea_ceiling = nausea_ceiling
         self.max_width = max_width
         self.max_depth = max_depth
 
@@ -378,8 +382,16 @@ class PhysicsFitness:
         ratings = physics.rate(stats)
         if self.targets is None:
             score += ratings.excitement * 10
-            score -= max(0.0, ratings.intensity - physics.RATING_WEIGHTS["intensity_cap"]) * 5
-            score -= max(0.0, ratings.nausea - 7.0) * 5
+            # Steer away from rides too punishing to be worth riding. This is a
+            # preference, so it lives here rather than inside `physics.rate`,
+            # which predicts what the game would say and nothing more. The
+            # thresholds are on the calibrated rating scale, where a real
+            # Mine Train sits near 6.5 intensity and the worst shipped designs
+            # reach the low 9s, so these only bite on genuinely extreme tracks
+            # rather than firing constantly the way the old uncalibrated
+            # intensity did.
+            score -= max(0.0, ratings.intensity - self.intensity_ceiling) * 5
+            score -= max(0.0, ratings.nausea - self.nausea_ceiling) * 5
         else:
             score += ratings.excitement  # mild tiebreaker inside windows
             score -= self.target_weight * _window_distance(

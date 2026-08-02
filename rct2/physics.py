@@ -221,68 +221,131 @@ class RideRatings:
     nausea: float
 
 
-# Placeholder Mine Train multipliers, shaped like OpenRCT2's RideRatings
-# contributions. Calibrate against headless OpenRCT2 in a later phase.
+# Rating weights fitted by least squares against `data/calibration.csv`: 204
+# real track designs shipped with the game, each carrying the ratings the game
+# itself assigned and the stats the game itself measured. See
+# docs/devlog.md (2026-08-02) for the fit and its limits.
+#
+# Units are the game's own, not ours: miles per hour and meters, matching the
+# calibration data. `rate()` converts from RideStats at the boundary. Fitting
+# in the source units keeps each coefficient interpretable as "rating points
+# per mph" rather than a compound of two conversions.
+#
+# What this fit is good at, and what it is not:
+#
+#   Ranking, which is what evolution actually consumes. Spearman correlation
+#   against the real ratings across all 204 designs is 0.87 for excitement,
+#   0.84 intensity, 0.58 nausea — against 0.45 / 0.74 / 0.49 for the
+#   placeholder weights this replaces.
+#
+#   Absolute values *inside the range the designs cover* (excitement 0.3-8.8,
+#   median 6.3): r2 0.73 / 0.85 / 0.61, mean absolute error 0.57 / 0.78 / 0.94.
+#
+#   Absolute values *below* that range: unreliable, and this is the honest
+#   limitation. Every ride generide has produced so far scores below 200 of
+#   the 204 shipped designs, so the fit is extrapolating there and reads
+#   roughly 2-4 points high. Four of our own in-game measurements were tested
+#   as training anchors and did not fix it — 4 rows against 204 barely move
+#   the fit. Closing that gap needs more of our own rides measured in-game,
+#   which is the only source of data in that region.
+#
+# Airtime is deliberately absent. The calibration data stores it in an
+# unconverted unit (see docs/phase1-spec.md) and our simulated airtime is
+# separately known to be several times too high, so including it would add
+# two compounding errors for one weak predictor.
 RATING_WEIGHTS = {
-    "excitement_base": 2.9,
-    "excitement_max_speed": 0.12,  # per m/s
-    "excitement_avg_speed": 0.10,
-    "excitement_drops": 0.25,  # per drop
-    "excitement_drop_height": 0.02,  # per height unit dropped
-    "excitement_airtime": 0.5,  # per second
-    "excitement_length": 0.002,  # per meter
-    "intensity_base": 2.0,
-    "intensity_max_speed": 0.15,
-    "intensity_positive_g": 1.2,  # per g above 1
-    "intensity_negative_g": 1.5,  # per g below 0
-    "intensity_lateral_g": 1.5,
-    "intensity_drop_height": 0.03,
-    "nausea_base": 1.0,
-    "nausea_lateral_g": 1.8,
-    "nausea_negative_g": 1.0,
-    "nausea_intensity": 0.25,  # coupling from intensity
-    "intensity_cap": 10.0,  # excitement collapses beyond this
-    "lateral_g_cap": 2.8,
-    "excess_penalty": 0.75,  # excitement lost per unit past a cap
+    "excitement_base": 2.5290,
+    "excitement_max_speed_mph": 0.013030,
+    "excitement_average_speed_mph": 0.032069,
+    "excitement_ride_length_m": 0.001522,
+    "excitement_max_positive_vertical_g": 0.212852,
+    "excitement_max_negative_vertical_g": -0.008452,
+    "excitement_max_lateral_g": 0.410545,
+    "excitement_drop_count": 0.070207,
+    "excitement_highest_drop_height_m": -0.006029,
+    "excitement_inversion_count": -0.073437,
+    "intensity_base": 0.3928,
+    "intensity_max_speed_mph": 0.104738,
+    "intensity_average_speed_mph": 0.015165,
+    "intensity_ride_length_m": -0.001869,
+    "intensity_max_positive_vertical_g": 0.212605,
+    "intensity_max_negative_vertical_g": -0.624363,
+    "intensity_max_lateral_g": 0.546125,
+    "intensity_drop_count": 0.217989,
+    "intensity_highest_drop_height_m": -0.064294,
+    "intensity_inversion_count": 0.142704,
+    "nausea_base": 0.6078,
+    "nausea_max_speed_mph": 0.071178,
+    "nausea_average_speed_mph": 0.025821,
+    "nausea_ride_length_m": -0.001699,
+    "nausea_max_positive_vertical_g": 0.024989,
+    "nausea_max_negative_vertical_g": -0.576455,
+    "nausea_max_lateral_g": 0.780585,
+    "nausea_drop_count": 0.058551,
+    "nausea_highest_drop_height_m": -0.054940,
+    "nausea_inversion_count": 0.027337,
 }
+
+MPH_PER_MS = 2.23694
+_RATING_FEATURES = (
+    "max_speed_mph",
+    "average_speed_mph",
+    "ride_length_m",
+    "max_positive_vertical_g",
+    "max_negative_vertical_g",
+    "max_lateral_g",
+    "drop_count",
+    "highest_drop_height_m",
+    "inversion_count",
+)
+
+
+def rating_features(stats: RideStats) -> dict:
+    """Convert RideStats into the game's own units, as the fit expects them.
+
+    `max_negative_vertical_g` is signed, negative when the train goes light
+    over a crest. RideStats stores that as an unsigned magnitude, so it is
+    negated here — the calibration data is signed (152 of 204 designs are
+    negative) and the fitted coefficient is large, so getting this backwards
+    silently inverts a real term rather than merely scaling it.
+    """
+    return {
+        "max_speed_mph": stats.max_speed * MPH_PER_MS,
+        "average_speed_mph": stats.avg_speed * MPH_PER_MS,
+        "ride_length_m": stats.ride_length,
+        "max_positive_vertical_g": stats.max_positive_g,
+        "max_negative_vertical_g": -abs(stats.max_negative_g),
+        "max_lateral_g": stats.max_lateral_g,
+        "drop_count": stats.drop_count,
+        "highest_drop_height_m": stats.highest_drop * HEIGHT_UNIT_M,
+        # generide never builds inversions; kept so the fitted coefficients,
+        # which were estimated with this column present, stay unbiased.
+        "inversion_count": 0,
+    }
 
 
 def rate(stats: RideStats) -> RideRatings:
-    """Map ride stats to approximate excitement/intensity/nausea ratings."""
+    """Predict the excitement/intensity/nausea the game would assign.
+
+    This is a prediction, not a preference. The three ratings are computed
+    independently, the way the game computes them — there is deliberately no
+    "excitement collapses when intensity is high" term here. That behaviour is
+    a statement about which rides we *want*, not about what the game would say,
+    and it belongs in the fitness function. Folding it in here previously meant
+    a slightly-too-high intensity estimate silently destroyed a track's
+    excitement, which is what taught evolution to avoid speed and drops.
+
+    Accuracy is documented on RATING_WEIGHTS. In short: ranking is good, and
+    absolute values below roughly 3 read high because no shipped design lives
+    down there to calibrate against.
+    """
     w = RATING_WEIGHTS
+    features = rating_features(stats)
+    ratings = {}
+    for target in ("excitement", "intensity", "nausea"):
+        value = w[f"{target}_base"]
+        for feature in _RATING_FEATURES:
+            value += w[f"{target}_{feature}"] * features[feature]
+        ratings[target] = max(0.0, value)
 
-    intensity = (
-        w["intensity_base"]
-        + w["intensity_max_speed"] * stats.max_speed
-        + w["intensity_positive_g"] * max(0.0, stats.max_positive_g - 1.0)
-        + w["intensity_negative_g"] * max(0.0, -stats.max_negative_g)
-        + w["intensity_lateral_g"] * stats.max_lateral_g
-        + w["intensity_drop_height"] * stats.total_drop_height
-    )
-
-    nausea = (
-        w["nausea_base"]
-        + w["nausea_lateral_g"] * stats.max_lateral_g
-        + w["nausea_negative_g"] * max(0.0, -stats.max_negative_g)
-        + w["nausea_intensity"] * intensity
-    )
-
-    excitement = (
-        w["excitement_base"]
-        + w["excitement_max_speed"] * stats.max_speed
-        + w["excitement_avg_speed"] * stats.avg_speed
-        + w["excitement_drops"] * stats.drop_count
-        + w["excitement_drop_height"] * stats.total_drop_height
-        + w["excitement_airtime"] * stats.airtime
-        + w["excitement_length"] * stats.ride_length
-    )
-    if intensity > w["intensity_cap"]:
-        excitement -= (intensity - w["intensity_cap"]) * w["excess_penalty"]
-    if stats.max_lateral_g > w["lateral_g_cap"]:
-        excitement -= (stats.max_lateral_g - w["lateral_g_cap"]) * w["excess_penalty"]
-
-    return RideRatings(
-        excitement=max(0.0, excitement),
-        intensity=max(0.0, intensity),
-        nausea=max(0.0, nausea),
-    )
+    return RideRatings(**ratings)
