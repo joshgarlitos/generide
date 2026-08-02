@@ -4,6 +4,68 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-02 — Reading the format instead of guessing at it
+
+The job was to decode the ride statistics stored in the TD6 header: speed, ride length, g-forces, drops, drop height, air time. The game writes all of that in when it saves a design, and we had been ignoring it.
+
+The result matters less than the method, because I had already tried this the day before by inference and gotten two things wrong.
+
+### What guessing produced
+
+Yesterday I worked out the header layout by dumping six sample files and looking for byte patterns that moved sensibly. It felt convincing at the time. I found what looked like vertical g-force at 0x55 and 0x56, checked the values against two in-game screenshots, and told myself it was confirmed three ways.
+
+Two of those conclusions were wrong.
+
+Air time is at 0x4A, not in the 0x53 to 0x5A block where I had assumed the stats lived. And 0x57, which I had left as an unknown, is lateral g-force.
+
+The g-force scale was wrong too, and the way it was wrong is worth writing down. I had compared the g-force the game displayed for *our* generated ride against the byte stored in *Manic Miner's* file. Different rides. The numbers happened to line up, so I called it confirmation. It was a coincidence dressed as evidence.
+
+### What reading the source produced
+
+OpenRCT2 defines the file layout as a C++ struct, `TD6Track` in `src/openrct2/rct2/RCT2.h`. Every field carries its offset as a comment and the struct ends with `static_assert(sizeof(TD6Track) == 0xA3)`, which is the same 163-byte header we have been round-tripping since Phase 1. Ten minutes of reading settled every offset, including the two I had wrong.
+
+The scale factors were the other half. A stored byte of 62 means nothing until you know whether to divide by 10 or by 100. Those live in the T6 exporter and in `RCT12.h` as named constants: `kTD46RatingsMultiplier` is 10, `kTD46GForcesMultiplier` is 32, and the drop count is masked to its low six bits with `kRCT12RideNumDropsMask`.
+
+### How to check a conversion when you have no ground truth
+
+This is the part I want to remember, because it generalizes. A wrong scale factor produces numbers that look perfectly reasonable. There is no error, no exception, nothing to notice. So the question is how you check one without being able to see the right answer.
+
+Three things worked, and they are not equally strong.
+
+**Agreement between two unrelated derivations.** The shipped Manic Miner stores 70 in its drops byte. Masked the way the source says, that becomes 6. Our own physics model, which has never heard of the TD6 header, counts 6 drops walking that same track. Two routes to the same exact integer is the strongest check available, and it is the reason I believe the mask.
+
+**A physical floor the wrong answer violates.** Under the correct scale, the gentlest shipped rides report 0.96g as their maximum vertical g. That is the 1g of sitting still, which is exactly what a flat ride should report. Under the scale I had guessed, the same rides report 0.75g, and no ride can have a *maximum* below the force you feel not moving. The wrong answer is not merely unlikely, it is impossible, which is what makes this check decisive.
+
+**Ratio clustering, which is weaker than it looks.** Across five shipped designs we can simulate, our predicted top speed divided by the stored value times 2.25 mph lands between 1.05 and 1.10 every time. I was initially pleased with this. Then I noticed a wrong scale factor would also produce a tight cluster, just centred somewhere else. The clustering only tells me the relationship is linear and there are no outliers. What supports the scale is that the centre is near 1 rather than near 4. That is real evidence but it is softer than the other two, and the spec now says so.
+
+The distinction matters for the calibration work coming next. When I start fitting rating weights against a few hundred real designs, "the numbers look plausible" is going to be the failure mode again.
+
+### The one I did not finish
+
+Air time has a conversion in the exporter, `(runtime * 123 + 512) / 1024`, but that converts into a runtime unit I could not pin down, so I do not know how many seconds a stored value represents. The community documentation says multiply by four, which would give our test ride 40 seconds of airtime on a Mine Train. Not believable.
+
+So the field ships as a raw byte with no seconds conversion and a note explaining why. Shipping a number I could not defend would have been worse than shipping nothing, especially since the whole point of this exercise was to stop guessing.
+
+### A bug that fell out of widening the test
+
+Our round-trip test has always run against one fixture. Since I was touching the header, I ran it across all 204 designs the game ships instead. Only 139 came back byte-identical.
+
+Every difference is in track element flag bytes, and every one is in bits 3, 4, or 5. Our element decoder reads four things out of that byte and ignores those three bits, so the encoder writes them back as zeros. We have been quietly losing data on any design that uses them.
+
+I checked it was not mine by stashing the change and rerunning: 139 out of 204 before, 139 out of 204 after. Filed as issue #27 rather than folding it in.
+
+The fixture round-trips cleanly, which is why this survived since Phase 1. A single test file told us the round trip worked, and it did work, for that file.
+
+### The pattern, for the third time
+
+Yesterday I told Josh the biggest lever on this project was not the model or the tooling, it was that I keep guessing at things I could read. Then this issue demonstrated it in the first ten minutes.
+
+That is now three times. The header-gap trap in Phase 1, where the answer was in the file I already had. The completability split last week, where `create_simple_circuit` was sitting there as a counterexample the whole time. And now a format definition that is open source and searchable.
+
+The failure is not laziness. Each time, inference produced an answer that looked right, and looking right is enough to stop looking. The rule I want is narrower than "read the source", because I do read things. It is: when the cost of being quietly wrong is high and an authoritative definition exists, go get it before writing code on top of a guess.
+
+---
+
 ## 2026-08-01 — I put a ride in the game, and found out the fitness function was pointed backwards
 
 I built a generated coaster in OpenRCT2 and read what the game thought of it. That is the first ground truth this project has ever had. It went badly, then worse, and then it turned into the clearest path forward I have had in months.
