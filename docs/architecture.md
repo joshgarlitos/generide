@@ -78,7 +78,11 @@ Computes the 32-bit TD6 checksum over compressed file content using the RCT2 rol
 
 ### `rct2/td6.py`
 
-Defines `Ride`, `TrackElement`, and `Entrance`. It parses named header fields while retaining the raw header so unparsed bytes survive round trips. Scenery remains opaque. The primary file APIs are:
+Defines `Ride`, `TrackElement`, and `Entrance`. It parses named header fields while retaining the raw header so unparsed bytes survive round trips. Scenery remains opaque.
+
+Named fields include the ride stats the game measured on its own test lap: speeds, ride length, vertical and lateral g, inversions, drops, highest drop height, and total air time, alongside the three ratings. Properties convert the stored bytes into displayed units. Offsets and scale factors are taken from OpenRCT2's `TD6Track` struct and T6 exporter rather than inferred from sample files; the evidence for each is recorded in [phase1-spec.md](phase1-spec.md). Those stats are what make calibration possible without running the game, since any real exported design carries the ratings the game assigned it.
+
+The primary file APIs are:
 
 - `load(path) -> Ride`
 - `save(ride, path) -> None`
