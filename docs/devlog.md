@@ -4,6 +4,56 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-02 — What the AI was good at, and what it couldn't do at all
+
+This entry isn't about the coaster. It's about how I've been working, because the last two days made the division of labour clearer than anything else on this project has.
+
+The short version is that the agent generated an enormous amount of verification and almost none of it found anything, while the three things that actually mattered all came from outside the code.
+
+### The verification that didn't help
+
+Over two days the agent ran the fitness function across 403 generated tracks to prove a refactor was score-identical, round-tripped all 204 track designs the game ships, built an 82-track corpus to check the stall screen against the physics model, and ran A/B tests across dozens of seeds. All of that was fast, careful, and correct. Almost none of it found a real problem.
+
+It couldn't have. Every one of those checks was our code being compared against our code. The genetic algorithm was passing construction validation on 100% of runs while producing rides no train could finish. The fitness function was ranking coasters in exactly the reverse order the game does. The whole test suite was green the entire time, because the tests and the thing being tested shared the same wrong assumptions.
+
+That's the part I want to remember. An agent can produce internal consistency in unlimited quantity, and internal consistency tells you nothing about whether your model matches reality.
+
+### What did help
+
+Three things moved the project, and all three were contact with something outside our own code.
+
+I built a generated ride in OpenRCT2 and read the ratings window. That's what showed our excitement numbers were about 25 times too high and, worse, ranking rides backwards. It took two minutes.
+
+I looked at the station and said the platform was too short. That turned out to be a track piece we had defined and never once emitted, and chasing it flushed out two more bugs that had been sitting there for weeks.
+
+The agent read OpenRCT2's source instead of inferring the file format from samples. That fixed two byte offsets and a scale factor it had gotten wrong the day before while sounding certain.
+
+### On how sure it sounds
+
+The agent's confidence is least reliable exactly when it feels strongest, and the failure has a consistent shape: it does some inference, gets a tidy answer, and the tidiness reads as knowledge.
+
+The clearest example was the g-force scale. It told me the value was "confirmed three independent ways." What it had actually done was compare the g-force the game displayed for *our* ride against the byte stored in *Manic Miner's* file. Two different rides. The numbers happened to land close together and it stopped looking.
+
+So I've stopped reading confidence as a signal. What I read instead is whether it showed me a number that came from outside the code it was writing. A source citation, a screenshot from the game, a second derivation that doesn't share a code path with the first. When it says "verified" and the verification is its own code agreeing with its own code, that's not evidence.
+
+The agent itself put the useful version of this well, when it graded its own checks by strength: two unrelated derivations landing on the same integer is strong, a physical floor that the wrong answer violates is strong, and a tight cluster of ratios is weaker than it looks because a wrong answer clusters too.
+
+### Where it was genuinely good
+
+Once I handed it a real data point, it was fast. From one screenshot it found the inversion, traced it back to the g-force model as the root cause, remembered the template file had stored ratings in it, found 204 more of them on my disk, and read the format spec to decode them. That's a lot of ground in one sitting, and it's exactly the kind of work where breadth and speed pay.
+
+It was also good at things that are tedious enough that I'd have skipped them. Running the round trip against 204 files instead of the one fixture, which is how the element flag data loss surfaced. Tracing a station-handling assumption through three separate call sites. Re-deriving every number in a pull request description instead of taking them on trust.
+
+So the split isn't the one I expected, where the machine does the boring parts and I do the clever ones. It's that the agent is quick inside a set of assumptions and structurally can't check the assumptions. Putting the thing in front of reality is the part I can't delegate.
+
+### What I'd change
+
+Front-load the reality check. Everything the agent built before I put a ride in the game was optimizing against a broken objective, and no amount of its testing would have caught that, because the objective and the tests agreed with each other. On this project that means a generated ride running in OpenRCT2 should gate further fitness work, not follow it.
+
+The other thing worth naming is the category of decision where there's no fact to look up. Station length of 6 tiles was a judgment call and there's no derivation that produces it. Same with where the file belongs on disk, and with telling it that its explanations were hard to follow. It didn't push back on any of those, which was right. When there's no correct answer to find, it shouldn't be the one deciding.
+
+---
+
 ## 2026-08-02 — Reading the format instead of guessing at it
 
 The job was to decode the ride statistics stored in the TD6 header: speed, ride length, g-forces, drops, drop height, air time. The game writes all of that in when it saves a design, and we had been ignoring it.
