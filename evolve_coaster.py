@@ -136,6 +136,22 @@ def main():
         help="Fitness function: geometric proxy or physics simulation (default: proxy)",
     )
     parser.add_argument(
+        "--max-width",
+        type=int,
+        default=30,
+        help=(
+            "Maximum track footprint width in tiles (default: 30). Footprints "
+            "may be rotated to fit, so this and --max-depth are interchangeable "
+            "rather than a fixed orientation."
+        ),
+    )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=30,
+        help="Maximum track footprint depth in tiles (default: 30)",
+    )
+    parser.add_argument(
         "--target-excitement",
         type=str,
         default=None,
@@ -234,9 +250,11 @@ def main():
             targets = RatingTargets(
                 excitement=windows[0], intensity=windows[1], nausea=windows[2],
             )
-        fitness_fn = PhysicsFitness(targets=targets)
+        fitness_fn = PhysicsFitness(
+            targets=targets, max_width=args.max_width, max_depth=args.max_depth,
+        )
     else:
-        fitness_fn = ProxyFitness()
+        fitness_fn = ProxyFitness(max_width=args.max_width, max_depth=args.max_depth)
 
     # Progress callback
     def progress(gen, pop):
@@ -288,7 +306,9 @@ def main():
         )
 
     # Validate the best track
-    result = validate_construction(best.segments)
+    result = validate_construction(
+        best.segments, max_width=args.max_width, max_depth=args.max_depth,
+    )
     if result.valid:
         print("  Validation: PASSED")
     else:
