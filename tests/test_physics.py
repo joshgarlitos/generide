@@ -1,12 +1,17 @@
 """Tests for the approximate physics simulation."""
 
 import math
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from rct2 import physics
-from rct2.physics import RideStats, rate, segment_length, simulate
+from rct2.calibration import read_csv
+from rct2.physics import RATING_WEIGHTS, RideStats, rate, segment_length, simulate
 from rct2.segments import SEGMENTS
+
+CALIBRATION = Path(__file__).parent.parent / "data" / "calibration.csv"
 
 FLAT = 0x00
 UP_START = 0x06  # flat_to_25_deg_up
@@ -103,33 +108,103 @@ def test_unknown_segment_does_not_crash():
 
 
 def test_rate_monotonicity():
+    """A bigger hill rates higher, with no cap to work around.
+
+    This test used to need its hills kept small so they stayed under an
+    intensity cap that would otherwise slash excitement. That coupling is gone
+    from `rate` — it predicts what the game would say, and the game rates the
+    three independently — so the caveat no longer applies.
+    """
     base = simulate(make_hill(5, 5) + [FLAT], lift_indices=set(range(7)))
-    # Keep the bigger hill below the intensity cap; past the cap the rating
-    # model intentionally slashes excitement.
     bigger = simulate(make_hill(8, 8) + [FLAT], lift_indices=set(range(10)))
     assert rate(bigger).excitement > rate(base).excitement
     assert rate(bigger).intensity > rate(base).intensity
 
 
-def test_excessive_intensity_slashes_excitement():
+def test_excitement_is_independent_of_intensity():
+    """Cranking intensity must not move excitement.
+
+    The old model subtracted from excitement once intensity passed a cap. On
+    uncalibrated intensity readings that fired on essentially every real
+    coaster, so evolution learned that speed and drops were dangerous. Steering
+    away from punishing rides is a preference and now lives in PhysicsFitness;
+    `rate` only predicts.
+    """
     stats = simulate(make_hill(10, 10) + [FLAT], lift_indices=set(range(12)))
-    normal = rate(stats)
-    wild = RideStats(
-        max_speed=stats.max_speed,
-        avg_speed=stats.avg_speed,
-        ride_length=stats.ride_length,
-        ride_time=stats.ride_time,
-        drop_count=stats.drop_count,
-        total_drop_height=stats.total_drop_height,
-        highest_drop=stats.highest_drop,
-        max_positive_g=6.0,
-        max_negative_g=-3.0,
-        max_lateral_g=5.0,
-        airtime=stats.airtime,
-        completed=True,
-        stall_index=None,
+    baseline = rate(stats)
+
+    # Same ride, but with g-forces that would have blown past the old cap.
+    violent = replace(stats, max_positive_g=6.0, max_negative_g=3.0, max_lateral_g=5.0)
+    extreme = rate(violent)
+
+    assert extreme.intensity > baseline.intensity
+    assert extreme.nausea > baseline.nausea
+    # Excitement responds to its own terms, never to intensity's magnitude.
+    expected = (
+        baseline.excitement
+        + RATING_WEIGHTS["excitement_max_positive_vertical_g"]
+        * (6.0 - stats.max_positive_g)
+        + RATING_WEIGHTS["excitement_max_negative_vertical_g"]
+        * (-3.0 - -abs(stats.max_negative_g))
+        + RATING_WEIGHTS["excitement_max_lateral_g"] * (5.0 - stats.max_lateral_g)
     )
-    extreme = rate(wild)
-    assert extreme.intensity > normal.intensity
-    assert extreme.nausea > normal.nausea
-    assert extreme.excitement < rate(stats).excitement + extreme.intensity
+    assert extreme.excitement == pytest.approx(expected, abs=1e-9)
+
+
+def test_negative_vertical_g_is_fed_to_the_model_as_a_signed_value():
+    """RideStats stores a magnitude; the fitted weights expect a signed value.
+
+    152 of the 204 calibration designs carry a negative value here and the
+    fitted coefficient is one of the largest in the model, so passing the
+    magnitude through unchanged would invert a real term rather than just
+    rescale it.
+    """
+    stats = simulate(make_hill(6, 6) + [FLAT], lift_indices=set(range(8)))
+    airborne = replace(stats, max_negative_g=1.5)
+
+    assert physics.rating_features(airborne)["max_negative_vertical_g"] == -1.5
+    # Sign convention aside, more airtime must read as more intense.
+    assert rate(airborne).intensity > rate(replace(stats, max_negative_g=0.0)).intensity
+
+
+def test_calibrated_weights_reproduce_a_real_ride_from_the_game_s_own_stats():
+    """Pin the fit's quality against ground truth.
+
+    Feeding the game's own measured stats for Manic Miner through the weights
+    should land near the rating the game actually assigned it (6.1 excitement).
+    This isolates the rating model from our physics: if this test passes and a
+    simulated prediction is still off, the error is in `simulate`, not here.
+    """
+    row = next(
+        r for r in read_csv(CALIBRATION) if r.name == "Manic Miner"
+    )
+    features = {
+        "max_speed_mph": row.max_speed_mph,
+        "average_speed_mph": row.average_speed_mph,
+        "ride_length_m": row.ride_length_m,
+        "max_positive_vertical_g": row.max_positive_vertical_g,
+        "max_negative_vertical_g": row.max_negative_vertical_g,
+        "max_lateral_g": row.max_lateral_g,
+        "drop_count": row.drop_count,
+        "highest_drop_height_m": row.highest_drop_height_m,
+        "inversion_count": row.inversion_count,
+    }
+
+    def predict(target):
+        value = RATING_WEIGHTS[f"{target}_base"]
+        for name in physics._RATING_FEATURES:
+            value += RATING_WEIGHTS[f"{target}_{name}"] * features[name]
+        return value
+
+    assert predict("excitement") == pytest.approx(row.excitement, abs=0.5)
+    assert predict("intensity") == pytest.approx(row.intensity, abs=1.0)
+
+
+def test_ratings_never_go_negative():
+    """A track with nothing going on floors at zero rather than going negative."""
+    nothing = simulate([0x02, 0x01] + [0x00] * 4)
+    ratings = rate(nothing)
+
+    assert ratings.excitement >= 0.0
+    assert ratings.intensity >= 0.0
+    assert ratings.nausea >= 0.0
