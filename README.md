@@ -66,16 +66,27 @@ Generate the hand-authored test circuit:
 python generate_coaster.py simple_coaster.td6
 ```
 
-Run the genetic algorithm and export its best valid track:
+Evolve a coaster and export the best track found:
 
 ```bash
 python evolve_coaster.py \
-  --generations 100 \
+  --fitness physics \
+  --generations 150 \
   --population 50 \
   --rng-seed 123 \
-  --verbose \
   --output evolved.td6
 ```
+
+`--fitness physics` scores candidates on simulated ride stats (speed, drops, g-forces) rather than track geometry alone, and is the setting that produces rides with actual drops instead of flat loops. Expect this to take one to two minutes; shorter runs (fewer generations, smaller population) finish faster but tend to settle on shorter, tamer tracks. Reruns with the same `--rng-seed` reproduce the same track exactly, so a seed worth keeping is worth writing down.
+
+A few flags worth knowing:
+
+- `--rng-seed N` — reproduce a specific run. Omit it for a random seed, which the CLI prints so you can rerun it later.
+- `--station-length N` — platform length in tiles (default 6, minimum 2). Only applies to the generated seed circuit, not a `--seed <path>` track.
+- `--target-excitement MIN:MAX`, `--target-intensity MIN:MAX`, `--target-nausea MIN:MAX` — with `--fitness physics`, aim for a specific rating range instead of maximizing excitement, e.g. `--target-intensity 4:7`. Our rating model is not yet calibrated against the game's real ratings (see the roadmap), so treat these as rough knobs rather than exact targets for now.
+- `--verbose` — print progress each generation.
+
+Run `python evolve_coaster.py --help` for the full list.
 
 Both commands use `data/sample_rides/manic_miner_test.td6` as a template for the Mine Train vehicle and header data. To use the result, copy the generated file into OpenRCT2's `track` folder, restart the game if it is already open, then start a Mine Train ride and pick the design from the Track Designs menu. The designs are saved against that ride type, so they will not show up under any other coaster.
 
