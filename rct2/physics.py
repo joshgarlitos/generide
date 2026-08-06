@@ -26,7 +26,6 @@ GRAVITY = 9.81
 FRICTION_COEFF = 0.01  # rolling friction deceleration per meter, as fraction of g
 LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
 MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
-DROP_THRESHOLD_UNITS = 3  # minimum descent (height units) to count as a drop
 BANK_LATERAL_CREDIT = 0.67  # lateral g absorbed by a banked turn
 
 # G-force is linear in speed, not speed-squared over a geometric radius.
@@ -174,6 +173,7 @@ def simulate(
     elevation = 0
     slope_state = "flat"
     descent_run = 0
+    in_drop = False
     drop_count = 0
     total_drop_height = 0.0
     highest_drop = 0.0
@@ -217,22 +217,30 @@ def simulate(
                 lateral_g = max(0.0, lateral_g - BANK_LATERAL_CREDIT)
             max_lateral_g = max(max_lateral_g, lateral_g)
 
-        # Drop tracking: accumulate contiguous descent in height units.
+        # Drop tracking: OpenRCT2 counts a drop the moment the train enters a
+        # run of downward-sloped elements (Vehicle.cpp's testing-flags walk),
+        # with no minimum height -- there is no threshold to clear. The run
+        # ends as soon as a non-downward element interrupts it, so a flat
+        # plateau partway down a hill splits one geometric descent into two
+        # counted drops (see issue #33: a 2-unit descent, a flat stretch, then
+        # an 8-unit descent reads as 2 drops in the game, not 1).
         if segment.elevation_delta < 0:
             descent_run += -segment.elevation_delta
-        else:
-            if descent_run >= DROP_THRESHOLD_UNITS:
+            if not in_drop:
                 drop_count += 1
+                in_drop = True
+        else:
+            if descent_run > 0:
                 total_drop_height += descent_run
                 highest_drop = max(highest_drop, descent_run)
             descent_run = 0
+            in_drop = False
         elevation += segment.elevation_delta
 
         speed = exit_speed
         max_speed = max(max_speed, speed)
 
-    if descent_run >= DROP_THRESHOLD_UNITS:
-        drop_count += 1
+    if descent_run > 0:
         total_drop_height += descent_run
         highest_drop = max(highest_drop, descent_run)
 
