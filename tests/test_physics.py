@@ -208,3 +208,69 @@ def test_ratings_never_go_negative():
     assert ratings.excitement >= 0.0
     assert ratings.intensity >= 0.0
     assert ratings.nausea >= 0.0
+
+
+FIXTURE = Path(__file__).parent.parent / "data" / "sample_rides" / "manic_miner_test.td6"
+
+
+def test_gforce_model_matches_the_real_fixture_within_a_stated_tolerance():
+    """The committed regression check for the velocity-linear g-force model.
+
+    The fitted coefficients (GFORCE_VERTICAL_COEFF, GFORCE_LATERAL_COEFF) come
+    from 6 real designs read from a local game install, which isn't something
+    this test can load -- those .td6 files aren't committed, only the fit's
+    result is. This fixture is what's actually checked in, and it was not
+    part of the fit, so matching it is real evidence the coefficients
+    generalize rather than just memorizing the 6 they were tuned on.
+
+    Real values (from the fixture's own TD6 header, which is a real game
+    export): +g=2.56, -g=-0.64, lateral=1.28. Tolerances match the residuals
+    documented on GFORCE_VERTICAL_COEFF -- this is not a tight equality
+    check, because the model is still an approximation, just no longer one
+    that's wrong by a factor of 2-4x.
+    """
+    from rct2 import td6
+
+    ride = td6.load(FIXTURE)
+    segments = [element.segment_type for element in ride.elements]
+    lifts = {index for index, element in enumerate(ride.elements) if element.chain_lift}
+
+    stats = simulate(segments, lift_indices=lifts)
+
+    assert stats.max_positive_g == pytest.approx(2.56, abs=0.5)
+    assert stats.max_negative_g == pytest.approx(-0.64, abs=0.5)
+    assert stats.max_lateral_g == pytest.approx(1.28, abs=0.6)
+
+    # The old v^2/(radius*g) model landed at +g=5.01, -g=-2.25, lat=5.05 on
+    # this exact fixture -- 2x to 4x high. Pin that the new model is not
+    # merely closer by coincidence but is decisively inside the old model's
+    # error band.
+    assert stats.max_positive_g < 3.5
+    assert stats.max_lateral_g < 2.5
+
+
+def test_gforce_is_linear_in_speed_not_quadratic():
+    """Confirms the functional form, not just the fitted constants.
+
+    OpenRCT2's real Vehicle::GetGForces() adds `velocity * 98 / factor` -- speed
+    to the first power. Doubling the speed through an identical transition
+    should double the dynamic (non-gravity) contribution exactly, not
+    quadruple it. Tests `_vertical_g` directly rather than through `simulate`,
+    since the full energy pipeline confounds entry speed with everything
+    downstream of it (friction is a flat per-segment cost, not proportional
+    to speed, so entry speed and speed-at-a-later-segment aren't linearly
+    related even though the g-force formula itself is linear in speed).
+    """
+    prev_angle = 0.0
+    angle = math.radians(25)
+    length_m = 3.0
+
+    slow_g = physics._vertical_g(prev_angle, angle, 5.0, length_m)
+    fast_g = physics._vertical_g(prev_angle, angle, 10.0, length_m)
+
+    base = math.cos(angle)
+    slow_dynamic = slow_g - base
+    fast_dynamic = fast_g - base
+
+    assert slow_dynamic > 0
+    assert fast_dynamic == pytest.approx(slow_dynamic * 2, rel=1e-9)

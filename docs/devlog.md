@@ -4,6 +4,50 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-02 — The g-force model was solving the wrong physics problem
+
+Fixing the g-force overestimate turned out not to be a calibration problem. It was a modeling problem: we were computing real centripetal physics for a game that does not use real centripetal physics.
+
+### What the old model did
+
+Vertical g through a slope transition was `v²/(radius·g)`, with the radius derived from a single track piece's own tile length and its angle change. Standard mechanics. On a real ride it read two to four times too high, and not by a consistent ratio, which ruled out a simple scale-factor fix. The two designs closest to flat were nearly exact; the ones with real hills were the worst offenders.
+
+### What the game actually does
+
+I pulled OpenRCT2's real `Vehicle::GetGForces()` from source instead of continuing to guess at the shape of the error. It is:
+
+```cpp
+gForceVert += abs(velocity) * 98 / vertFactor;
+```
+
+Velocity to the first power, not the second. `vertFactor` is a lookup value that varies continuously through each track piece, baked into the game's original 1999 data per piece type. There is no radius anywhere in it.
+
+So the old model wasn't a bad estimate of the right thing. It was a correct implementation of the wrong thing. RCT2's ride physics were built from measurement and hand-tuning, not from a coaster textbook, and no amount of scaling a `v²` term was ever going to fit a `v¹` game.
+
+### The fix, and what it needed
+
+We don't have the real `vertFactor` tables. Extracting them would mean pulling per-piece, per-progress values for dozens of track types, well past the scope of this fix. So the fix keeps our own geometric shape factor (angle change over arc length, doing the job `vertFactor` does in the real game) but corrects the exponent: linear in speed, with a constant fitted against real designs standing in for the game's own per-piece constant.
+
+Fitting needs real segment lists, which narrows the calibration set hard: only 7 of the 204 shipped designs use exclusively pieces our segment table knows, and one of those seven had to come back out. Doubledrop's real export carries zero chain-lift indices, our simulation nearly stalls it climbing out of the station as a result, and a corrupted speed trace would have quietly bent the fit to explain an unrelated bug. Six designs and eighteen numbers (three g-axes each) is what the fit actually rests on.
+
+I found the exclusion by generalization-checking rather than assuming it was safe. Before trusting the fitted constant, I ran it against `manic_miner_test.td6`, the one design that's actually committed to this repo and was not part of the fit at all. It landed within the same error band as the six it was tuned on, which is the evidence that mattered: a coefficient that only reproduces its own training data proves nothing.
+
+### The bug the check caught
+
+Partway through, the fixture check disagreed badly with the fit on lateral g — predicted three times the real value on a ride the coefficient should have handled well. Tracing it down, my fitting script read `Ride.max_lateral_g`, which is the *raw stored byte*, not `max_lateral_g_force`, the converted value. I had fit a coefficient against integers like 4 and 5 as though they were already g-forces. Checking against a second, independent source of truth is what surfaced it. Fitting against the seven designs alone would have looked internally consistent and been wrong in exactly the silent way a bad scale factor always is.
+
+### Where it landed
+
+Against the six real designs in the fit: positive vertical g within about 0.2g (was 2-4x high), lateral g within about 0.5g (was 3-4x high). Negative vertical g improved from being 2-6x too deep to about 0.3-0.4g too shallow, better, but the one axis still visibly off, and left that way rather than chased further on a six-design sample.
+
+Checked against our own rides, which were no part of any fit: v6's positive g went from 2.94g predicted (37% high) to 1.92g (11% low) against a real 2.15g.
+
+### What's still not fixed
+
+Negative g's remaining gap, and the segment-vocabulary limit that held this fit to six designs. More of our own rides measured in-game is what would let this get tighter, same as every other calibration effort this week — the game doesn't ship rides in the range ours occupy, and it doesn't ship us a wider variety of track pieces than 46 of them either, at least not ones we can read yet.
+
+---
+
 ## 2026-08-02 — Fitting the rating model, and finding out where the data runs out
 
 The rating weights are now fitted against 204 real track designs instead of being nine numbers somebody typed once. The headline number: ranking correlation against the game's real ratings went from 0.45 to 0.87 for excitement. But the more useful finding is where the fit stops working, and why.

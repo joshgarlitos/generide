@@ -9,8 +9,8 @@ Unit conventions:
   height units (a 25-degree slope climbs 2 units per tile, 60-degree climbs 8).
 - The simulation converts once at the boundary and runs in meters/seconds:
   TILE_M meters per tile, HEIGHT_UNIT_M meters per height unit.
-- Rating multipliers in RATING_WEIGHTS are placeholders to be calibrated
-  against headless OpenRCT2 runs in a later phase.
+- Rating multipliers in RATING_WEIGHTS are fitted against real designs; see
+  the constant's own docstring for the fit and its limits.
 """
 
 import math
@@ -28,6 +28,44 @@ LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
 MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
 DROP_THRESHOLD_UNITS = 3  # minimum descent (height units) to count as a drop
 BANK_LATERAL_CREDIT = 0.67  # lateral g absorbed by a banked turn
+
+# G-force is linear in speed, not speed-squared over a geometric radius.
+#
+# OpenRCT2's real Vehicle::GetGForces() (src/openrct2/ride/Vehicle.cpp) computes:
+#
+#   gForceVert += abs(velocity) * 98 / vertFactor
+#   gForceLateral += abs(velocity) * 98 / lateralFactor
+#
+# where vertFactor/lateralFactor come from a per-track-piece, per-progress
+# lookup table baked into the game's original 1999 data -- not derived from
+# geometry. We don't have those tables, so this keeps our own geometric shape
+# factor (angle change over arc length, in place of vertFactor's role) but
+# fixes the functional form to match: velocity to the first power, and a
+# fitted constant standing in for "98 / vertFactor".
+#
+# The earlier v^2/(radius*g) form was real centripetal physics, which is not
+# what RCT2 calculates. It overestimated positive vertical g by 2-4x, non-
+# uniformly (1.04x on gentle rides, 3x+ on steep ones), which is why a scale
+# factor could not have fixed it — the error scaled with the very term whose
+# exponent was wrong.
+#
+# Fitted by least squares against the 6 of 7 real designs simulatable end to
+# end (our segment table doesn't yet cover every piece type real designs use;
+# see issue #25) with every segment type known. A 7th, Doubledrop, was
+# excluded: its real export carries zero chain-lift indices, our simulation
+# nearly stalls it on the opening climb as a result, and the corrupted speed
+# profile from that stall would have biased the fit for an unrelated reason.
+#
+# Residual error against the 6-design fit set, and independently against
+# data/sample_rides/manic_miner_test.td6 (not part of the fit):
+#   positive vertical g: within ~0.2g          (was 2-4x high)
+#   lateral g:           within ~0.5g           (was 3-4x high)
+#   negative vertical g: systematically ~0.3-0.4g too shallow (was 2-6x deep)
+# Negative g (airtime/crests) is the visible remaining gap. It was not chased
+# further here because the fit set is already small (6 designs); narrowing it
+# needs more real designs, which needs #25 first.
+GFORCE_VERTICAL_COEFF = 0.56393
+GFORCE_LATERAL_COEFF = 0.44517
 
 # Slope state names from construction.slope_state_at mapped to track angle.
 _SLOPE_ANGLE_RAD = {
@@ -100,17 +138,18 @@ def _vertical_g(
 ) -> float:
     """Vertical g felt through a slope transition.
 
-    Approximates the transition as an arc spanning this segment's length:
-    a valley (angle increasing) adds centripetal g, a crest subtracts it.
-    This is the crudest part of the model and the first calibration target.
+    A valley (angle increasing) adds to the base gravity term, a crest
+    subtracts. Linear in speed rather than speed-squared over a geometric
+    radius -- see GFORCE_VERTICAL_COEFF's docstring for why, and for the
+    fit this constant comes from.
     """
     base = math.cos(angle)
     dtheta = angle - prev_angle
     if dtheta == 0 or length_m <= 0:
         return base
-    radius = length_m / abs(dtheta)
-    centripetal = speed_ms**2 / (radius * GRAVITY)
-    return base + math.copysign(centripetal, dtheta)
+    shape = abs(dtheta) / length_m
+    dynamic = GFORCE_VERTICAL_COEFF * speed_ms * shape
+    return base + math.copysign(dynamic, dtheta)
 
 
 def simulate(
@@ -172,7 +211,8 @@ def simulate(
         prev_angle = angle
 
         if geometry.radius_m is not None:
-            lateral_g = mean_speed**2 / (geometry.radius_m * GRAVITY)
+            # Linear in speed, same reasoning as the vertical term above.
+            lateral_g = GFORCE_LATERAL_COEFF * mean_speed / geometry.radius_m
             if seg_id in _BANKED_TURNS:
                 lateral_g = max(0.0, lateral_g - BANK_LATERAL_CREDIT)
             max_lateral_g = max(max_lateral_g, lateral_g)
