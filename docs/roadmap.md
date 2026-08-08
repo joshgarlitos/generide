@@ -40,7 +40,7 @@ Half of the answer is built. `rct2/physics.py` walks the track with an energy-me
 
 The other half is missing, and it is the half that makes the numbers mean anything. The mapping from stats to ratings uses placeholder weights that no one has checked against the game. Ratings in RCT2 are not a function of the track layout alone; the game runs a test lap and derives them from what it observes, so reproducing them in Python means reproducing the physics too, and keeping it in sync with a game that is still being developed.
 
-So the plan is a hybrid. The cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. The game's headless mode and plugin API should make it possible to place a track, run the test, and read the ratings back without automating the UI. Known rides from `data/sample_rides/` give me a way to check both against reality. The first useful measurement is small: load one evolved track in the game and see how far the placeholder ratings sit from the real ones.
+So the plan is a hybrid. The cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. That is no longer a guess: the spike in [headless-oracle-spike.md](headless-oracle-spike.md) confirmed a plugin can build a ride and read the game's own ratings back with no UI automation, and measured the cost at roughly 4 seconds per evaluation. That price is what makes the split mandatory rather than merely convenient — 4 seconds is unaffordable for every individual in a run and trivial for the handful of finalists.
 
 Once that works, a user will be able to request something like:
 
@@ -73,6 +73,7 @@ Presentation can grow too: names, colors, scenery, and batches of different fina
 | Validator-driven mutation across the full piece vocabulary | Complete |
 | Approximate physics simulation and ride stats | Complete |
 | Completability separated from buildability | Complete |
+| Headless OpenRCT2 oracle feasibility spike | Complete |
 | Calibrate ratings against headless OpenRCT2 | Next |
 | Track renderer and per-run plots | Planned |
 | Accept a request with footprint and rating targets | Planned |
