@@ -2,9 +2,9 @@
 
 ## The vision
 
-In **generide**, I am building a tool that generates roller coasters for RollerCoaster Tycoon based on parameters such as the space the ride needs to fit within, the ride ratings I want it to hit (such as its level of excitement), and a target cost range. The generated coaster should work in the game.
+In **generide**, I am building a tool that generates roller coasters for RollerCoaster Tycoon to a request set at generation time, not to a fixed target baked into the code: the footprint the ride has to fit within, target ranges for excitement/intensity/nausea, and a target cost range. Each of those is a parameter I can set tighter, looser, or leave open, per request. The generated coaster should work in the game regardless of what was asked for.
 
-The game scores rides for excitement, intensity, and nausea. The goal is not to create the biggest possible numbers. It is to generate a ride within a requested range, such as exciting but not painfully intense, while keeping it inside a specific plot of land.
+The game scores rides for excitement, intensity, and nausea. The goal is not to create the biggest possible numbers, and it is not to hit one specific number either. It is to generate a ride inside whatever ranges that request specifies, such as exciting but not painfully intense, while keeping it inside whatever plot of land was given.
 
 ## What works today
 
@@ -42,7 +42,7 @@ The other half is missing, and it is the half that makes the numbers mean anythi
 
 So the plan is a hybrid. The cheap physics approximation scores every track during evolution, and OpenRCT2 running headless acts as the source of truth for the best candidates. That is no longer a guess: the spike in [headless-oracle-spike.md](headless-oracle-spike.md) confirmed a plugin can build a ride and read the game's own ratings back with no UI automation, and measured the cost at roughly 4 seconds per evaluation. That price is what makes the split mandatory rather than merely convenient — 4 seconds is unaffordable for every individual in a run and trivial for the handful of finalists.
 
-Once that works, a user will be able to request something like:
+Once that works, a user will be able to hand generide a request shaped like this — one example of an unlimited range of them, not a spec the code targets:
 
 ```text
 Fit inside 18 x 15 tiles
@@ -51,7 +51,7 @@ Intensity below 8
 Nausea below 5
 ```
 
-The algorithm can then evolve toward a specific kind of ride instead of a vague idea of "more coaster."
+Change any number, drop a range entirely, shrink the footprint — the request is the input, not a constant. The algorithm evolves toward whatever that request says instead of a vague idea of "more coaster."
 
 ## Later: make the results richer
 
@@ -76,4 +76,4 @@ Presentation can grow too: names, colors, scenery, and batches of different fina
 | Headless OpenRCT2 oracle feasibility spike | Complete |
 | Calibrate ratings against headless OpenRCT2 | Next |
 | Track renderer and per-run plots | Planned |
-| Accept a request with footprint and rating targets | Planned |
+| Accept a request with footprint and rating targets | Complete |

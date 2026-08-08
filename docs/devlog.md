@@ -27,6 +27,54 @@ That puts a test lap on a ~30 in-game-second ride at about 4 seconds wall clock.
 Ratings come back x100 from the plugin API (652 is 6.52) and x10 from TD6 headers, where our own `RATING_PER_UNIT` is 0.1. Comparing the two without converting yields a clean 10x error that would read as a modeling failure rather than a units bug — the same shape as the `max_lateral_g` raw-byte mistake during #23, which is why it is called out in the doc.
 
 And an unrated ride reports excitement `-1`, not 0. Feeding that into fitness unconverted would score an untested track as merely slightly bad rather than unmeasured.
+## 2026-08-08 — First in-game reading of a CoasterRequest-targeted ride
+
+Ran the new `CoasterRequest` path end to end and loaded the result in the actual game, not just through the simulator:
+
+```
+python evolve_coaster.py --fitness physics --max-width 15 --max-depth 15 \
+  --target-excitement 5:7 --target-intensity 0:8 --target-nausea 0:5 \
+  --generations 150 --population 60 --rng-seed 42 --output my_ride.td6
+```
+
+The physics-level stats held up well:
+
+| Stat | Predicted | Game |
+|---|---|---|
+| Max speed | 17.5 mph | 18 mph |
+| Drops | 2 | 2 |
+| Airtime | 0.0s | 0.00s |
+| Lateral g | 0.76 | 1.37g |
+
+Drop count matching exactly is the #33 fix showing up in a real ride, not just a fixture test. Lateral g is off by more than the ~0.5g residual documented for #23's fit set, but that fit was tuned on 6 real designs, not a track this short and slow, so it's outside the range that fit was ever checked against.
+
+The ratings were not close:
+
+| Rating | Predicted | Game |
+|---|---|---|
+| Excitement | 3.91 | 0.25 |
+| Intensity | 3.49 | 0.28 |
+| Nausea | 2.77 | 0.19 |
+
+This is not a new failure. It is the exact gap `RATING_WEIGHTS` already documents: the 204-design calibration set bottoms out at 0.3 excitement, this ride scored 0.25, and below the fitted range the model reads roughly 2-4 points high. It does here too, on all three ratings, within about half a point of that stated bound.
+
+One reading is not enough to refit anything — the same section notes four prior in-game anchors barely moved a 204-row fit — but it is a second confirmation, on a target-range-driven ride rather than an open-ended one, that the actual gap is in `rate()`'s extrapolation below the shipped range, not in `simulate()`'s physics. That is the case #6 (headless OpenRCT2 as oracle) exists to close: enough of these readings to matter, gathered automatically instead of one manual load at a time.
+
+---
+
+## 2026-08-06 — A request is an object now, not scattered CLI flags
+
+Issue #5 asked for a `CoasterRequest`: footprint, excitement/intensity/nausea ranges, cost range, all optional. Most of the scoring behind it already existed — `RatingTargets` and `PhysicsFitness`'s distance-from-window scoring landed earlier without anyone calling it that. What was missing was the object itself: one thing a caller builds that carries "what ride do I want" from the CLI into fitness, instead of five separate arguments that happened to line up.
+
+`CoasterRequest` lives in `rct2/fitness.py` next to `RatingTargets`, and `PhysicsFitness.from_request()` builds a fitness function from one. `evolve_coaster.py` now constructs a `CoasterRequest` from its parsed args and hands it to `from_request` rather than assembling `RatingTargets` inline — the CLI is a caller of the same API a script would use, not a special case.
+
+### The one field that doesn't do anything
+
+`cost` is on the dataclass because the roadmap's vision names a cost range as part of the request. It is not scored. There is no per-piece price data anywhere in this codebase to score it against, and estimating one wasn't in scope here. `PhysicsFitness.from_request` silently ignores it rather than raising, which is worth being honest about: a caller who sets `request.cost` and expects it to shape evolution will not get that. Documented on the dataclass itself so it's visible at the point someone would reach for the field, not just here.
+
+### What actually needed proving
+
+The acceptance criteria wanted more than the dataclass compiling — "an evolution run constrained to a footprint produces a track that fits it" is a claim about selection pressure, not construction. `ProxyFitness` already penalizes out-of-bounds tracks per excess tile, but nothing before this checked that penalty was strong enough, over real generations of mutation and crossover, to actually hold a population inside a tight footprint rather than just discourage wandering past it. Ran it — 12x12 against a seed that starts well inside that box — across five RNG seeds before trusting it as a regression test, since one seed passing proves less than it feels like it does.
 
 ---
 

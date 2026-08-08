@@ -306,6 +306,41 @@ class RatingTargets:
     nausea: Optional[Tuple[float, float]] = None
 
 
+@dataclass
+class CoasterRequest:
+    """What a user actually asks for: a footprint plus optional target ranges.
+
+    This is the single object a request travels through, from CLI arguments
+    to fitness. Every range is optional -- an unset range leaves that axis
+    unconstrained rather than targeting a specific value, matching the
+    project's vision of a request the caller shapes per-run rather than a
+    fixed spec baked into the code (see docs/roadmap.md).
+
+    `cost` exists for the shape of the request the roadmap describes, but
+    nothing in this codebase estimates a track's build cost yet -- there is
+    no per-piece price data to score it against. `PhysicsFitness.from_request`
+    ignores it rather than pretending to honor it; revisit once a cost model
+    exists.
+    """
+
+    max_width: int = 30
+    max_depth: int = 30
+    excitement: Optional[Tuple[float, float]] = None
+    intensity: Optional[Tuple[float, float]] = None
+    nausea: Optional[Tuple[float, float]] = None
+    cost: Optional[Tuple[float, float]] = None
+
+    def rating_targets(self) -> Optional["RatingTargets"]:
+        """The RatingTargets PhysicsFitness expects, or None if nothing is set."""
+        if self.excitement is None and self.intensity is None and self.nausea is None:
+            return None
+        return RatingTargets(
+            excitement=self.excitement,
+            intensity=self.intensity,
+            nausea=self.nausea,
+        )
+
+
 def _window_distance(value: float, window: Optional[Tuple[float, float]]) -> float:
     """Linear distance outside a (min, max) window; 0 when inside or unset."""
     if window is None:
@@ -346,6 +381,19 @@ class PhysicsFitness:
         self.nausea_ceiling = nausea_ceiling
         self.max_width = max_width
         self.max_depth = max_depth
+
+    @classmethod
+    def from_request(cls, request: CoasterRequest, **kwargs) -> "PhysicsFitness":
+        """Build a PhysicsFitness that scores distance from a CoasterRequest.
+
+        `request.cost` is not scored -- see CoasterRequest's docstring for why.
+        """
+        return cls(
+            targets=request.rating_targets(),
+            max_width=request.max_width,
+            max_depth=request.max_depth,
+            **kwargs,
+        )
 
     def evaluate(self, segments: list[int]) -> float:
         score = 0.0
