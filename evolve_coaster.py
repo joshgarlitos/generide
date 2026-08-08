@@ -15,7 +15,7 @@ from pathlib import Path
 from rct2 import physics, td6
 from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve
-from rct2.fitness import PhysicsFitness, ProxyFitness, RatingTargets
+from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
     BEGIN_STATION,
     DEFAULT_STATION_LENGTH,
@@ -239,22 +239,18 @@ def main():
         low, _, high = raw.partition(":")
         return (float(low), float(high))
 
+    request = CoasterRequest(
+        max_width=args.max_width,
+        max_depth=args.max_depth,
+        excitement=parse_window(args.target_excitement),
+        intensity=parse_window(args.target_intensity),
+        nausea=parse_window(args.target_nausea),
+    )
+
     if args.fitness == "physics":
-        windows = (
-            parse_window(args.target_excitement),
-            parse_window(args.target_intensity),
-            parse_window(args.target_nausea),
-        )
-        targets = None
-        if any(w is not None for w in windows):
-            targets = RatingTargets(
-                excitement=windows[0], intensity=windows[1], nausea=windows[2],
-            )
-        fitness_fn = PhysicsFitness(
-            targets=targets, max_width=args.max_width, max_depth=args.max_depth,
-        )
+        fitness_fn = PhysicsFitness.from_request(request)
     else:
-        fitness_fn = ProxyFitness(max_width=args.max_width, max_depth=args.max_depth)
+        fitness_fn = ProxyFitness(max_width=request.max_width, max_depth=request.max_depth)
 
     # Progress callback
     def progress(gen, pop):
