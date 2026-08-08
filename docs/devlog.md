@@ -4,6 +4,22 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-06 — A request is an object now, not scattered CLI flags
+
+Issue #5 asked for a `CoasterRequest`: footprint, excitement/intensity/nausea ranges, cost range, all optional. Most of the scoring behind it already existed — `RatingTargets` and `PhysicsFitness`'s distance-from-window scoring landed earlier without anyone calling it that. What was missing was the object itself: one thing a caller builds that carries "what ride do I want" from the CLI into fitness, instead of five separate arguments that happened to line up.
+
+`CoasterRequest` lives in `rct2/fitness.py` next to `RatingTargets`, and `PhysicsFitness.from_request()` builds a fitness function from one. `evolve_coaster.py` now constructs a `CoasterRequest` from its parsed args and hands it to `from_request` rather than assembling `RatingTargets` inline — the CLI is a caller of the same API a script would use, not a special case.
+
+### The one field that doesn't do anything
+
+`cost` is on the dataclass because the roadmap's vision names a cost range as part of the request. It is not scored. There is no per-piece price data anywhere in this codebase to score it against, and estimating one wasn't in scope here. `PhysicsFitness.from_request` silently ignores it rather than raising, which is worth being honest about: a caller who sets `request.cost` and expects it to shape evolution will not get that. Documented on the dataclass itself so it's visible at the point someone would reach for the field, not just here.
+
+### What actually needed proving
+
+The acceptance criteria wanted more than the dataclass compiling — "an evolution run constrained to a footprint produces a track that fits it" is a claim about selection pressure, not construction. `ProxyFitness` already penalizes out-of-bounds tracks per excess tile, but nothing before this checked that penalty was strong enough, over real generations of mutation and crossover, to actually hold a population inside a tight footprint rather than just discourage wandering past it. Ran it — 12x12 against a seed that starts well inside that box — across five RNG seeds before trusting it as a regression test, since one seed passing proves less than it feels like it does.
+
+---
+
 ## 2026-08-06 — The drop counter wasn't wrong about height, it was wrong about what a drop is
 
 Issue #23's g-force fix closed, but its sibling stayed open: on `generide-v6`, the game counts 2 drops and we counted 1, even though the drop height and speed we computed were both close to the game's numbers. That split — geometry right, count wrong — was the tell that this wasn't a threshold-tuning problem.

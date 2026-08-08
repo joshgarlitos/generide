@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from rct2 import construction, td6
+from rct2.evolution import evolve
 from rct2.fitness import (
+    CoasterRequest,
     PhysicsFitness,
     ProxyFitness,
     RatingTargets,
@@ -15,6 +17,7 @@ from rct2.fitness import (
     estimate_energy_violations,
 )
 from rct2.generate import create_simple_circuit
+from rct2.geometry import Position, track_bounds
 from rct2.mutations import generate_random_track
 from rct2.physics import rate, simulate
 
@@ -69,6 +72,61 @@ def test_target_window_scoring():
     in_score = PhysicsFitness(targets=inside).evaluate(segments)
     out_score = PhysicsFitness(targets=disjoint).evaluate(segments)
     assert in_score > out_score
+
+
+def test_coaster_request_defaults_to_unconstrained_ratings():
+    """No rating windows set means rating_targets() is None, not an empty RatingTargets.
+
+    PhysicsFitness treats `targets=None` as open-ended scoring and a
+    RatingTargets with every field None as a (pointless) zero-width-nowhere
+    match against nothing, so the distinction matters.
+    """
+    request = CoasterRequest()
+    assert request.rating_targets() is None
+    assert request.max_width == 30
+    assert request.max_depth == 30
+
+
+def test_coaster_request_rating_targets_carries_set_windows():
+    request = CoasterRequest(excitement=(5.0, 7.0), nausea=(0.0, 4.0))
+    targets = request.rating_targets()
+    assert targets.excitement == (5.0, 7.0)
+    assert targets.intensity is None
+    assert targets.nausea == (0.0, 4.0)
+
+
+def test_physics_fitness_from_request_matches_manual_construction():
+    segments, _ = load_fixture()
+    request = CoasterRequest(max_width=15, max_depth=20, excitement=(4.0, 8.0))
+
+    from_request = PhysicsFitness.from_request(request)
+    manual = PhysicsFitness(
+        targets=request.rating_targets(), max_width=15, max_depth=20,
+    )
+
+    assert from_request.evaluate(segments) == manual.evaluate(segments)
+
+
+def test_footprint_constrained_evolution_fits_the_request():
+    """Acceptance criterion for #5: a tight footprint actually shapes what
+    evolution produces, not just something validated after the fact.
+    """
+    request = CoasterRequest(max_width=12, max_depth=12)
+    fitness_fn = ProxyFitness(max_width=request.max_width, max_depth=request.max_depth)
+
+    rng = random.Random(7)
+    stats = evolve(
+        create_simple_circuit(),
+        rng,
+        fitness_fn=fitness_fn,
+        generations=25,
+        population_size=25,
+        elitism=4,
+    )
+
+    bounds = track_bounds(Position(), stats.best_individual.segments)
+    assert bounds.width <= request.max_width
+    assert bounds.depth <= request.max_depth
 
 
 # Hand-built tracks, each chosen to trip one penalty. Random generation goes
