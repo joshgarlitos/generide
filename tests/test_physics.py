@@ -87,6 +87,27 @@ def test_two_hills_count_two_drops():
     assert stats.highest_drop == pytest.approx(12)
 
 
+def test_flat_plateau_mid_descent_still_counts_two_drops():
+    """Reproduces issue #33.
+
+    OpenRCT2 counts a drop the moment a downward run starts, with no minimum
+    height, so a short partial descent that our old DROP_THRESHOLD_UNITS
+    filter would have discarded still counts on its own once a flat stretch
+    ends it. A climb to 10, a 2-unit descent, a flat plateau, then an 8-unit
+    descent back to 0 must read as 2 drops, matching the game, not 1.
+    """
+    track = (
+        [UP_START] + [UP] * 4 + [UP_END]
+        + [DOWN_START, DOWN_END]
+        + [FLAT] * 4
+        + [DOWN_START] + [DOWN] * 3 + [DOWN_END]
+    )
+    stats = simulate(track, lift_indices=set(range(0, 6)))
+    assert stats.drop_count == 2
+    assert stats.highest_drop == pytest.approx(8)
+    assert stats.total_drop_height == pytest.approx(10)
+
+
 def test_segment_length_straight_and_turns():
     flat = segment_length(SEGMENTS[FLAT])
     assert flat.radius_m is None

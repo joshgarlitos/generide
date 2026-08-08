@@ -4,6 +4,42 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-06 — The drop counter wasn't wrong about height, it was wrong about what a drop is
+
+Issue #23's g-force fix closed, but its sibling stayed open: on `generide-v6`, the game counts 2 drops and we counted 1, even though the drop height and speed we computed were both close to the game's numbers. That split — geometry right, count wrong — was the tell that this wasn't a threshold-tuning problem.
+
+### Tracing the actual profile
+
+The track's elevation, one point per segment: a climb from 0 to 10, then an unbroken-looking descent from 10 back to 0 with a flat stretch at 8 partway down. `count_drops` walked that as one continuous descent run and counted it once past `DROP_THRESHOLD_UNITS` (3 height units). Geometrically it is one drop. The game says two, which meant our definition of "drop" was wrong, not our arithmetic.
+
+### What the game actually counts
+
+Read `Vehicle.cpp` rather than guess from more samples, same as #23 and #32 before it. The real rule has no height minimum at all:
+
+```cpp
+else if (ted.flags.has(TrackElementFlag::down) && velocity >= 0)
+{
+    ...
+    if (curRide->numDrops < Limits::kRideMaxDropsCount)
+        curRide->numDrops++;
+    ...
+}
+```
+
+`numDrops` increments the instant the train enters a run of downward-sloped track elements — not when the run ends, and not gated on how tall it turns out to be. The run persists across consecutive downward elements and ends the moment a non-downward element interrupts it (`!ted.flags.has(TrackElementFlag::down)`). A flat plateau in the middle of a hill isn't a continuation of the same drop, it's a boundary between two.
+
+Our own `DROP_THRESHOLD_UNITS = 3` was filtering out short runs entirely — on `generide-v6`, the first 2-unit descent before the plateau never cleared it, got silently reset to zero, and vanished from the count. The remaining 8-unit descent to the bottom was the only thing left to count, hence 1 instead of 2.
+
+### The fix
+
+`count_drops`'s logic in `simulate()` now increments on the transition into a downward run rather than accumulating height and checking it against a minimum at the end. No threshold, because the game has none. `highest_drop` and `total_drop_height` still accumulate per-run height for the rating features that use them — that part of the geometry was already correct, so it stayed.
+
+### Confidence, and its limit
+
+`generide-v6.td6` isn't a committed fixture (same situation as #23's fit designs), so the regression test reproduces the shape of the bug instead: a climb, a short descent below the old threshold, a flat plateau, then a longer descent, asserting 2 drops. That's real evidence the *rule* is now right, not evidence pinned against the exact game export. The next design that surfaces a drop-counting disagreement is worth turning into a committed fixture the way `manic_miner_test.td6` was for #23.
+
+---
+
 ## 2026-08-02 — The g-force model was solving the wrong physics problem
 
 Fixing the g-force overestimate turned out not to be a calibration problem. It was a modeling problem: we were computing real centripetal physics for a game that does not use real centripetal physics.
