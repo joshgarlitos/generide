@@ -4,6 +4,18 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-10 — The benchmark harness from the research plan
+
+`rct2/benchmark.py` and `run_benchmark.py` implement the measurement design from `docs/research-plan.md`: a method is any function of the shape `(rng, max_evaluations) -> segments`, so a new search method registers the same way `method_random` and `method_ga` do, without the harness needing to know anything about how it spends its budget.
+
+Every result goes through one gate before it gets a score: not construction-valid and not completing the circuit means no ported rating, full stop, regardless of what the raw stats look like. That gate exists because of a specific mistake from 2026-08-09, where a track the game would reject for going underground still got reported at 5.03 excitement. `evaluate_result` makes that mistake structurally impossible rather than something to remember to check.
+
+Results save to JSON with the full segment list, not just derived stats, so a saved run can be re-scored later, a new rating model, the headless oracle, without re-running the search. Reliability (fraction valid and completed) and diversity (fraction of results that are physically distinct shapes, not fraction of distinct exact segment lists) are computed alongside quality rather than added later, since the plan's diversity goal only means anything if it was tracked from the first run.
+
+A 5-seed, 400-evaluation smoke test confirms the plumbing: random search gets 0% reliability at that budget, matching what `docs/architecture.md` already says about random search rarely closing a circuit at all, and GA gets 80%. Not a real comparison, the plan calls for 25 seeds and a much larger budget before any number here is trustworthy, just confirmation nothing is broken.
+
+---
+
 ## 2026-08-09 — Four quick wins, two of which worked, and the reason the other two didn't
 
 Tried four cheap changes aimed at the plateau around 2.4 estimated excitement. Two worked and are committed. Two made things measurably worse and were dropped. The interesting part is that both failures have the same cause, and it is not the cause I expected.

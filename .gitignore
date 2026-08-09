@@ -21,3 +21,7 @@ AGENTS.md
 
 # Generated track files (keep data/sample_rides/)
 /*.td6
+
+# Benchmark harness output (run_benchmark.py) -- reproducible from a seed
+# list and a git commit, not something to keep in version control
+/benchmark_results/

@@ -92,14 +92,22 @@ scored 5.03 on tracks the game refuses to build.
 
 ## Build order
 
-**1. Benchmark harness.** Name a method, a seed list, and an evaluation
-budget; get back a results file with the full metric set; re-analyse later
-without redoing the compute. Every experiment so far has been a throwaway
-script, which is why the results are hard to trust and impossible to
-re-examine. Estimated two days.
+**1. Benchmark harness. Done, 2026-08-10.** `rct2/benchmark.py` and
+`run_benchmark.py`. Name a method, a seed list, and an evaluation budget;
+get back a results file with the full metric set; re-analyse later without
+redoing the compute.
 
-Design it with the final judge as a swappable component, and put the
-buildable-and-completable gate and the diversity metric in from day one.
+The buildable-and-completable gate and the diversity metric are in from the
+start, as planned. The final judge is not yet swappable to the real game,
+that's step 2 below; right now every method is scored by the same ported
+model. Two methods are registered so far: `random` (rung 0) and `ga` (rung
+1, the current genetic algorithm). Rungs 2 through 5 register the same way
+once they exist.
+
+Not yet run at the scale the plan calls for (25 seeds, a real evaluation
+budget). A 5-seed, 400-evaluation smoke test confirms the plumbing works;
+see docs/devlog.md (2026-08-10). The actual random-vs-GA comparison, and
+everything after it, is still open.
 
 **2. Headless oracle.** Issue #42. The harness needs a fast in-loop scorer
 regardless, so starting with the ported model as the judge and swapping the
