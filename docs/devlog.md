@@ -4,6 +4,35 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-08 — Scoring evolution with the ported ratings did not produce better rides
+
+`PhysicsFitness` now takes a `ported_ratings` flag so either rating model can score a run. It defaults to the old fitted weights, because switching it on did not help.
+
+Five seeds per model, 120 generations, population 40, at a 30x30 footprint:
+
+| Scored by | mean highest drop | mean mph | requirements cleared | mean ported excitement |
+|---|---|---|---|---|
+| Old fitted weights | 4.4 | 25.5 | 1.6 of 3 | 1.71 |
+| Ported calculation | 4.0 | 23.0 | 1.4 of 3 | 1.67 |
+
+The ported model came out marginally lower on every measure, including on its own scoring. At five seeds and differences this small that is noise, so the honest reading is that it made no difference rather than that it hurt.
+
+### The hypothesis I had was wrong
+
+I expected the requirement thresholds to flatten the search landscape: if most of the population fails every threshold, everything gets divided alike, scores bunch together, and selection has nothing to pull on. I wrote that reasoning into the class docstring before testing it, which was getting ahead of myself.
+
+Measuring it on 120 random tracks says the opposite. Excitement under the ported model has a standard deviation of 1.55 against the fitted model's 1.03, and a 10th-to-90th percentile spread of 4.01 against 2.63. It carries more signal, not less. About 28% of random tracks already clear each individual threshold, so the population is not pinned below the cliffs either.
+
+So I do not have a demonstrated explanation for why the more accurate model does not search better. Worth stating plainly rather than reaching for a tidy story, because the obvious candidate is now ruled out.
+
+### What this suggests about where the real problem is
+
+Both models produce rides averaging a highest drop around 4 against the game's threshold of 8, and the real Manic Miner sits at 10. Neither objective gets there. But an earlier 200-generation run reached a 20 unit drop, which says evolution can build that when given time. That points at the objective not being the binding constraint at this scale, and at generation count or the mutation operators mattering more than which rating model scores the result.
+
+The port keeps its value regardless. It is the accurate predictor, which is what target ranges, finalist scoring, and the comparison against the headless oracle all need. It just is not, on this evidence, a better thing to run a search against.
+
+---
+
 ## 2026-08-08 — Porting the real rating calculation, and what it says about our old model
 
 `rct2/ratings.py` now holds a transcription of OpenRCT2's rating calculation rather than an approximation of it: the ride-independent sub-ratings, the Mine Train's nineteen coefficients from `MineTrainCoaster.h`, the requirement checks, and the intensity penalty. It keeps the game's integer arithmetic, including the 16.16 coefficient shifts and the int16 saturation in `RideRatingsAdd`, because rounding behaviour is part of what makes the numbers match.
