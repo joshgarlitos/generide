@@ -74,6 +74,29 @@ def test_target_window_scoring():
     assert in_score > out_score
 
 
+def test_ported_ratings_flag_changes_which_model_scores_the_track():
+    """Both rating models stay reachable, and they disagree as expected.
+
+    On a small track that misses the game's requirement thresholds, the ported
+    calculation halves the ratings where the fitted weights cannot, so the same
+    track has to score lower through the ported model. If this ever stops being
+    true the flag has silently stopped being wired in.
+    """
+    from rct2 import physics as physics_module
+    from rct2 import ratings as ratings_module
+
+    small = create_simple_circuit() + [0x06, 0x04, 0x09, 0x0C, 0x0A, 0x0F]
+    stats = simulate(small)
+
+    fitted = physics_module.rate(stats)
+    ported = ratings_module.rate(stats, small)
+    assert ported.excitement < fitted.excitement
+
+    open_ended_fitted = PhysicsFitness(ported_ratings=False).evaluate(small)
+    open_ended_ported = PhysicsFitness(ported_ratings=True).evaluate(small)
+    assert open_ended_ported < open_ended_fitted
+
+
 def test_coaster_request_defaults_to_unconstrained_ratings():
     """No rating windows set means rating_targets() is None, not an empty RatingTargets.
 

@@ -4,6 +4,73 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-08 — Scoring evolution with the ported ratings did not produce better rides
+
+`PhysicsFitness` now takes a `ported_ratings` flag so either rating model can score a run. It defaults to the old fitted weights, because switching it on did not help.
+
+Five seeds per model, 120 generations, population 40, at a 30x30 footprint:
+
+| Scored by | mean highest drop | mean mph | requirements cleared | mean ported excitement |
+|---|---|---|---|---|
+| Old fitted weights | 4.4 | 25.5 | 1.6 of 3 | 1.71 |
+| Ported calculation | 4.0 | 23.0 | 1.4 of 3 | 1.67 |
+
+The ported model came out marginally lower on every measure, including on its own scoring. At five seeds and differences this small that is noise, so the honest reading is that it made no difference rather than that it hurt.
+
+### The hypothesis I had was wrong
+
+I expected the requirement thresholds to flatten the search landscape: if most of the population fails every threshold, everything gets divided alike, scores bunch together, and selection has nothing to pull on. I wrote that reasoning into the class docstring before testing it, which was getting ahead of myself.
+
+Measuring it on 120 random tracks says the opposite. Excitement under the ported model has a standard deviation of 1.55 against the fitted model's 1.03, and a 10th-to-90th percentile spread of 4.01 against 2.63. It carries more signal, not less. About 28% of random tracks already clear each individual threshold, so the population is not pinned below the cliffs either.
+
+So I do not have a demonstrated explanation for why the more accurate model does not search better. Worth stating plainly rather than reaching for a tidy story, because the obvious candidate is now ruled out.
+
+### What this suggests about where the real problem is
+
+Both models produce rides averaging a highest drop around 4 against the game's threshold of 8, and the real Manic Miner sits at 10. Neither objective gets there. But an earlier 200-generation run reached a 20 unit drop, which says evolution can build that when given time. That points at the objective not being the binding constraint at this scale, and at generation count or the mutation operators mattering more than which rating model scores the result.
+
+The port keeps its value regardless. It is the accurate predictor, which is what target ranges, finalist scoring, and the comparison against the headless oracle all need. It just is not, on this evidence, a better thing to run a search against.
+
+---
+
+## 2026-08-08 — Porting the real rating calculation, and what it says about our old model
+
+`rct2/ratings.py` now holds a transcription of OpenRCT2's rating calculation rather than an approximation of it: the ride-independent sub-ratings, the Mine Train's nineteen coefficients from `MineTrainCoaster.h`, the requirement checks, and the intensity penalty. It keeps the game's integer arithmetic, including the 16.16 coefficient shifts and the int16 saturation in `RideRatingsAdd`, because rounding behaviour is part of what makes the numbers match.
+
+### Checking it against something the port cannot influence
+
+The useful test is to drive the port with the game's own measured stats rather than our simulation's, since a real TD6 export carries the numbers the game recorded on its own test lap. Feeding `manic_miner_test.td6`'s header through the port:
+
+| Rating | Ported | Game stored |
+|---|---|---|
+| Excitement | 4.49 | 6.20 |
+| Intensity | 6.18 | 6.50 |
+| Nausea | 3.97 | 4.20 |
+
+Intensity within 0.32 and nausea within 0.23 is the evidence that the transcribed constants and the fixed-point arithmetic are right. The excitement shortfall of 1.71 is not mysterious either, because I deliberately skipped three bonuses that read the surrounding park rather than the track, and all three are excitement-weighted: sheltered length, proximity at a 0.33 coefficient, and scenery at 0.26. A Mine Train running through tunnels with scenery around it is exactly the ride that would collect them. The residual landing almost entirely on the one axis where terms are missing is a better signal than a smaller error spread across all three would have been.
+
+### What it does to the rides we actually build
+
+On an evolved track at a 15x15 footprint, three drops, a 2 unit highest drop, 19 mph:
+
+| | Excitement | Intensity | Nausea |
+|---|---|---|---|
+| Old fitted model | 4.06 | 3.65 | 2.66 |
+| Ported calculation | 0.92 | 1.11 | 0.76 |
+| Measured in-game, comparable ride | 0.25 | 0.28 | 0.19 |
+
+That track fails two requirements, drop height at 2 against a threshold of 8 and speed at 8 units against 10, so it is halved twice. The old model had no way to express that and read four points high. The port is still somewhat high, which the missing park-dependent bonuses would not explain since those would push it higher still, so there is more to find. It is in the right order of magnitude, which the fitted model never was.
+
+### A test that caught me rather than the code
+
+My first compounding test asserted that failing one requirement halves the rating exactly, comparing a drop height of 10 against 1. It failed by one unit. The reason is that every input a requirement tests also feeds a bonus, so changing the drop height from 10 to 1 moved the drop bonus as well as tripping the threshold, and I was measuring two effects while claiming to measure one. The fix was to sit one unit either side of each threshold so the bonus difference is negligible. Worth recording because the same trap is waiting in any test of these thresholds.
+
+### What is deliberately not in yet
+
+Proximity, scenery, and sheltered length, for the reason above. `requirementLength` is also out: it tests the station's `SegmentLength`, which is a platform measure we do not model, and guessing at it would silently halve ratings on a rule I have not verified. Nothing consumes the port yet either. `PhysicsFitness` still uses the fitted weights, and switching it over is its own change, because it needs an evaluation of whether evolution actually produces better rides rather than just different ones.
+
+---
+
 ## 2026-08-08 — The rating formula was never a mystery, and our model fails for a different reason than I thought
 
 I went looking for how other people worked out RCT2's rating scales. The answer is that nobody had to work them out, because OpenRCT2 is a decompilation and the exact calculation is sitting in `src/openrct2/ride/RideRatings.cpp` with the original integer constants intact. Every ride type carries its own coefficients in its own header, so the Mine Train's nineteen modifiers and its 2.90 / 2.30 / 2.10 base ratings are all in `MineTrainCoaster.h`. There is also an [OpenRCT2 wiki page](https://github.com/OpenRCT2/OpenRCT2/wiki/Ride-rating-calculation) that writes the ride-independent formulas out in decimal, and it agrees with the source when you convert the fixed-point constants: 5242 over 65536 is the 0.08 the wiki quotes for positive vertical g's excitement contribution.
