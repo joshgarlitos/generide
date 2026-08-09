@@ -4,6 +4,44 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-08 — Porting the real rating calculation, and what it says about our old model
+
+`rct2/ratings.py` now holds a transcription of OpenRCT2's rating calculation rather than an approximation of it: the ride-independent sub-ratings, the Mine Train's nineteen coefficients from `MineTrainCoaster.h`, the requirement checks, and the intensity penalty. It keeps the game's integer arithmetic, including the 16.16 coefficient shifts and the int16 saturation in `RideRatingsAdd`, because rounding behaviour is part of what makes the numbers match.
+
+### Checking it against something the port cannot influence
+
+The useful test is to drive the port with the game's own measured stats rather than our simulation's, since a real TD6 export carries the numbers the game recorded on its own test lap. Feeding `manic_miner_test.td6`'s header through the port:
+
+| Rating | Ported | Game stored |
+|---|---|---|
+| Excitement | 4.49 | 6.20 |
+| Intensity | 6.18 | 6.50 |
+| Nausea | 3.97 | 4.20 |
+
+Intensity within 0.32 and nausea within 0.23 is the evidence that the transcribed constants and the fixed-point arithmetic are right. The excitement shortfall of 1.71 is not mysterious either, because I deliberately skipped three bonuses that read the surrounding park rather than the track, and all three are excitement-weighted: sheltered length, proximity at a 0.33 coefficient, and scenery at 0.26. A Mine Train running through tunnels with scenery around it is exactly the ride that would collect them. The residual landing almost entirely on the one axis where terms are missing is a better signal than a smaller error spread across all three would have been.
+
+### What it does to the rides we actually build
+
+On an evolved track at a 15x15 footprint, three drops, a 2 unit highest drop, 19 mph:
+
+| | Excitement | Intensity | Nausea |
+|---|---|---|---|
+| Old fitted model | 4.06 | 3.65 | 2.66 |
+| Ported calculation | 0.92 | 1.11 | 0.76 |
+| Measured in-game, comparable ride | 0.25 | 0.28 | 0.19 |
+
+That track fails two requirements, drop height at 2 against a threshold of 8 and speed at 8 units against 10, so it is halved twice. The old model had no way to express that and read four points high. The port is still somewhat high, which the missing park-dependent bonuses would not explain since those would push it higher still, so there is more to find. It is in the right order of magnitude, which the fitted model never was.
+
+### A test that caught me rather than the code
+
+My first compounding test asserted that failing one requirement halves the rating exactly, comparing a drop height of 10 against 1. It failed by one unit. The reason is that every input a requirement tests also feeds a bonus, so changing the drop height from 10 to 1 moved the drop bonus as well as tripping the threshold, and I was measuring two effects while claiming to measure one. The fix was to sit one unit either side of each threshold so the bonus difference is negligible. Worth recording because the same trap is waiting in any test of these thresholds.
+
+### What is deliberately not in yet
+
+Proximity, scenery, and sheltered length, for the reason above. `requirementLength` is also out: it tests the station's `SegmentLength`, which is a platform measure we do not model, and guessing at it would silently halve ratings on a rule I have not verified. Nothing consumes the port yet either. `PhysicsFitness` still uses the fitted weights, and switching it over is its own change, because it needs an evaluation of whether evolution actually produces better rides rather than just different ones.
+
+---
+
 ## 2026-08-08 — First in-game reading of a CoasterRequest-targeted ride
 
 Ran the new `CoasterRequest` path end to end and loaded the result in the actual game, not just through the simulator:

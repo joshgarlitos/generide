@@ -117,6 +117,16 @@ Contains reusable checks for slope state, bank state, turns, elevation, and esti
 
 Walks the track with an energy-method velocity model in meters and seconds, collecting maximum speed, drops, g-forces, airtime, and whether the train completes the circuit. `rate()` maps those stats to approximate excitement, intensity, and nausea through a weights table shaped like OpenRCT2's per-ride-type contributions. It imports `construction.py` and never the reverse, and it is the authority on completability.
 
+### `rct2/ratings.py`
+
+A transcription of OpenRCT2's real rating calculation, taken from `RideRatings.cpp` and the Mine Train's own coefficient table, rather than an approximation of it. It keeps the game's integer arithmetic: coefficients are 16.16 fixed point applied with a shift, ratings are fixed point x100 in an int16, and every addition saturates the way `RideRatingsAdd` does.
+
+It exists alongside `physics.rate()`, which is the older least-squares fit against 204 shipped designs, because the two answer the same question by different means and can be compared. The port can express one thing the fit structurally cannot. The game applies requirement checks that *divide* all three ratings when a ride misses a threshold, the Mine Train has several of them, and a linear model has no way to represent a cliff. That is why the fitted weights read several points high on the small tracks generide currently produces, which nearly always miss at least one threshold, while nearly every shipped design clears them all.
+
+Three bonuses are not ported: sheltered length, proximity, and scenery all read the surrounding park rather than the track. All three are excitement-weighted, which is where the port's residual against a real design sits. `requirementLength` is also omitted because it tests a station platform measure we do not model.
+
+Nothing consumes this yet; `PhysicsFitness` still scores through `physics.rate()`.
+
 ### `rct2/evolution.py`
 
 Owns `Individual`, `Population`, evolution statistics, population initialization, tournament selection, elitism, and the main evolution loops.
