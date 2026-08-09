@@ -71,6 +71,72 @@ Proximity, scenery, and sheltered length, for the reason above. `requirementLeng
 
 ---
 
+## 2026-08-08 — The rating formula was never a mystery, and our model fails for a different reason than I thought
+
+I went looking for how other people worked out RCT2's rating scales. The answer is that nobody had to work them out, because OpenRCT2 is a decompilation and the exact calculation is sitting in `src/openrct2/ride/RideRatings.cpp` with the original integer constants intact. Every ride type carries its own coefficients in its own header, so the Mine Train's nineteen modifiers and its 2.90 / 2.30 / 2.10 base ratings are all in `MineTrainCoaster.h`. There is also an [OpenRCT2 wiki page](https://github.com/OpenRCT2/OpenRCT2/wiki/Ride-rating-calculation) that writes the ride-independent formulas out in decimal, and it agrees with the source when you convert the fixed-point constants: 5242 over 65536 is the 0.08 the wiki quotes for positive vertical g's excitement contribution.
+
+We have been fitting weights by least squares against 204 designs to approximate a function whose source code we could have read.
+
+### The structure
+
+Start from the ride type's base rating. For each modifier, compute a ride-independent sub-rating from one stat, multiply by that ride type's 16.16 fixed-point coefficient, shift right 16, add. Then apply requirement checks, then the intensity penalty, then per-vehicle multipliers from the ride entry, then an air time adjustment.
+
+### Why our fitted model reads high on our own rides
+
+I had this wrong, and the correction matters more than the original diagnosis. I said the model was extrapolating below the range of the shipped designs and drifting 2 to 4 points high. The real mechanism is that the game applies cliffs, and a linear model has no way to represent one:
+
+```cpp
+if (ride.highestDropHeight < modifier.threshold)
+{
+    ratings.excitement /= modifier.excitement;   // divisor is 2 for Mine Train
+    ratings.intensity /= modifier.intensity;
+    ratings.nausea /= modifier.nausea;
+}
+```
+
+Those are divisions, not subtractions, and the Mine Train has five of them, on drop height, drop count, max speed, track length, and negative g. Each failure halves all three ratings and they compound. The ride I generated had a 3 foot highest drop against a threshold of 8 height units, roughly 20 feet, so it lost half its rating on that check alone before anything else applied. The real Manic Miner clears the same check at 25 feet.
+
+That explains the shape of the error rather than just its size. Almost every shipped design clears these thresholds, so the fit never saw the cliff. Almost every ride we generate falls off it. No amount of refitting a linear model on the 204 designs would have found this, and the four in-game anchors I added earlier could not have either.
+
+The intensity penalty is real too, and it works the way our removed code did: excitement loses a quarter at each of intensity 10, 11, 12, 13.2, and 14.5. Taking it out was a fair workaround while our intensity ran 3.3x high, but a correct port should bring it back.
+
+### Prior art
+
+Kevin Burke tried [close to this exact project](https://kevin.burke.dev/kevin/roller-coaster-tycoon-genetic-algorithms/), genetic algorithms over RCT tracks, and did the ratings work against the original x86 in IDA Pro, locating functions by hunting for strings like "Too high!". He gave up because the calculation was buried four subroutines deep. OpenRCT2 finished that job, which is the whole reason this is now a reading exercise rather than a reverse-engineering one.
+
+### What a Python port cannot reproduce exactly
+
+Two excitement bonuses read the surrounding park rather than the track. Proximity scores how close the track runs to scenery, ground, and itself, with a Mine Train coefficient of 0.33, and scenery scores nearby decoration at 0.26. There is also a per-vehicle multiplier on the ride entry object. Our tracks go into an empty park so scenery is near zero, but proximity would need its map walk ported to be exact.
+
+### What this changes
+
+Porting the real calculation is worth more than the stat-targeting fitness I proposed a few hours ago, and it makes the headless oracle a way to verify the port rather than the main source of truth. It also moves the bottleneck: with the correct formula in place, the accuracy of the stats we feed it becomes the limiting factor, and we already know our lateral g read 0.76 against the game's 1.37 on a real ride. Intensity takes lateral g at a 1:1 coefficient, so that error goes straight through.
+
+---
+
+## 2026-08-08 — The headless oracle works, and the flag in the game's own help is the wrong one
+
+Ran the #6 spike. Verdict is go, and the full write-up is in [headless-oracle-spike.md](headless-oracle-spike.md). Two things are worth pulling out here.
+
+### The documented way is the broken way
+
+`openrct2 --help` suggests `host <park> --headless` for headless use, and it is the natural thing to reach for. It loads plugins fine. It also puts the game in network mode, where the park loads paused and `context.paused = false` throws `Game state is not mutable in this context.` The park sits frozen and `interval.tick` never fires once. Not a config problem — `pause_server_if_no_clients` was already false.
+
+The `simulate` subcommand looked like the other obvious candidate, and it is genuinely fast: 500 ticks in 0.4 seconds, roughly 30x realtime. But a probe plugin under it printed nothing at all, and the source says why — `SimulateCommands.cpp` calls `gameStateUpdateLogic()` in a bare loop and never starts the scripting engine. It advances a park quickly and can tell you nothing about the result.
+
+What works is the invocation with no subcommand at all: `openrct2 <park> --headless`. Plugins load, and a plugin can unpause itself. I would not have found that by reading the help text, only by testing all three and watching which one ticked.
+
+### The cost is what decides the architecture
+
+Speed 4 ("hyper") runs 318 ticks/sec against 40.7 at normal — 8x. Speed 8 is rejected outright rather than clamped, so 8x is the ceiling. Startup to plugin-running is 0.15s and amortizes across a batch, since one process can evaluate many candidates.
+
+That puts a test lap on a ~30 in-game-second ride at about 4 seconds wall clock. A 50x100 run is 5,000 evaluations, so scoring every individual is 5.5 hours; scoring the top 10 of a run is 40 seconds. The roadmap already called for a hybrid of proxy-for-all and oracle-for-elites, and I had been treating that as a sensible design preference. It isn't — it's the only thing the measured number supports.
+
+### Two traps for whoever implements this
+
+Ratings come back x100 from the plugin API (652 is 6.52) and x10 from TD6 headers, where our own `RATING_PER_UNIT` is 0.1. Comparing the two without converting yields a clean 10x error that would read as a modeling failure rather than a units bug — the same shape as the `max_lateral_g` raw-byte mistake during #23, which is why it is called out in the doc.
+
+And an unrated ride reports excitement `-1`, not 0. Feeding that into fitness unconverted would score an untested track as merely slightly bad rather than unmeasured.
 ## 2026-08-08 — First in-game reading of a CoasterRequest-targeted ride
 
 Ran the new `CoasterRequest` path end to end and loaded the result in the actual game, not just through the simulator:
