@@ -4,6 +4,52 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-09 — Four quick wins, two of which worked, and the reason the other two didn't
+
+Tried four cheap changes aimed at the plateau around 2.4 estimated excitement. Two worked and are committed. Two made things measurably worse and were dropped. The interesting part is that both failures have the same cause, and it is not the cause I expected.
+
+### What worked
+
+**Mutations can no longer dig below ground.** `_build_slope_run` chose "up" and "down" with equal odds regardless of where the track currently was, so at ground level a mutation could excavate a drop rather than climb to one. Digging is cheaper for the search to find, because climbing needs a chain lift and enough speed to get up there, while a hole is free. Once big drops started scoring highly, every run at a high rating weight produced tracks the game rejects for going underground. Runs now carry the current elevation and a floor, and filter out any option that would cross it, including the closing path that brings the run back to flat.
+
+**`ideal_length` raised from 50 to 80.** It sat below the 25th percentile (62) of the 204 shipped designs, whose median is 82. Fitness was penalising tracks for growing past a length shorter than three quarters of what the game itself ships.
+
+Together these produced construction-valid tracks clearing the game's 8-unit drop threshold, which nothing had managed before.
+
+### What didn't
+
+**A bigger repair budget.** Repair is the step that adds pieces to reconnect a track after a change breaks its loop. The cap was 8 pieces, which is close to what an 8-unit hill needs, so I expected raising it would let taller hills survive to be scored. Tried 8, 16, 24, 32 across three seeds each:
+
+| budget | mean highest drop | est. excitement |
+|---|---|---|
+| 8 | 9.3 | 3.16 |
+| 16 | 2.0 | 2.06 |
+| 24 | 3.3 | 1.13 |
+| 32 | 6.0 | 2.77 |
+
+The default was best and every increase was worse. My guess is that a bigger budget lets more badly-cut tracks get patched into something whole but shorter, where a small budget fails the repair and the unmutated parent survives instead. That guess is unverified.
+
+**Seeding evolution from the real Manic Miner track.** This should have been the easy win, since the CLI already supports it and the real ride starts at 4.53 on our estimate against 0.4 for the flat oval seed. Instead the score fell to 1.98, worse than starting from the flat oval, and all three seeds converged on nearly the same degraded shape.
+
+Breaking it down term by term showed what was lost:
+
+| | segments | drop count | highest drop | length | speed |
+|---|---|---|---|---|---|
+| Real Manic Miner | 89 | 6 | 10 | 481m | 16 |
+| After 200 generations | 56 | 5 | 2 | 190m | 10 |
+
+Drop count barely moved. The height of the one big drop collapsed from 10 to 2, which is what crosses the game's threshold and halves the rating.
+
+### The cause both failures share
+
+A track is a flat list of about 90 pieces, with nothing marking which pieces belong together. A lift hill is not a thing the code knows about; it is pieces 12 through 24 that happen to go upward. Crossover cuts two tracks at arbitrary points and joins halves, so sooner or later a cut lands inside a tall structure and breaks it. Once broken it does not grow back, because building a tall drop is hard and does not happen by accident.
+
+That explains both failures at once. Seeding from a real ride does not help because the real ride's structure is no better protected than anything else. A bigger repair budget does not help because repairing a track that has been cut through a hill produces a whole track without the hill.
+
+So the bottleneck is not the starting point and not the repair budget. It is that the representation has no notion of structure, and that is a representation problem rather than a parameter problem. `docs/research-plan.md` covers what to do about it.
+
+---
+
 ## 2026-08-08 — Scoring evolution with the ported ratings did not produce better rides
 
 `PhysicsFitness` now takes a `ported_ratings` flag so either rating model can score a run. It defaults to the old fitted weights, because switching it on did not help.

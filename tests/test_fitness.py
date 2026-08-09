@@ -168,7 +168,7 @@ def _mixed_corpus(count: int = 40) -> list[list[int]]:
     corpus = [
         create_simple_circuit(),
         [0x00] * 3,                    # below min_length
-        [0x02, 0x01] + [0x00] * 70,    # past ideal_length
+        [0x02, 0x01] + [0x00] * 90,    # past ideal_length (80, since 2026-08-09)
         BREAKS_SLOPE,
         BREAKS_BANK,
         CLIMBS_TOO_HIGH,

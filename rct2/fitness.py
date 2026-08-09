@@ -122,7 +122,12 @@ class WeightedProxyFitness:
     which meant weights tuned here produced tracks the game would reject.
 
     Rewards track length (up to `ideal_length`), elevation changes, balanced
-    left/right turns, and segment variety. Penalizes construction invalidity,
+    left/right turns, and segment variety. `ideal_length` defaults to 80,
+    matching the median element count (82) across the 204 shipped designs in
+    `data/calibration.csv` -- the old default of 50 sat below their 25th
+    percentile (62), so fitness was penalizing tracks for growing past a
+    length shorter than three-quarters of what the game itself ships.
+    Penalizes construction invalidity,
     open circuits, excessive footprint, collisions, going below ground, illegal
     slope and bank transitions, energy shortfalls, a first hill with no chain
     lift, stalling before the circuit closes, and being too short.
@@ -138,7 +143,7 @@ class WeightedProxyFitness:
         # Footprint and length configuration
         max_width: int = 30,
         max_depth: int = 30,
-        ideal_length: int = 50,
+        ideal_length: int = 80,
         min_length: int = 8,
         # Rewards
         length_weight: float = 2.0,
@@ -284,7 +289,7 @@ class ProxyFitness(WeightedProxyFitness):
         self,
         max_width: int = 30,
         max_depth: int = 30,
-        ideal_length: int = 50,
+        ideal_length: int = 80,
         stall_penalty: float = 500.0,
     ) -> None:
         super().__init__(
@@ -390,6 +395,7 @@ class PhysicsFitness:
         max_width: int = 30,
         max_depth: int = 30,
         ported_ratings: bool = False,
+        rating_weight: float = 10.0,
     ) -> None:
         self.targets = targets
         self.validity_weight = validity_weight
@@ -400,6 +406,7 @@ class PhysicsFitness:
         self.max_width = max_width
         self.max_depth = max_depth
         self.ported_ratings = ported_ratings
+        self.rating_weight = rating_weight
 
     @classmethod
     def from_request(cls, request: CoasterRequest, **kwargs) -> "PhysicsFitness":
@@ -451,7 +458,7 @@ class PhysicsFitness:
         else:
             ratings = physics.rate(stats)
         if self.targets is None:
-            score += ratings.excitement * 10
+            score += ratings.excitement * self.rating_weight
             # Steer away from rides too punishing to be worth riding. This is a
             # preference, so it lives here rather than inside `physics.rate`,
             # which predicts what the game would say and nothing more. The

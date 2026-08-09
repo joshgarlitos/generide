@@ -159,3 +159,5 @@ Evolution has been benchmarked against random search and wins clearly, and mutat
 ## License
 
 generide is licensed under the [GNU General Public License v3.0](LICENSE).
+
+`rct2/ratings.py` contains the ride rating calculation transcribed from [OpenRCT2](https://github.com/OpenRCT2/OpenRCT2), Copyright (c) 2014-2026 OpenRCT2 developers, which is also GPL-3.0. That module carries its own attribution notice naming the specific source files. Elsewhere the project reads OpenRCT2's source as documentation for the game's behaviour, for example the drop-counting rule in `rct2/physics.py`, without copying its code.

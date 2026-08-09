@@ -177,6 +177,20 @@ def slope_state_at(segments: list[int], position: Optional[int] = None) -> str:
     return state
 
 
+def elevation_at(segments: list[int], position: Optional[int] = None) -> int:
+    """Cumulative elevation, in RCT2 height units, after segments[:position].
+
+    Lets a mutation know how much room is left before the floor without
+    tracing full 3D geometry -- same replay-and-sum shape as slope_state_at.
+    """
+    elevation = 0
+    for segment in segments[:position]:
+        piece = SEGMENTS.get(segment)
+        if piece is not None:
+            elevation += piece.elevation_delta
+    return elevation
+
+
 def bank_state_at(segments: list[int], position: Optional[int] = None) -> str:
     """Bank state after replaying segments[:position] (or the full list)."""
     state = "flat"

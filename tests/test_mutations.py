@@ -143,6 +143,63 @@ class TestBuildRuns:
             found.update(_build_slope_run(rng))
         assert {0x05, 0x07, 0x08} & found
 
+    def test_slope_run_never_digs_below_ground_at_the_default_floor(self):
+        """A run built at ground level must never go negative.
+
+        `_build_slope_run` used to pick "up" or "down" with equal odds
+        regardless of current elevation, which let evolution excavate a big
+        drop instead of climbing to one -- cheaper for the GA to find, and
+        the digging showed up for real once big drops started scoring high
+        enough to be worth it. See docs/devlog.md.
+        """
+        from rct2.segments import SEGMENTS
+
+        rng = random.Random(99)
+        lowest = 0
+        for _ in range(2000):
+            run = _build_slope_run(rng, current_z=0, min_elevation=0)
+            z = 0
+            for seg in run:
+                z += SEGMENTS[seg].elevation_delta
+                lowest = min(lowest, z)
+        assert lowest == 0
+
+    def test_slope_run_can_still_climb_from_ground_level(self):
+        """The floor only removes "down"; "up" must still be reachable."""
+        rng = random.Random(3)
+        reached_positive = False
+        for _ in range(200):
+            run = _build_slope_run(rng, current_z=0, min_elevation=0)
+            from rct2.segments import SEGMENTS
+            z = sum(SEGMENTS[s].elevation_delta for s in run)
+            if z > 0:
+                reached_positive = True
+                break
+        assert reached_positive
+
+    def test_slope_run_respects_an_arbitrary_floor_not_just_zero(self):
+        """min_elevation is a real parameter, not a hardcoded zero check."""
+        from rct2.segments import SEGMENTS
+
+        rng = random.Random(5)
+        floor = 4
+        for _ in range(500):
+            run = _build_slope_run(rng, current_z=floor, min_elevation=floor)
+            z = floor
+            for seg in run:
+                z += SEGMENTS[seg].elevation_delta
+                assert z >= floor
+
+    def test_random_tracks_never_dig_below_ground(self):
+        """The same floor applies to whole generated tracks, not just one run."""
+        from rct2.geometry import track_bounds
+
+        rng = random.Random(7)
+        for _ in range(100):
+            segments = generate_random_track(rng, min_length=10, max_length=40)
+            bounds = track_bounds(Position(), segments)
+            assert bounds.min_z >= 0
+
 
 class TestMutateFunction:
     """Tests for the high-level mutate function."""
