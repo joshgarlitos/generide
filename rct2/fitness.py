@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, Set, Tuple
 
 from rct2 import construction, physics
+from rct2 import ratings as ported_ratings_module
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
 
@@ -360,6 +361,22 @@ class PhysicsFitness:
     resulting stats, and scores either open-ended excitement (default) or
     distance from requested rating windows. Construction violations and
     stalls are penalized with a gradient so evolution can climb out of them.
+
+    `ported_ratings` chooses which rating model scores the candidate.
+    False keeps `physics.rate()`, the least-squares fit against 204 shipped
+    designs. True uses `rct2.ratings`, the transcription of the game's own
+    calculation, which is the more accurate predictor on the small tracks
+    generide builds because it applies the requirement thresholds that divide
+    ratings.
+
+    It defaults to False because being the better predictor did not make it
+    the better search target. Over five seeds at 120 generations the two
+    produced statistically indistinguishable rides, with the ported model
+    marginally lower on drop height, speed, and its own excitement score. Why
+    is unresolved; the obvious explanation, that the thresholds flatten the
+    landscape, is measurably false, since ported excitement across random
+    tracks has a wider spread than the fitted model's. See docs/devlog.md
+    (2026-08-08).
     """
 
     def __init__(
@@ -372,6 +389,7 @@ class PhysicsFitness:
         nausea_ceiling: float = 7.0,
         max_width: int = 30,
         max_depth: int = 30,
+        ported_ratings: bool = False,
     ) -> None:
         self.targets = targets
         self.validity_weight = validity_weight
@@ -381,6 +399,7 @@ class PhysicsFitness:
         self.nausea_ceiling = nausea_ceiling
         self.max_width = max_width
         self.max_depth = max_depth
+        self.ported_ratings = ported_ratings
 
     @classmethod
     def from_request(cls, request: CoasterRequest, **kwargs) -> "PhysicsFitness":
@@ -427,7 +446,10 @@ class PhysicsFitness:
             progress = (stats.stall_index or 0) / max(1, len(segments))
             score -= self.validity_weight * 4 * (1.0 - progress)
 
-        ratings = physics.rate(stats)
+        if self.ported_ratings:
+            ratings = ported_ratings_module.rate(stats, segments)
+        else:
+            ratings = physics.rate(stats)
         if self.targets is None:
             score += ratings.excitement * 10
             # Steer away from rides too punishing to be worth riding. This is a
