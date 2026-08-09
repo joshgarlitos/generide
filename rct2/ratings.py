@@ -1,10 +1,26 @@
 """Port of OpenRCT2's real ride rating calculation.
 
+Derived work notice
+-------------------
+The algorithm, coefficients, and thresholds in this module are transcribed
+from OpenRCT2, Copyright (c) 2014-2026 OpenRCT2 developers, which is licensed
+under the GNU General Public License version 3. Sources:
+
+    src/openrct2/ride/RideRatings.cpp
+    src/openrct2/ride/rtd/coaster/MineTrainCoaster.h
+    src/openrct2/ride/Ride.cpp          (turn count bucketing)
+
+generide is itself GPL-3.0 (see LICENSE), so this derivation is permitted and
+the license is unchanged by it. Translating the code from C++ to Python does
+not make it a new work: it stays a derivative, which is why the attribution
+above belongs here rather than only in a commit message.
+
+What the module does
+--------------------
 This replaces guessing. OpenRCT2 is a decompilation of RCT2, so the original
-calculation survives in `src/openrct2/ride/RideRatings.cpp` with its integer
-constants intact, and each ride type's coefficients live in its own header
-(`src/openrct2/ride/rtd/coaster/MineTrainCoaster.h` for ours). Everything here
-is transcribed from that source rather than fitted; see docs/devlog.md
+calculation survives in `RideRatings.cpp` with its integer constants intact,
+and each ride type's coefficients live in its own header. Everything here is
+transcribed from that source rather than fitted; see docs/devlog.md
 (2026-08-08) and issue #40.
 
 `rct2/physics.py`'s `RATING_WEIGHTS` and `rate()` are the older least-squares
