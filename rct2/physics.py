@@ -294,8 +294,17 @@ class RideRatings:
 #   the 204 shipped designs, so the fit is extrapolating there and reads
 #   roughly 2-4 points high. Four of our own in-game measurements were tested
 #   as training anchors and did not fix it — 4 rows against 204 barely move
-#   the fit. Closing that gap needs more of our own rides measured in-game,
-#   which is the only source of data in that region.
+#   the fit.
+#
+#   The mechanism behind that gap is now known, and refitting cannot close it.
+#   The game applies threshold checks that *divide* all three ratings (the
+#   Mine Train halves them for each of drop height under 8 height units, fewer
+#   than 2 drops, and three others; see RideRatings.cpp's Requirement
+#   functions). Nearly every shipped design clears those thresholds and nearly
+#   every track we generate fails at least one, so the fit never saw the cliff
+#   and no linear model can express it. Porting the real calculation, whose
+#   constants are public in OpenRCT2's source, is the actual fix; see
+#   docs/devlog.md (2026-08-08).
 #
 # Airtime is deliberately absent. The calibration data stores it in an
 # unconverted unit (see docs/phase1-spec.md) and our simulated airtime is
