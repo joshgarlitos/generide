@@ -16,6 +16,7 @@ from rct2.construction import (
     bank_closing_path,
     bank_state_at,
     build_station,
+    elevation_at,
     legal_bank_segments,
     legal_slope_segments,
     slope_closing_path,
@@ -136,35 +137,87 @@ def _insert_sequence(segments: list[int], position: int, sequence: list[int]) ->
     return result
 
 
-def _build_run(rng: random.Random, legal_fn, closing_fn, excluded: set) -> list[int]:
+def _build_run(
+    rng: random.Random, legal_fn, closing_fn, excluded: set,
+    current_z: int = 0, min_elevation: Optional[int] = None,
+) -> list[int]:
     """Randomly walk a legality-query state machine from flat back to flat.
 
     Used to build self-contained slope or bank runs from scratch. Combined
     bank+slope segments (0x18-0x1F) are excluded so slope runs and bank runs
     stay independent; mutating combined bank-slope track is out of scope here.
+
+    `min_elevation` (only meaningful for slope runs; bank runs pass None
+    because excluding combined pieces keeps them flat) filters out any option
+    that would carry the run below the floor at any step, including the
+    closing path. Without this, a "down" pick at ground level is exactly as
+    legal as "up", so nothing stops a mutation from excavating a big drop
+    instead of climbing to one -- which is cheaper for the GA to discover and
+    is what it did once a big drop got scored highly enough to be worth
+    pursuing. See docs/devlog.md for the run where that showed up.
     """
     state = "flat"
     run: list[int] = []
+    z = current_z
     for _ in range(rng.randint(1, 4)):
         options = {seg: nxt for seg, nxt in legal_fn(state).items() if seg not in excluded}
+        if min_elevation is not None:
+            options = {
+                seg: nxt for seg, nxt in options.items()
+                if z + SEGMENTS[seg].elevation_delta >= min_elevation
+            }
         if not options:
             break
         segment = rng.choice(list(options))
         run.append(segment)
+        z += SEGMENTS[segment].elevation_delta
         state = options[segment]
         if state == "flat":
             break
-    run.extend(closing_fn(state))
+
+    closing = closing_fn(state)
+    if min_elevation is not None:
+        closing_z = z
+        for segment in closing:
+            closing_z += SEGMENTS[segment].elevation_delta
+            if closing_z < min_elevation:
+                # The per-step filter above only covers the loop's own
+                # committed steps. If the loop ran out of random steps (or
+                # picked "flat" state) before the run actually leveled out,
+                # the remaining closing segments still have to finish the
+                # descent -- and those were never checked. Discard the whole
+                # run rather than land it below the floor; the caller treats
+                # an empty run as "nothing to insert here."
+                return []
+    run.extend(closing)
     return run
 
 
-def _build_slope_run(rng: random.Random) -> list[int]:
-    """Build a self-contained slope run (starts and ends flat)."""
-    return _build_run(rng, legal_slope_segments, slope_closing_path, BANK_TRANSITIONS)
+def _build_slope_run(
+    rng: random.Random, current_z: int = 0, min_elevation: Optional[int] = 0,
+) -> list[int]:
+    """Build a self-contained slope run (starts and ends flat).
+
+    `min_elevation` defaults to ground level, matching `validate_construction`'s
+    own default floor, so a run built with the default arguments can never
+    dig below where the game would reject the track anyway.
+    """
+    return _build_run(
+        rng, legal_slope_segments, slope_closing_path, BANK_TRANSITIONS,
+        current_z=current_z, min_elevation=min_elevation,
+    )
 
 
-def _build_bank_run(rng: random.Random) -> list[int]:
-    """Build a self-contained banked-turn run (starts and ends flat)."""
+def _build_bank_run(
+    rng: random.Random, current_z: int = 0, min_elevation: Optional[int] = None,
+) -> list[int]:
+    """Build a self-contained banked-turn run (starts and ends flat).
+
+    Accepts and ignores `current_z`/`min_elevation` so callers can pass the
+    same arguments to either build function without special-casing which one
+    they have -- a banked run never changes elevation, since combined
+    bank+slope pieces are excluded from it.
+    """
     return _build_run(rng, legal_bank_segments, bank_closing_path, SLOPE_TRANSITIONS)
 
 
@@ -195,7 +248,7 @@ def _insert_legal_run_or_continuation(
     """
     state = state_fn(segments, position)
     if state == "flat":
-        run = build_fn(rng)
+        run = build_fn(rng, current_z=elevation_at(segments, position), min_elevation=0)
         return _insert_sequence(segments, position, run) if run else segments
     options = {seg: nxt for seg, nxt in legal_fn(state).items() if seg not in excluded}
     if not options:
@@ -503,7 +556,7 @@ def generate_random_track(
     while len(segments) - station_tiles < target_length:
         choice = rng.random()
         if choice < 0.25:  # 25% chance for a slope run
-            segments.extend(_build_slope_run(rng))
+            segments.extend(_build_slope_run(rng, current_z=elevation_at(segments)))
         elif choice < 0.40:  # 15% chance for a banked run
             segments.extend(_build_bank_run(rng))
         else:  # 60% chance for simple segment
