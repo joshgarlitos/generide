@@ -4,6 +4,29 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-08 — The headless oracle works, and the flag in the game's own help is the wrong one
+
+Ran the #6 spike. Verdict is go, and the full write-up is in [headless-oracle-spike.md](headless-oracle-spike.md). Two things are worth pulling out here.
+
+### The documented way is the broken way
+
+`openrct2 --help` suggests `host <park> --headless` for headless use, and it is the natural thing to reach for. It loads plugins fine. It also puts the game in network mode, where the park loads paused and `context.paused = false` throws `Game state is not mutable in this context.` The park sits frozen and `interval.tick` never fires once. Not a config problem — `pause_server_if_no_clients` was already false.
+
+The `simulate` subcommand looked like the other obvious candidate, and it is genuinely fast: 500 ticks in 0.4 seconds, roughly 30x realtime. But a probe plugin under it printed nothing at all, and the source says why — `SimulateCommands.cpp` calls `gameStateUpdateLogic()` in a bare loop and never starts the scripting engine. It advances a park quickly and can tell you nothing about the result.
+
+What works is the invocation with no subcommand at all: `openrct2 <park> --headless`. Plugins load, and a plugin can unpause itself. I would not have found that by reading the help text, only by testing all three and watching which one ticked.
+
+### The cost is what decides the architecture
+
+Speed 4 ("hyper") runs 318 ticks/sec against 40.7 at normal — 8x. Speed 8 is rejected outright rather than clamped, so 8x is the ceiling. Startup to plugin-running is 0.15s and amortizes across a batch, since one process can evaluate many candidates.
+
+That puts a test lap on a ~30 in-game-second ride at about 4 seconds wall clock. A 50x100 run is 5,000 evaluations, so scoring every individual is 5.5 hours; scoring the top 10 of a run is 40 seconds. The roadmap already called for a hybrid of proxy-for-all and oracle-for-elites, and I had been treating that as a sensible design preference. It isn't — it's the only thing the measured number supports.
+
+### Two traps for whoever implements this
+
+Ratings come back x100 from the plugin API (652 is 6.52) and x10 from TD6 headers, where our own `RATING_PER_UNIT` is 0.1. Comparing the two without converting yields a clean 10x error that would read as a modeling failure rather than a units bug — the same shape as the `max_lateral_g` raw-byte mistake during #23, which is why it is called out in the doc.
+
+And an unrated ride reports excitement `-1`, not 0. Feeding that into fitness unconverted would score an untested track as merely slightly bad rather than unmeasured.
 ## 2026-08-08 — First in-game reading of a CoasterRequest-targeted ride
 
 Ran the new `CoasterRequest` path end to end and loaded the result in the actual game, not just through the simulator:
