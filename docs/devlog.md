@@ -4,6 +4,30 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-10 — Lateral g: a two-point fix that didn't survive more data, and the real fix it led to
+
+Issue #41 started from one number: a ride we generated and loaded in-game measured 1.37g lateral, and the model predicted 0.76g. Two things feed lateral g, the fitted coefficient and the turn-radius estimate, and the first attempt guessed radius.
+
+### The fix that looked right and wasn't
+
+Our ride and `manic_miner_test.td6` both hit their worst lateral g on the same piece, a 3-tile turn modeled as a 1.5-tile radius. Both readings, solved backward, implied something closer to 1.0 tile. Averaging two points that agree feels like a fit. It shrank the radius and moved on.
+
+Then I found the original game install still has all 205 shipped designs on disk (`~/Library/Application Support/Steam/.../RCT Classic.app/Contents/Resources`), not just the 7 we knew we could simulate from `data/calibration.csv`. Checked the radius change against those same 7, minus 2 that stall on our simulation the way Doubledrop always has. Implied radius across the 5 that ran ranged from 0.83 to 2.0 tiles. No single value fit more than one or two of them. The original 1.5 had the lowest total error of anything tried, including my new 1.0. Two points agreeing was luck, not signal. Reverted.
+
+### What the fuller data actually said
+
+Of those 5 designs, the two whose worst turn happens to be banked, Manic Miner and Penguin Paradise, were both underpredicted even at the original radius. The three with a plain worst turn were close. That split by itself was the tell: it's not the radius, it's the flat credit subtracted for a turn that leans.
+
+Solved each banked design for the credit that reproduces its real value, radius and coefficient both held at their original values: Manic Miner implies 0.29g, Penguin Paradise implies 0.16g. Averaged to 0.226, replacing the old 0.67. Checked back through the real simulator, not hand arithmetic: Manic Miner now predicts 1.35g against real 1.28 (was 0.98, error went from -0.30 to +0.07), Penguin Paradise predicts 1.85g against real 1.92 (was 1.41, error from -0.51 to -0.07).
+
+### What this doesn't fix
+
+The ride that started this. It has no banked turns at all, so the credit never touches it. It still predicts 0.76g against the real 1.37g, unchanged. Its worst turn also runs at 7.67 m/s, well under the 14-21 m/s range every one of the 5 real designs' worst turns ran at. A model that's purely linear in speed will underpredict hardest exactly where speed is lowest if the real game's per-piece factor isn't purely proportional to speed either, which is a plausible next place to look and wasn't chased today.
+
+So issue #41 is half addressed. Banked turns are meaningfully more accurate against two independent real designs. The specific ride that motivated the issue is exactly as wrong as it was before, for a reason that's now at least named rather than unknown.
+
+---
+
 ## 2026-08-10 — The benchmark harness from the research plan
 
 `rct2/benchmark.py` and `run_benchmark.py` implement the measurement design from `docs/research-plan.md`: a method is any function of the shape `(rng, max_evaluations) -> segments`, so a new search method registers the same way `method_random` and `method_ga` do, without the harness needing to know anything about how it spends its budget.
