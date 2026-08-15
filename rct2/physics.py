@@ -26,7 +26,7 @@ GRAVITY = 9.81
 FRICTION_COEFF = 0.01  # rolling friction deceleration per meter, as fraction of g
 LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
 MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
-BANK_LATERAL_CREDIT = 0.67  # lateral g absorbed by a banked turn
+BANK_LATERAL_CREDIT = 0.226  # lateral g absorbed by a banked turn; see issue #41 below
 
 # G-force is linear in speed, not speed-squared over a geometric radius.
 #
@@ -66,6 +66,47 @@ BANK_LATERAL_CREDIT = 0.67  # lateral g absorbed by a banked turn
 GFORCE_VERTICAL_COEFF = 0.56393
 GFORCE_LATERAL_COEFF = 0.44517
 
+# 2026-08-10, issue #41: our own generated rides under-read lateral g. A ride
+# we generated and loaded in-game measured 1.37g; this predicted 0.76g.
+#
+# First attempt shrank the 3-tile turn's assumed radius (in segment_length())
+# from 1.5 tiles to 1.0, based on that ride plus manic_miner_test.td6 both
+# implying a smaller radius. That was two points agreeing by coincidence. The
+# original game install (the 205 designs RCT Classic ships, at ~/Library/
+# Application Support/Steam/.../RCT Classic.app/Contents/Resources) has 5
+# more designs our segment table can fully simulate. Checked against all of
+# them plus our own ride, radius 1.0 was worse in aggregate than the original
+# 1.5 (sum of squared error 4.5 against 1.0): implied radius across those 5
+# designs ranges 0.83-2.0 tiles, no single value fits more than one or two at
+# a time, and 1.5 already had the lowest total error of anything tried.
+# Reverted to 1.5.
+#
+# Of those 5 designs, the two whose worst turn is banked (Manic Miner,
+# Penguin Paradise) were both underpredicted at that radius; the three with
+# an unbanked worst turn were close (within about 0.1g, one exception at
+# 0.52g -- Penguin Toboggan, already a known residual from the original #23
+# fit). Solving each banked case for the credit that reproduces its real
+# value, holding the radius at 1.5 and the coefficient fixed:
+#   Manic Miner:       raw 1.572g, real 1.28g -> implies a 0.292g credit
+#   Penguin Paradise:  raw 2.080g, real 1.92g -> implies a 0.160g credit
+# Averaging to 0.226 and re-running through simulate() (not the hand
+# arithmetic above, which is why this is checked against the real function
+# rather than trusted from the derivation): Manic Miner predicts 1.35g
+# against real 1.28 (was 0.98, error was -0.30, now +0.07), Penguin Paradise
+# predicts 1.85g against real 1.92 (was 1.41, error was -0.51, now -0.07).
+#
+# This does not fix the ride that motivated it. That ride has no banked
+# turns at all, so this credit never touches it -- it still predicts 0.76g
+# against the real 1.37g, unchanged. Its bottleneck turn also runs at a much
+# lower speed (7.67 m/s) than any of the 5 real designs' bottlenecks (14-21
+# m/s), which is a real, unexplained difference and the likely next place to
+# look: a model that is linear in speed with no offset will underpredict
+# hardest exactly where speed is lowest, if the real per-piece factor RCT2
+# uses isn't purely proportional to speed either. Not chased further here.
+#
+# BANK_LATERAL_CREDIT moved to 0.226 below. GFORCE_LATERAL_COEFF and the turn
+# radii are unchanged from the original #23 fit.
+
 # Slope state names from construction.slope_state_at mapped to track angle.
 _SLOPE_ANGLE_RAD = {
     "flat": 0.0,
@@ -102,6 +143,12 @@ def segment_length(segment: Segment) -> SegmentGeometry:
 
     # Turn radius by displacement shape: 5-tile quarter turns (forward=2,
     # right=3) curve at ~2.5 tiles, 3-tile turns (forward=1, right=2) at ~1.5.
+    # Checked against 5 real designs plus one of our own (issue #41,
+    # 2026-08-10): implied radius across them ranges 0.83-2.0 tiles with no
+    # single value fitting more than one or two at a time, and 1.5 has the
+    # lowest total error of the values tried. The lateral-g miss on our own
+    # rides traced to BANK_LATERAL_CREDIT instead; see that constant's
+    # docstring in GFORCE_LATERAL_COEFF's block above.
     shape = (abs(segment.forward_delta), abs(segment.right_delta))
     radius_tiles = {(2, 3): 2.5, (1, 2): 1.5}.get(shape)
     if radius_tiles is None:

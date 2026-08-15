@@ -270,6 +270,29 @@ def test_gforce_model_matches_the_real_fixture_within_a_stated_tolerance():
     assert stats.max_lateral_g < 2.5
 
 
+def test_bank_lateral_credit_matches_the_real_fixture_tightly():
+    """Dedicated pin for issue #41's fix, tighter than the generous check above.
+
+    The fixture's worst turn is banked, so this is checking the specific
+    thing that changed: BANK_LATERAL_CREDIT moved from 0.67 to 0.226 based on
+    this fixture and one other real design (Penguin Paradise, not committed)
+    both implying a value near 0.2-0.3 once the turn radius was confirmed
+    correct. Before this fix, the fixture predicted 0.98g against real 1.28g;
+    after, 1.35g. Error flipped sign (-0.30 to +0.07) but shrank by more than
+    4x, which is why this gets its own tight-tolerance test rather than
+    resting on the generous abs=0.6 above.
+    """
+    from rct2 import td6
+
+    ride = td6.load(FIXTURE)
+    segments = [element.segment_type for element in ride.elements]
+    lifts = {index for index, element in enumerate(ride.elements) if element.chain_lift}
+
+    stats = simulate(segments, lift_indices=lifts)
+
+    assert stats.max_lateral_g == pytest.approx(1.28, abs=0.15)
+
+
 def test_gforce_is_linear_in_speed_not_quadratic():
     """Confirms the functional form, not just the fitted constants.
 
