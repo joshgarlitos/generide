@@ -115,9 +115,30 @@ def method_ga(
     return stats.best_individual.segments
 
 
+def method_ga_parts(
+    rng: random.Random, max_evaluations: int, population_size: int = 40,
+) -> list[int]:
+    """Rung 2: the genetic algorithm with a part-based genome, so crossover
+    can never slice a slope run or banked turn in half (see
+    docs/research-plan.md and rct2/mutations.py's crossover_parts). Compared
+    against "ga" through this same harness, unmodified, so the comparison is
+    a real one rather than a hopeful rewrite.
+    """
+    from rct2.evolution import evolve_parts
+    from rct2.generate import create_simple_circuit
+
+    generations = max(1, (max_evaluations - population_size) // population_size)
+    stats = evolve_parts(
+        create_simple_circuit(), rng, fitness_fn=_search_fitness(),
+        population_size=population_size, generations=generations,
+    )
+    return stats.best_individual.segments
+
+
 METHODS: dict[str, MethodFn] = {
     "random": method_random,
     "ga": method_ga,
+    "ga_parts": method_ga_parts,
 }
 
 

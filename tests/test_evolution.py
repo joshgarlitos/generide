@@ -9,6 +9,7 @@ from rct2.evolution import (
     Individual,
     Population,
     evolve,
+    evolve_parts,
     evolve_until,
 )
 from rct2.fitness import ProxyFitness
@@ -359,6 +360,51 @@ class TestReproducibility:
         )
 
         # Results should be identical
+        assert stats1.best_fitness == stats2.best_fitness
+        assert stats1.fitness_history == stats2.fitness_history
+        assert stats1.valid_ratio_history == stats2.valid_ratio_history
+        assert stats1.best_individual.segments == stats2.best_individual.segments
+
+
+class TestEvolveParts:
+    """Tests for the part-based evolve_parts, mirroring TestEvolve/TestReproducibility."""
+
+    def test_evolution_returns_stats(self):
+        rng = random.Random(42)
+        seed = create_simple_circuit()
+        stats = evolve_parts(seed, rng, generations=5, population_size=10)
+
+        assert isinstance(stats, EvolutionStats)
+        assert stats.generations == 5
+        assert stats.best_individual is not None
+        assert len(stats.fitness_history) > 0
+
+    def test_evolution_improves_fitness(self):
+        rng = random.Random(42)
+        seed = create_simple_circuit()
+        fitness_fn = ProxyFitness()
+
+        stats = evolve_parts(
+            seed,
+            rng,
+            fitness_fn=fitness_fn,
+            generations=20,
+            population_size=20,
+            mutation_rate=0.2,
+        )
+
+        initial_fitness = fitness_fn.evaluate(seed)
+        assert stats.best_fitness >= initial_fitness - 50  # Allow some variance
+
+    def test_same_seed_produces_identical_results(self):
+        seed = create_simple_circuit()
+
+        rng1 = random.Random(12345)
+        stats1 = evolve_parts(seed, rng1, generations=10, population_size=20, mutation_rate=0.1)
+
+        rng2 = random.Random(12345)
+        stats2 = evolve_parts(seed, rng2, generations=10, population_size=20, mutation_rate=0.1)
+
         assert stats1.best_fitness == stats2.best_fitness
         assert stats1.fitness_history == stats2.fitness_history
         assert stats1.valid_ratio_history == stats2.valid_ratio_history

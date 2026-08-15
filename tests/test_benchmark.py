@@ -19,6 +19,7 @@ from rct2.benchmark import (
     evaluate_result,
     load_results,
     method_ga,
+    method_ga_parts,
     method_random,
     reliability,
     run_benchmark,
@@ -136,6 +137,11 @@ class TestMethodsRegistered:
 
         segs1 = method_ga(random.Random(7), max_evaluations=60, population_size=20)
         segs2 = method_ga(random.Random(7), max_evaluations=60, population_size=20)
+        assert segs1 == segs2
+
+    def test_ga_parts_is_reproducible_given_the_same_seed(self):
+        segs1 = method_ga_parts(random.Random(7), max_evaluations=60, population_size=20)
+        segs2 = method_ga_parts(random.Random(7), max_evaluations=60, population_size=20)
         assert segs1 == segs2
 
 
