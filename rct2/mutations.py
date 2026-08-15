@@ -565,3 +565,207 @@ def generate_random_track(
     # Try to repair
     repaired = repair_circuit(segments, rng)
     return repaired if repaired is not None else segments
+
+
+# ---------------------------------------------------------------------------
+# Part-based representation.
+#
+# Crossover above cuts at an arbitrary segment index, which can (and does)
+# slice a slope run or banked turn in half. A "part" is either one simple
+# piece or one whole pre-built run (station, slope run, bank run); the
+# functions below operate on lists of parts instead of individual segments,
+# so a run can never be split apart by crossover or picked at piece by piece
+# by mutation. They sit alongside the flat-list functions above rather than
+# replacing them, so the existing GA stays available as an unmodified
+# baseline -- see docs/research-plan.md and rct2/benchmark.py's "ga_parts".
+# ---------------------------------------------------------------------------
+
+
+def _group_runs(segments: list[int]) -> list[list[int]]:
+    """Group a flat (post-station) list into parts.
+
+    A maximal run of consecutive segments in SLOPE_TRANSITIONS or
+    BANK_TRANSITIONS becomes one part (this can fuse an adjacent bank run and
+    slope run into a single part if nothing simple separates them -- still
+    safe for crossover, since the fused blob is still never split, but it
+    means a multi-segment part can't always be labeled "slope" or "bank").
+    Everything else is its own single-segment part.
+    """
+    parts: list[list[int]] = []
+    run: list[int] = []
+    for seg in segments:
+        if _is_special_segment(seg):
+            run.append(seg)
+            continue
+        if run:
+            parts.append(run)
+            run = []
+        parts.append([seg])
+    if run:
+        parts.append(run)
+    return parts
+
+
+def segments_to_parts(segments: list[int]) -> list[list[int]]:
+    """Group a flat segment list into parts, with the station as part 0.
+
+    Mirrors `_find_mutable_range`'s station detection exactly, including its
+    fallback for a track that opens with BEGIN_STATION but has no
+    well-formed platform.
+    """
+    station_len = station_length(segments)
+    if station_len == 0 and segments and segments[0] == BEGIN_STATION:
+        station_len = 1
+    if station_len == 0:
+        return _group_runs(segments)
+    return [segments[:station_len]] + _group_runs(segments[station_len:])
+
+
+def flatten_parts(parts: list[list[int]]) -> list[int]:
+    """Flatten a parts list back into the plain segment list every other
+    function in the project (fitness, construction, td6 export) expects."""
+    return [seg for part in parts for seg in part]
+
+
+def generate_random_track_parts(
+    rng: random.Random,
+    min_length: int = 8,
+    max_length: int = 30,
+    station_tiles: int = DEFAULT_STATION_LENGTH,
+) -> list[list[int]]:
+    """Part-based counterpart to `generate_random_track`.
+
+    Builds the same mix of station, slope runs, bank runs, and single simple
+    segments with the same probabilities, but keeps each one as its own part
+    instead of flattening into one list.
+    """
+    target_length = rng.randint(min_length, max_length)
+    parts: list[list[int]] = [build_station(station_tiles)]
+    length = 0
+
+    while length < target_length:
+        choice = rng.random()
+        if choice < 0.25:  # 25% chance for a slope run
+            run = _build_slope_run(rng, current_z=elevation_at(flatten_parts(parts)))
+            if not run:
+                continue
+            parts.append(run)
+            length += len(run)
+        elif choice < 0.40:  # 15% chance for a banked run
+            run = _build_bank_run(rng)
+            if not run:
+                continue
+            parts.append(run)
+            length += len(run)
+        else:  # 60% chance for simple segment
+            parts.append([rng.choice(SIMPLE_SEGMENTS)])
+            length += 1
+
+    # repair_circuit only ever appends, never touches the existing prefix, so
+    # regrouping just the new tail (rather than the whole flattened result)
+    # keeps every part boundary already established above untouched and
+    # correctly keeps a repair-added slope bump atomic instead of scattering
+    # it into single-segment parts.
+    flat_before = flatten_parts(parts)
+    repaired = repair_circuit(flat_before, rng)
+    if repaired is None:
+        return parts
+    tail = repaired[len(flat_before):]
+    return parts + _group_runs(tail) if tail else parts
+
+
+def mutate_parts(
+    parts: list[list[int]],
+    rng: random.Random,
+    rate: float = 0.1,
+    max_attempts: int = 10,
+) -> list[list[int]]:
+    """Part-based counterpart to `mutate`.
+
+    The same six mutation types, but operating on whole parts: a slope run
+    or banked turn is inserted, deleted, replaced, or swapped as one unit,
+    never picked apart segment by segment. Assumes part 0 is the station
+    (callers should run the seed through `segments_to_parts` after
+    `_ensure_station`, never the other way around).
+    """
+    if not parts:
+        return parts
+
+    for _ in range(max_attempts):
+        result = [part.copy() for part in parts]
+        num_mutations = max(1, int(len(parts) * rate))
+
+        for _ in range(num_mutations):
+            mutation_type = rng.choice([
+                "insert_simple", "insert_slope", "insert_banked",
+                "delete", "replace", "swap",
+            ])
+            mutable_indices = list(range(1, len(result)))
+
+            if mutation_type == "insert_simple":
+                pos = rng.randint(1, len(result))
+                result.insert(pos, [rng.choice(SIMPLE_SEGMENTS)])
+
+            elif mutation_type == "insert_slope":
+                pos = rng.randint(1, len(result))
+                run = _build_slope_run(rng, current_z=elevation_at(flatten_parts(result[:pos])))
+                if run:
+                    result.insert(pos, run)
+
+            elif mutation_type == "insert_banked":
+                pos = rng.randint(1, len(result))
+                run = _build_bank_run(rng)
+                if run:
+                    result.insert(pos, run)
+
+            elif mutation_type == "delete":
+                if mutable_indices:
+                    del result[rng.choice(mutable_indices)]
+
+            elif mutation_type == "replace":
+                if mutable_indices:
+                    pos = rng.choice(mutable_indices)
+                    if len(result[pos]) == 1:
+                        result[pos] = [rng.choice(SIMPLE_SEGMENTS)]
+                    else:
+                        # A multi-segment part might be a slope run, a bank
+                        # run, or (see _group_runs) both fused together, so
+                        # there's no single "kind" to preserve -- pick fresh,
+                        # same as insert_slope/insert_banked do.
+                        current_z = elevation_at(flatten_parts(result[:pos]))
+                        builder = rng.choice([_build_slope_run, _build_bank_run])
+                        new_run = builder(rng, current_z=current_z)
+                        if new_run:
+                            result[pos] = new_run
+
+            elif mutation_type == "swap":
+                if len(mutable_indices) >= 2:
+                    pos1, pos2 = rng.sample(mutable_indices, 2)
+                    result[pos1], result[pos2] = result[pos2], result[pos1]
+
+        flat_before = flatten_parts(result)
+        repaired = repair_circuit(flat_before, rng)
+        if repaired is not None and is_closed_circuit(Position(), repaired):
+            tail = repaired[len(flat_before):]
+            return result + _group_runs(tail) if tail else result
+
+    return parts  # Return original if all mutations fail
+
+
+def crossover_parts(
+    parts1: list[list[int]],
+    parts2: list[list[int]],
+    rng: random.Random,
+) -> tuple[list[list[int]], list[list[int]]]:
+    """Part-based counterpart to `crossover`.
+
+    Cuts only ever land on a part boundary, so a slope run or banked turn
+    can never be split between the two children -- the flat version's bug.
+    Part 0 (the station) is always protected since the cut point is chosen
+    from index 1 onward.
+    """
+    point1 = rng.randint(1, len(parts1))
+    point2 = rng.randint(1, len(parts2))
+    child1 = parts1[:point1] + parts2[point2:]
+    child2 = parts2[:point2] + parts1[point1:]
+    return child1, child2

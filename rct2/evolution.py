@@ -17,9 +17,14 @@ from rct2.construction import (
 from rct2.fitness import FitnessFunction, ProxyFitness
 from rct2.mutations import (
     crossover,
+    crossover_parts,
+    flatten_parts,
     generate_random_track,
+    generate_random_track_parts,
     mutate,
+    mutate_parts,
     repair_circuit,
+    segments_to_parts,
 )
 
 
@@ -29,6 +34,11 @@ class Individual:
 
     segments: list[int]
     fitness: float = 0.0
+    # Only set by the part-based evolve_parts() path below; `segments` above
+    # is always the flattened, canonical view everything else in the project
+    # (fitness, construction, td6 export) consumes, regardless of which path
+    # built the individual. Added after `fitness` since it has a default.
+    parts: Optional[list[list[int]]] = None
 
     def is_valid(self) -> bool:
         """Check whether this individual passes all construction rules."""
@@ -321,6 +331,163 @@ def evolve_until(
         generations=gen + 1,
         best_fitness=best.fitness if best else 0.0,
         best_individual=best if best else Individual(segments=seed),
+        fitness_history=fitness_history,
+        valid_ratio_history=valid_ratio_history,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part-based evolution loop.
+#
+# Mirrors evolve()'s structure exactly (same tournament selection, elitism,
+# generation loop) but calls the part-based generation/mutation/crossover
+# functions from mutations.py, so a slope run or banked turn can never be
+# split apart by crossover. Kept alongside evolve() rather than replacing it,
+# so the existing GA stays available as an unmodified baseline -- see
+# rct2/benchmark.py's "ga_parts" method, registered next to "ga".
+# ---------------------------------------------------------------------------
+
+
+def _ensure_station_parts(
+    parts: list[list[int]],
+    length: int = DEFAULT_STATION_LENGTH,
+) -> list[list[int]]:
+    """Part-based counterpart to `_ensure_station`."""
+    if parts and station_length(parts[0]) > 0:
+        return [part.copy() for part in parts]
+    return [build_station(length)] + [part.copy() for part in parts]
+
+
+def _create_initial_population_parts(
+    seed_parts: list[list[int]],
+    population_size: int,
+    fitness_fn: FitnessFunction,
+    rng: random.Random,
+    platform: int = DEFAULT_STATION_LENGTH,
+) -> Population:
+    """Part-based counterpart to `_create_initial_population`."""
+    individuals = []
+
+    seed_ind = Individual(segments=flatten_parts(seed_parts), parts=seed_parts)
+    seed_ind.fitness = fitness_fn.evaluate(seed_ind.segments)
+    individuals.append(seed_ind)
+
+    while len(individuals) < population_size:
+        if rng.random() < 0.7:
+            mutated = mutate_parts(seed_parts, rng, rate=0.3)
+            mutated = _ensure_station_parts(mutated, platform)
+        else:
+            mutated = generate_random_track_parts(rng, station_tiles=platform)
+
+        ind = Individual(segments=flatten_parts(mutated), parts=mutated)
+        ind.fitness = fitness_fn.evaluate(ind.segments)
+        individuals.append(ind)
+
+    return Population(individuals=individuals)
+
+
+def _create_offspring_parts(
+    parent1: Individual,
+    parent2: Individual,
+    mutation_rate: float,
+    fitness_fn: FitnessFunction,
+    rng: random.Random,
+    platform: int = DEFAULT_STATION_LENGTH,
+) -> list[Individual]:
+    """Part-based counterpart to `_create_offspring`."""
+    offspring = []
+
+    child1_parts, child2_parts = crossover_parts(parent1.parts, parent2.parts, rng)
+
+    for child_parts in [child1_parts, child2_parts]:
+        child_parts = _ensure_station_parts(child_parts, platform)
+        child_parts = mutate_parts(child_parts, rng, rate=mutation_rate)
+        child_parts = _ensure_station_parts(child_parts, platform)
+
+        child = Individual(segments=flatten_parts(child_parts), parts=child_parts)
+        child.fitness = fitness_fn.evaluate(child.segments)
+        offspring.append(child)
+
+    return offspring
+
+
+def evolve_parts(
+    seed: list[int],
+    rng: random.Random,
+    fitness_fn: Optional[FitnessFunction] = None,
+    population_size: int = 50,
+    generations: int = 100,
+    mutation_rate: float = 0.1,
+    elitism: int = 2,
+    tournament_size: int = 3,
+    progress_callback: Optional[Callable[[int, Population], None]] = None,
+) -> EvolutionStats:
+    """Part-based counterpart to `evolve`.
+
+    Same genetic algorithm loop, but genomes are lists of parts (a single
+    piece or a whole pre-built run) instead of a flat list of segments, so
+    crossover and mutation can never split a run apart. See
+    docs/research-plan.md for why that matters.
+
+    Args:
+        seed: Initial track segment list to evolve from (flat, same as evolve())
+        rng: Random number generator for reproducible runs
+        fitness_fn: Fitness evaluation function (defaults to ProxyFitness)
+        population_size: Number of individuals in population
+        generations: Number of evolution generations
+        mutation_rate: Probability of mutation per part
+        elitism: Number of best individuals to preserve each generation
+        tournament_size: Number of candidates for tournament selection
+        progress_callback: Optional callback(generation, population) for progress
+
+    Returns:
+        EvolutionStats with best individual and history
+    """
+    if fitness_fn is None:
+        fitness_fn = ProxyFitness()
+
+    platform = station_length(seed) or DEFAULT_STATION_LENGTH
+    seed_parts = segments_to_parts(_ensure_station(seed, platform))
+    population = _create_initial_population_parts(
+        seed_parts, population_size, fitness_fn, rng, platform
+    )
+
+    fitness_history = []
+    valid_ratio_history = []
+
+    for gen in range(generations):
+        best = population.best()
+        if best:
+            fitness_history.append(best.fitness)
+        valid_ratio_history.append(
+            population.valid_count() / len(population.individuals)
+            if population.individuals else 0.0
+        )
+
+        if progress_callback:
+            progress_callback(gen, population)
+
+        population.individuals.sort(key=lambda ind: ind.fitness, reverse=True)
+
+        next_gen = []
+        next_gen.extend(population.individuals[:elitism])
+
+        while len(next_gen) < population_size:
+            parent1 = _tournament_select(population, rng, tournament_size)
+            parent2 = _tournament_select(population, rng, tournament_size)
+            offspring = _create_offspring_parts(
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform
+            )
+            next_gen.extend(offspring)
+
+        next_gen = next_gen[:population_size]
+        population = Population(individuals=next_gen)
+
+    best = population.best()
+    return EvolutionStats(
+        generations=generations,
+        best_fitness=best.fitness if best else 0.0,
+        best_individual=best if best else Individual(segments=seed, parts=seed_parts),
         fitness_history=fitness_history,
         valid_ratio_history=valid_ratio_history,
     )

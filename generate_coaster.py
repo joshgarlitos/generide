@@ -33,10 +33,12 @@ def main():
 
     print(f"Generated: {output_path}")
     print()
-    print("To use in OpenRCT2:")
-    print("  1. Copy to: ~/Documents/OpenRCT2/track/")
-    print("  2. Open OpenRCT2, build a Mine Train ride")
-    print("  3. Select 'Track Designs' and choose the design")
+    print("To use in OpenRCT2, copy it into the track folder for your platform:")
+    print("  macOS:   ~/Library/Application Support/OpenRCT2/track/")
+    print("  Windows: %USERPROFILE%\\Documents\\OpenRCT2\\track\\")
+    print("  Linux:   ~/.config/OpenRCT2/track/")
+    print("Then restart OpenRCT2 if it's already open, build a Mine Train")
+    print("ride, and select 'Track Designs' to choose the design.")
 
 
 if __name__ == "__main__":

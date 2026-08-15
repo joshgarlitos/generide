@@ -28,12 +28,17 @@ from rct2.mutations import (
     _build_slope_run,
     _slope_bump,
     crossover,
+    crossover_parts,
     delete_segment,
+    flatten_parts,
     generate_random_track,
+    generate_random_track_parts,
     insert_segment,
     mutate,
+    mutate_parts,
     repair_circuit,
     replace_segment,
+    segments_to_parts,
     swap_segments,
 )
 
@@ -411,3 +416,98 @@ class TestIntegration:
         # Repair should succeed at least sometimes
         # Note: repair is stochastic and depends on track geometry
         assert repair_success >= 1
+
+
+class TestPartsRepresentation:
+    """Tests for the part-based genome (segments_to_parts/flatten_parts and
+    the crossover_parts/mutate_parts/generate_random_track_parts trio)."""
+
+    def test_flatten_parts_round_trips_with_segments_to_parts(self):
+        rng = random.Random(1)
+        tracks = [
+            create_simple_circuit(),
+            generate_random_track(rng),
+            generate_random_track(rng),
+            build_station() + _build_slope_run(rng, current_z=0) + [FLAT_SEGMENTS[0]],
+        ]
+        for track in tracks:
+            assert flatten_parts(segments_to_parts(track)) == track
+
+    def test_segments_to_parts_groups_the_station_as_one_part(self):
+        station = build_station()
+        track = station + [TURN_LEFT[0]] * 4
+        parts = segments_to_parts(track)
+        assert parts[0] == station
+
+    def test_segments_to_parts_groups_a_slope_run_as_one_part(self):
+        rng = random.Random(3)
+        slope_run = _build_slope_run(rng, current_z=0)
+        assert len(slope_run) > 1  # otherwise this test proves nothing
+        track = build_station() + slope_run + [FLAT_SEGMENTS[0]]
+        parts = segments_to_parts(track)
+        assert slope_run in parts
+
+    def test_segments_to_parts_groups_a_bank_run_as_one_part(self):
+        rng = random.Random(5)
+        bank_run = _build_bank_run(rng)
+        assert len(bank_run) > 1  # otherwise this test proves nothing
+        track = build_station() + bank_run + [FLAT_SEGMENTS[0]]
+        parts = segments_to_parts(track)
+        assert bank_run in parts
+
+    def test_crossover_parts_never_splits_a_part(self):
+        """The whole point of the part-based genome: a multi-segment run must
+        appear in a child in full, exactly as it was in a parent, or not at
+        all -- never as a partial slice."""
+        rng = random.Random(7)
+        run_a = _build_slope_run(rng, current_z=0)
+        run_b = _build_bank_run(rng)
+        assert len(run_a) > 1 and len(run_b) > 1
+
+        parts1 = segments_to_parts(build_station() + run_a + [FLAT_SEGMENTS[0]])
+        parts2 = segments_to_parts(build_station() + run_b + [TURN_RIGHT[0]])
+        all_original_parts = parts1 + parts2
+
+        for seed in range(50):
+            child1, child2 = crossover_parts(parts1, parts2, random.Random(seed))
+            for child in (child1, child2):
+                for part in child:
+                    assert part in all_original_parts
+
+    def test_mutate_parts_produces_only_well_formed_parts(self):
+        """No empty parts, ever -- an empty part would break the invariant
+        that mutation/crossover always move whole, non-empty units."""
+        rng = random.Random(11)
+        parts = segments_to_parts(create_simple_circuit())
+        for _ in range(20):
+            parts = mutate_parts(parts, rng, rate=0.2)
+            assert all(len(part) >= 1 for part in parts)
+
+    def test_mutate_parts_sometimes_produces_closed_circuits(self):
+        rng = random.Random(13)
+        original = segments_to_parts(create_simple_circuit())
+        valid_count = 0
+        for _ in range(20):
+            mutated = mutate_parts(original, rng, rate=0.1)
+            if is_closed_circuit(Position(), flatten_parts(mutated)):
+                valid_count += 1
+        assert valid_count > 0
+
+    def test_generate_random_track_parts_has_station_and_valid_segments(self):
+        rng = random.Random(17)
+        valid = (
+            set(SIMPLE_SEGMENTS) | STATION_SEGMENTS
+            | set(SLOPE_TRANSITIONS) | set(BANK_TRANSITIONS)
+        )
+        for _ in range(5):
+            parts = generate_random_track_parts(rng)
+            track = flatten_parts(parts)
+            assert station_length(track) == DEFAULT_STATION_LENGTH
+            for seg in track:
+                assert seg in valid
+
+    def test_generate_random_track_parts_respects_length_bounds(self):
+        rng = random.Random(19)
+        parts = generate_random_track_parts(rng, min_length=5, max_length=10)
+        track = flatten_parts(parts)
+        assert len(track) >= 5 + 2  # min_length + station
