@@ -4,6 +4,139 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-16 — The game rejected a ride that passed every check we have
+
+Loaded yesterday's generated coaster into OpenRCT2 and it would not build:
+"Can't construct this here... Too steep for lift hill."
+
+The Mine Train's chain lift only climbs 25-degree track. Yesterday's hill
+climbed on 60-degree pieces, because 60-degree pieces reach a given height in
+fewer tiles and tiles are what `repair_circuit` has to undo. Nothing in
+`construction.py` knew the lift had a maximum steepness, so the ride passed
+validation, exported cleanly, and failed at the only checkpoint that counts.
+
+The fix separates the two halves of a hill, which turn out to have different
+rules. The climb carries the lift, so it is restricted to 25-degree pieces
+(`LIFT_CAPABLE_SEGMENTS`). The drop carries no lift and has no limit, so it
+keeps the 60-degree pieces, which is where the speed and the excitement were
+coming from anyway. A height-10 hill grew from 8 tiles to 10, and
+`create_hill_circuit` sizes its far straight from the hill's length, so it
+still closes at every height. Ratings barely moved: 4.51 excitement on the
+ported model against 4.43 for the version that would not build.
+
+`validate_construction` now reports `lift_too_steep`, so this specific failure
+cannot reach the game again.
+
+### The part worth sitting with
+
+The headless oracle did not catch this, and could not have. It builds track
+without ever setting the chain lift flag, so no lift rule can fire in it. Two
+things follow. It cannot catch lift errors, which is the class of error that
+just cost a day. And any rating it returns is for a ride with no lift at all,
+which on most of our tracks means a train that never leaves the station, so
+"the oracle is our ground truth" is not yet true in the way the research plan
+assumes. Setting the lift flag is now a prerequisite for wiring it in, not a
+refinement afterwards.
+
+Running the oracle on the hill circuit also turned up "Invalid height!" on two
+pieces, which it silently retried 8 z-units higher and then continued. I guessed
+our elevation table was wrong. It is not. `context.getAllTrackSegments()` hands
+back the game's own geometry for all 350 pieces, and its `beginZ`/`endZ` values
+match `segments.py` on every piece checked, at 8 game z-units per height unit.
+The real cause is a per-piece flag the game exposes as `startsHalfHeightUp`,
+which is what the oracle's own docstring already suspected. The retry is
+correct behaviour, not a symptom. Guessing from placement logs when the game
+will simply tell you was the mistake.
+
+### What this says about the order of work
+
+Three checks now exist and they do not overlap the way I assumed:
+`construction.py` knows the rules we have written down, `physics.py` knows
+whether a train gets round, and only the game knows the rest. Every number in
+yesterday's benchmark came from the first two. The ride still would not build.
+Getting the oracle genuinely in the loop moved from "highest-value next step"
+to "the thing standing between us and knowing whether any of this is real."
+
+---
+
+## 2026-08-15 — Making the big drop a part instead of an accident
+
+The part-based genome landed and beat the piece-based one, and breaking its 25
+benchmarked runs down by score showed the next move sitting in plain sight.
+The scores were not spread out. Three runs built a drop of 8 height units or
+taller and scored 3.74, 3.84, and 3.85. The other 22 topped out at a drop of 4
+and scored between 1.90 and 2.10. Nothing landed in between.
+
+That gap is one of the game's own rules. RollerCoaster Tycoon divides all three
+ratings when a ride's highest drop is under 8 units, so a run either builds one
+tall drop and roughly doubles its score, or it does not and sits near 2. It was
+happening 3 times in 25 because a tall drop had to assemble itself out of
+individually chosen climb pieces that all happened to land in a row.
+
+So the drop stopped being something the search discovers and became something
+every genome has: `construction.build_hill(height)` returns a climb and its
+matching descent as one inseparable unit, part 1 of every genome, directly after
+the station. A new mutation raises or lowers it by one step. Crossover cuts
+start past it, so each child keeps exactly one hill and never inherits a second
+one competing for the single chain lift.
+
+### The result
+
+25 seeds, 2,000 evaluations, same harness and same in-loop scorer as the run
+that motivated it:
+
+| | median E | best | worst | median drop | cleared 8 | median mph |
+|---|---|---|---|---|---|---|
+| ga (piece-based) | 0.92 | 1.95 | 0.44 | 2 | 0/25 | 16.7 |
+| ga_parts before | 1.87 | 3.85 | 0.45 | 2 | 3/25 | 22.6 |
+| ga_parts after | 4.33 | 4.60 | 2.04 | 18 | 25/25 | 36.5 |
+
+Reliability stayed at 100% and diversity went from 88% to 100%.
+
+For scale: the real Manic Miner scores 4.63 on this same ported model, and the
+best run here is 4.60 at 88 pieces, 370m, 8 drops and 38mph against the real
+ride's 89 pieces, 481m, 6 drops and 36mph. Worth being careful about what that
+does and does not say. Our port reads 4.63 on a ride the game itself scored 6.2,
+because three excitement-weighted bonuses are not ported and they score the
+scenery and surroundings rather than the track. Both numbers above come off the
+same ruler, so the comparison is fair, but the ruler is known to be short. The
+headless oracle is what settles it.
+
+### Two things that were not the plan
+
+**Steep pieces turned out to be a closure constraint, not a flavour choice.**
+The first version built hills from 25-degree slopes, which need 12 tiles to
+reach height 10. A hill is a straight run, and every tile of it is displacement
+that `repair_circuit` has to walk back on an 8-segment budget. 60-degree pieces
+reach the same height in 8 tiles. The steeper drop being more exciting is a
+bonus; fitting at all is the reason.
+
+**The flat oval stopped working as a seed.** Dropping an 8-tile hill into
+`create_simple_circuit` pushes the endpoint 8 tiles from home, past what repair
+can close, and mutation went to 0 closed circuits out of 30. Raising the repair
+budget did not help at 8, 12, 16, 20 or 24, which matches the 2026-08-09 finding
+that a bigger budget is not the lever it looks like. `generate.create_hill_circuit`
+is the fix: the same stadium loop with the hill sharing the station's straight
+and the far side lengthened to match. It closes, it validates, and unlike the
+flat oval a train actually completes it. Back to 30 out of 30.
+
+Also fixed on the way past: mutations that delete or swap parts were moving
+existing slope runs to elevations they had never been checked against, digging
+below ground. The assembled track is now re-checked as a whole rather than
+trusting the per-run filter.
+
+### What the remaining two runs say
+
+The distribution is bimodal, 23 runs at 4.19 or better and 2 at about 2.05, and
+the two stragglers are not failing on drop height. They clear it at 10, along
+with the speed and drop-count requirements. They fail the fourth requirement,
+negative g: they reach -0.03g against a -0.10g threshold, where the good runs
+reach -0.30g. A minimum-height hill has a crest too gentle to throw anyone out
+of their seat. That is the same shape of problem this entry solved, one
+requirement over, and the same shape of fix is available.
+
+---
+
 ## 2026-08-10 — Lateral g: a two-point fix that didn't survive more data, and the real fix it led to
 
 Issue #41 started from one number: a ride we generated and loaded in-game measured 1.37g lateral, and the model predicted 0.76g. Two things feed lateral g, the fitted coefficient and the turn-radius estimate, and the first attempt guessed radius.
