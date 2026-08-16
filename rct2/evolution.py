@@ -18,6 +18,7 @@ from rct2.fitness import FitnessFunction, ProxyFitness
 from rct2.mutations import (
     crossover,
     crossover_parts,
+    ensure_hill_parts,
     flatten_parts,
     generate_random_track,
     generate_random_track_parts,
@@ -358,6 +359,20 @@ def _ensure_station_parts(
     return [build_station(length)] + [part.copy() for part in parts]
 
 
+def _ensure_scaffold_parts(
+    parts: list[list[int]],
+    rng: random.Random,
+    length: int = DEFAULT_STATION_LENGTH,
+) -> list[list[int]]:
+    """Station at part 0, lift hill at part 1, in that order.
+
+    Order matters: `ensure_hill_parts` inserts at a fixed index on the
+    assumption the station is already part 0, so a genome missing both would
+    otherwise end up with the hill in the wrong slot.
+    """
+    return ensure_hill_parts(_ensure_station_parts(parts, length), rng)
+
+
 def _create_initial_population_parts(
     seed_parts: list[list[int]],
     population_size: int,
@@ -375,7 +390,7 @@ def _create_initial_population_parts(
     while len(individuals) < population_size:
         if rng.random() < 0.7:
             mutated = mutate_parts(seed_parts, rng, rate=0.3)
-            mutated = _ensure_station_parts(mutated, platform)
+            mutated = _ensure_scaffold_parts(mutated, rng, platform)
         else:
             mutated = generate_random_track_parts(rng, station_tiles=platform)
 
@@ -400,9 +415,9 @@ def _create_offspring_parts(
     child1_parts, child2_parts = crossover_parts(parent1.parts, parent2.parts, rng)
 
     for child_parts in [child1_parts, child2_parts]:
-        child_parts = _ensure_station_parts(child_parts, platform)
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
         child_parts = mutate_parts(child_parts, rng, rate=mutation_rate)
-        child_parts = _ensure_station_parts(child_parts, platform)
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
 
         child = Individual(segments=flatten_parts(child_parts), parts=child_parts)
         child.fitness = fitness_fn.evaluate(child.segments)
@@ -429,8 +444,16 @@ def evolve_parts(
     crossover and mutation can never split a run apart. See
     docs/research-plan.md for why that matters.
 
+    Seed with `generate.create_hill_circuit()`, not `create_simple_circuit()`.
+    Every genome here carries a mandatory lift hill, and a hill is a straight
+    run of 8 or more tiles, so inserting one into the flat oval displaces its
+    end further than `repair_circuit` can walk back and leaves every descendant
+    open. Seeded correctly this run improves; seeded with the flat oval it does
+    not, by a wide margin.
+
     Args:
-        seed: Initial track segment list to evolve from (flat, same as evolve())
+        seed: Initial track segment list to evolve from (flat, same as
+            evolve()). Should already close with a lift hill in it.
         rng: Random number generator for reproducible runs
         fitness_fn: Fitness evaluation function (defaults to ProxyFitness)
         population_size: Number of individuals in population
@@ -447,7 +470,9 @@ def evolve_parts(
         fitness_fn = ProxyFitness()
 
     platform = station_length(seed) or DEFAULT_STATION_LENGTH
-    seed_parts = segments_to_parts(_ensure_station(seed, platform))
+    seed_parts = _ensure_scaffold_parts(
+        segments_to_parts(_ensure_station(seed, platform)), rng, platform
+    )
     population = _create_initial_population_parts(
         seed_parts, population_size, fitness_fn, rng, platform
     )
