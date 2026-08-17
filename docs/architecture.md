@@ -109,6 +109,8 @@ Combines geometry with slope, bank, chain-lift, and estimated-energy rules. Gene
 
 Implements insert, delete, replace, swap, mutation, crossover, random-track creation, and circuit repair. At each insertion or replacement point it asks `construction.py` which segments are legal given the current slope and bank state, then picks from what comes back, so offspring stay buildable without the mutation code holding its own copy of the rules. Every defined piece is reachable this way, including the steep slopes.
 
+It also holds the part-based genome (`segments_to_parts`, `mutate_parts`, `crossover_parts`, `generate_random_track_parts`), where a track is a list of parts rather than a flat list of pieces so a cut can never land inside a run. Part 0 is the station and part 1 is a lift hill built by `construction.build_hill`, both at fixed indices: the chain lift goes to the *first* run of climb pieces on a track, so a hill anywhere else risks a smaller climb ahead of it taking the lift. Crossover cuts start past both, which gives every child exactly one hill, and a dedicated mutation raises or lowers that hill's height. See "The lift hill is a part, not a discovery" below.
+
 ### `rct2/fitness.py`
 
 Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus the proxy and physics fitness classes. `WeightedProxyFitness` holds the entire proxy scoring implementation with every reward and penalty exposed as a constructor weight, and `ProxyFitness` is that class with the tuned defaults, so there is only one copy of the scoring rules to keep correct. The proxy rewards geometric qualities and penalizes tracks that are invalid, impractical, or would stall. It does not reproduce OpenRCT2 ride ratings; `PhysicsFitness` scores approximate ones from `physics.py`, but those weights are uncalibrated.
@@ -129,7 +131,19 @@ Nothing consumes this yet; `PhysicsFitness` still scores through `physics.rate()
 
 ### `rct2/evolution.py`
 
-Owns `Individual`, `Population`, evolution statistics, population initialization, tournament selection, elitism, and the main evolution loops.
+Owns `Individual`, `Population`, evolution statistics, population initialization, tournament selection, elitism, and the main evolution loops. Every individual is scored by proxy fitness only; the headless oracle below is not yet called from here.
+
+### `rct2/oracle.py`
+
+Drives a real, headless copy of OpenRCT2 to build a track and read back the ratings the game itself computes, confirmed working end to end in [headless-oracle-spike.md](headless-oracle-spike.md) at roughly 4 seconds per evaluation. That cost is why the plan is to call it only for a handful of finalists per run, not every individual, once it's wired into `evolution.py`.
+
+### `rct2/benchmark.py`
+
+Compares generation methods (GA, random search, and future methods) under matched conditions: same seeds, same evaluation budget, and a shared gate that refuses to score anything that isn't construction-valid and circuit-complete. Built after an earlier round of results turned out to be untrustworthy for mixing exactly those conditions.
+
+### `rct2/calibration.py`
+
+Extracts stats and game-assigned ratings from real, player-made `.td6` files, for calibrating `ratings.py` and `physics.py` against ground truth. Read-only; the source files aren't committed, only the extracted CSV.
 
 ## Design decisions
 
@@ -144,6 +158,8 @@ Owns `Individual`, `Population`, evolution statistics, population initialization
 **Segment lists as genomes.** A list of integer IDs maps directly to TD6 track elements, stays easy to inspect, and works with straightforward mutation and crossover operators.
 
 **Proxy fitness before game ratings.** Geometry-based scoring made it possible to prove the GA and export pipeline without automating the game. It is an intermediate signal, not the final definition of ride quality.
+
+**The lift hill is a part, not a discovery.** The game divides all three ratings when a ride's highest drop is under 8 height units, which put a cliff in the middle of the score distribution: benchmarked runs either cleared it and scored near 3.8, or missed it and scored near 2.0, with nothing between. Only 3 of 25 runs cleared it, because a tall drop had to assemble itself out of individually chosen climb pieces landing in a row. Making the hill a mandatory part with a tunable height took that to 25 of 25 and roughly doubled the median score. Two consequences worth knowing before touching it: hills are built from 60-degree pieces because a straight run is displacement `repair_circuit` has to walk back on an 8-segment budget, and 25-degree pieces need 12 tiles to reach a height 60-degree pieces reach in 8; and `evolve_parts` must be seeded with `generate.create_hill_circuit`, not `create_simple_circuit`, because dropping a hill into the flat oval opens it wider than repair can close.
 
 **Buildable is not runnable.** `validate_construction` answers whether OpenRCT2 would reject a track, and nothing more. Whether a train actually gets around it is a separate question, because the two genuinely come apart: `create_simple_circuit()`, the seed every evolution run starts from, is a flat liftless loop the game builds without complaint and no train can complete. Making a stall a construction issue would mark that seed illegal and start the GA from an invalid individual.
 

@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from rct2 import td6
-from rct2.construction import validate_construction
+from rct2.construction import (
+    MAX_HILL_HEIGHT,
+    MIN_HILL_HEIGHT,
+    validate_construction,
+)
+from rct2.physics import simulate
 from rct2.generate import (
     BEGIN_STATION,
     _reaches_open_ground,
@@ -17,6 +22,7 @@ from rct2.generate import (
     RIGHT_QUARTER_TURN_3,
     calculate_entrance_positions,
     calculate_space_required,
+    create_hill_circuit,
     create_simple_circuit,
     generate_ride,
     generate_simple_coaster,
@@ -287,3 +293,32 @@ def test_generated_ride_elements_have_chain_lift_on_station():
     # Non-station elements should not have chain lift
     for element in ride.elements[2:]:
         assert element.chain_lift is False
+
+
+class TestCreateHillCircuit:
+    """The seed for the part-based GA: closed, buildable, and unlike
+    create_hill_circuit,
+    create_simple_circuit, actually completable by a train."""
+
+    HEIGHTS = list(range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2))
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_closes_at_every_supported_height(self, height):
+        assert is_closed_circuit(Position(), create_hill_circuit(height))
+
+    @pytest.mark.parametrize("station", [4, 6, 8, 10])
+    def test_closes_at_every_station_length(self, station):
+        circuit = create_hill_circuit(station_length=station)
+        assert is_closed_circuit(Position(), circuit)
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_is_construction_valid(self, height):
+        assert validate_construction(create_hill_circuit(height)).valid
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_a_train_completes_it_with_the_full_drop(self, height):
+        """create_simple_circuit is flat and liftless and stalls. This one
+        has to actually run, which is the reason it exists."""
+        stats = simulate(create_hill_circuit(height))
+        assert stats.completed
+        assert stats.highest_drop == height

@@ -12,11 +12,15 @@ from rct2.construction import (
     BEGIN_STATION,
     DEFAULT_STATION_LENGTH,
     END_STATION,
+    MAX_HILL_HEIGHT,
+    MIN_HILL_HEIGHT,
     SLOPE_TRANSITIONS,
     bank_closing_path,
     bank_state_at,
+    build_hill,
     build_station,
     elevation_at,
+    hill_height,
     legal_bank_segments,
     legal_slope_segments,
     slope_closing_path,
@@ -627,6 +631,52 @@ def flatten_parts(parts: list[list[int]]) -> list[int]:
     return [seg for part in parts for seg in part]
 
 
+# Part 0 is the station and part 1 is the lift hill. Those are fixed positions
+# rather than parts that happen to be there: the chain lift is assigned to the
+# *first* run of climb pieces on the track (construction.find_first_hill), so a
+# hill anywhere but directly after the station risks a smaller climb ahead of
+# it taking the lift and leaving the tall one unpowered.
+HILL_INDEX = 1
+FIRST_FREE_INDEX = 2
+
+
+def _stays_above_ground(segments: list[int], min_elevation: int = 0) -> bool:
+    """Whether a track ever dips below the floor the game rejects tracks under.
+
+    `_build_slope_run` already filters its own steps this way, but "delete" and
+    "swap" move existing runs to elevations they were never checked against, so
+    the whole track needs re-checking once a mutation is assembled.
+    """
+    return all(
+        position.z >= min_elevation
+        for position in trace_track(Position(), segments)
+    )
+
+
+def random_hill_height(rng: random.Random) -> int:
+    """An even hill height in [MIN_HILL_HEIGHT, MAX_HILL_HEIGHT]."""
+    return rng.randrange(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2)
+
+
+def ensure_hill_parts(
+    parts: list[list[int]], rng: random.Random,
+) -> list[list[int]]:
+    """Guarantee `parts[HILL_INDEX]` is a lift hill, inserting one if not.
+
+    The counterpart to `_ensure_station_parts`. Every part-based genome is
+    supposed to carry exactly one hill in this slot, so a track can never
+    score below the game's drop-height threshold for want of a big drop.
+    Crossover and mutation are written to preserve it, and this is the
+    backstop for genomes that arrive from anywhere else (a user-supplied
+    seed, `segments_to_parts` on a flat track).
+    """
+    result = [part.copy() for part in parts]
+    if len(result) > HILL_INDEX and hill_height(result[HILL_INDEX]) > 0:
+        return result
+    result.insert(HILL_INDEX, build_hill(random_hill_height(rng)))
+    return result
+
+
 def generate_random_track_parts(
     rng: random.Random,
     min_length: int = 8,
@@ -637,10 +687,18 @@ def generate_random_track_parts(
 
     Builds the same mix of station, slope runs, bank runs, and single simple
     segments with the same probabilities, but keeps each one as its own part
-    instead of flattening into one list.
+    instead of flattening into one list. A lift hill tall enough to clear the
+    game's drop-height threshold is placed at `HILL_INDEX` up front, so every
+    track starts with a qualifying drop rather than waiting for one to
+    assemble itself out of individually-chosen climb pieces.
     """
+    # The hill deliberately does not count against target_length. It is a
+    # straight run of 8 to 16 tiles, so charging it to the budget left short
+    # tracks as a station and a hill in a dead straight line, with no turns
+    # generated at all and no way for repair_circuit to close them.
     target_length = rng.randint(min_length, max_length)
-    parts: list[list[int]] = [build_station(station_tiles)]
+    hill = build_hill(random_hill_height(rng))
+    parts: list[list[int]] = [build_station(station_tiles), hill]
     length = 0
 
     while length < target_length:
@@ -687,9 +745,17 @@ def mutate_parts(
     never picked apart segment by segment. Assumes part 0 is the station
     (callers should run the seed through `segments_to_parts` after
     `_ensure_station`, never the other way around).
+
+    A seventh type, "adjust_hill", raises or lowers the lift hill at
+    `HILL_INDEX` by one height step. That hill is otherwise untouchable: it is
+    never deleted, replaced, swapped, or inserted over, so its height is a
+    setting evolution tunes rather than a structure it has to keep
+    rediscovering. Everything from `FIRST_FREE_INDEX` on behaves as before.
     """
     if not parts:
         return parts
+
+    parts = ensure_hill_parts(parts, rng)
 
     for _ in range(max_attempts):
         result = [part.copy() for part in parts]
@@ -698,22 +764,29 @@ def mutate_parts(
         for _ in range(num_mutations):
             mutation_type = rng.choice([
                 "insert_simple", "insert_slope", "insert_banked",
-                "delete", "replace", "swap",
+                "delete", "replace", "swap", "adjust_hill",
             ])
-            mutable_indices = list(range(1, len(result)))
+            mutable_indices = list(range(FIRST_FREE_INDEX, len(result)))
+            insert_low = min(FIRST_FREE_INDEX, len(result))
 
-            if mutation_type == "insert_simple":
-                pos = rng.randint(1, len(result))
+            if mutation_type == "adjust_hill":
+                current = hill_height(result[HILL_INDEX])
+                step = rng.choice([-2, 2])
+                new_height = min(MAX_HILL_HEIGHT, max(MIN_HILL_HEIGHT, current + step))
+                result[HILL_INDEX] = build_hill(new_height)
+
+            elif mutation_type == "insert_simple":
+                pos = rng.randint(insert_low, len(result))
                 result.insert(pos, [rng.choice(SIMPLE_SEGMENTS)])
 
             elif mutation_type == "insert_slope":
-                pos = rng.randint(1, len(result))
+                pos = rng.randint(insert_low, len(result))
                 run = _build_slope_run(rng, current_z=elevation_at(flatten_parts(result[:pos])))
                 if run:
                     result.insert(pos, run)
 
             elif mutation_type == "insert_banked":
-                pos = rng.randint(1, len(result))
+                pos = rng.randint(insert_low, len(result))
                 run = _build_bank_run(rng)
                 if run:
                     result.insert(pos, run)
@@ -745,7 +818,11 @@ def mutate_parts(
 
         flat_before = flatten_parts(result)
         repaired = repair_circuit(flat_before, rng)
-        if repaired is not None and is_closed_circuit(Position(), repaired):
+        if (
+            repaired is not None
+            and is_closed_circuit(Position(), repaired)
+            and _stays_above_ground(repaired)
+        ):
             tail = repaired[len(flat_before):]
             return result + _group_runs(tail) if tail else result
 
@@ -761,11 +838,16 @@ def crossover_parts(
 
     Cuts only ever land on a part boundary, so a slope run or banked turn
     can never be split between the two children -- the flat version's bug.
-    Part 0 (the station) is always protected since the cut point is chosen
-    from index 1 onward.
+
+    Cut points start at `FIRST_FREE_INDEX`, which protects the station and the
+    lift hill twice over: each child keeps its own parent's prefix (station and
+    hill intact), and the donated suffix starts past the other parent's hill,
+    so no child ends up with two hills competing for the one chain lift.
     """
-    point1 = rng.randint(1, len(parts1))
-    point2 = rng.randint(1, len(parts2))
+    parts1 = ensure_hill_parts(parts1, rng)
+    parts2 = ensure_hill_parts(parts2, rng)
+    point1 = rng.randint(min(FIRST_FREE_INDEX, len(parts1)), len(parts1))
+    point2 = rng.randint(min(FIRST_FREE_INDEX, len(parts2)), len(parts2))
     child1 = parts1[:point1] + parts2[point2:]
     child2 = parts2[:point2] + parts1[point1:]
     return child1, child2

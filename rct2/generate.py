@@ -14,7 +14,9 @@ from rct2.construction import (
     DEFAULT_STATION_LENGTH,
     END_STATION,
     MIDDLE_STATION,
+    MIN_HILL_HEIGHT,
     MIN_STATION_LENGTH,
+    build_hill,
     build_station,
     default_lift_indices,
     station_length,
@@ -54,6 +56,41 @@ def create_simple_circuit(
         build_station(station_length)
         + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees around
         + [FLAT] * station_length                       # back down the far side
+        + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees home
+    )
+
+
+def create_hill_circuit(
+    hill_height: int = MIN_HILL_HEIGHT,
+    station_length: int = DEFAULT_STATION_LENGTH,
+) -> list[int]:
+    """Return `create_simple_circuit`'s shape with a lift hill after the station.
+
+    The same stadium loop, with the hill sharing the station's straight and the
+    far side lengthened to match. Unlike `create_simple_circuit`, which is flat
+    and liftless and which no train can actually complete, this closes *and*
+    runs: the hill powers the train and gives back a drop over the game's
+    rating threshold.
+
+    That is what makes it the right seed for the part-based genetic algorithm.
+    A hill is a straight run of 8 or more tiles, so inserting one into an
+    already-closed flat loop displaces the end by more than `repair_circuit`'s
+    budget can walk back, and every descendant of that seed starts open. Seeding
+    from a loop that already contains the hill avoids the problem rather than
+    asking repair to solve it.
+
+    Args:
+        hill_height: Height units the lift hill climbs and then drops.
+        station_length: Number of station tiles.
+
+    Returns:
+        A closed, construction-valid, completable circuit.
+    """
+    straight = build_station(station_length) + build_hill(hill_height)
+    return (
+        straight
+        + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees around
+        + [FLAT] * len(straight)                        # back down the far side
         + [RIGHT_QUARTER_TURN_3, RIGHT_QUARTER_TURN_3]  # 180 degrees home
     )
 

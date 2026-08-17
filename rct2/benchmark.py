@@ -125,11 +125,11 @@ def method_ga_parts(
     a real one rather than a hopeful rewrite.
     """
     from rct2.evolution import evolve_parts
-    from rct2.generate import create_simple_circuit
+    from rct2.generate import create_hill_circuit
 
     generations = max(1, (max_evaluations - population_size) // population_size)
     stats = evolve_parts(
-        create_simple_circuit(), rng, fitness_fn=_search_fitness(),
+        create_hill_circuit(), rng, fitness_fn=_search_fitness(),
         population_size=population_size, generations=generations,
     )
     return stats.best_individual.segments
