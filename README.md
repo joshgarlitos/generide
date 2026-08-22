@@ -6,7 +6,7 @@ generide is a Python tool for reading, validating, generating, and evolving Roll
 
 I started this project as a way to explore how I could generate new rides for RCT2 and get them running in the game. That turned into a much more interesting problem involving binary file formats, three-dimensional track geometry, construction rules, approximate physics, and a genetic algorithm that has to produce something the game will accept.
 
-Today, generide can evolve a Mine Train layout, export it, and run it in OpenRCT2. The next step is teaching it to optimize for the game's actual excitement, intensity, and nausea ratings instead of geometric stand-ins.
+Today, generide can evolve a Mine Train layout, export it, and run it in OpenRCT2. It scores candidates with OpenRCT2's own excitement, intensity, and nausea calculation, transcribed into Python, and it can hand a finished track to a real headless copy of the game to hear what the game itself says about it.
 
 ## Why this is an interesting problem
 
@@ -41,10 +41,16 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Evolves tracks using mutation, crossover, tournament selection, and elitism.
 - Asks the validator which pieces are legal at each point during mutation, so the full piece vocabulary is reachable, including steep drops.
 - Simulates the ride with an energy-method velocity model to get speed, drops, g-forces, and airtime, and reports whether a train can finish the circuit.
+- Scores rides with OpenRCT2's real rating calculation, transcribed from the game's source with its integer arithmetic intact, including the requirement thresholds that halve every rating when a ride is too slow or its drops too small.
+- Evolves a part-based genome as well as a flat one, so crossover cannot cut a lift hill in half, and carries the hill as a mandatory part rather than something the search has to stumble on.
+- Compares search methods through a benchmark harness at equal evaluation budgets, with a hard buildable-and-completed gate and reliability and diversity tracked alongside quality.
+- Builds a track piece by piece in a real headless OpenRCT2 and reads the game's own ratings back, so a benchmark run can be judged by the game rather than by our model of it.
 - Supports seeded runs so an interesting result or failure can be reproduced.
-- Has 158 passing tests, including regression tests against real OpenRCT2 exports.
+- Has 353 passing tests, including regression tests against real OpenRCT2 exports.
 
-Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. There is also a physics-based fitness that turns simulated ride stats into excitement, intensity, and nausea numbers, but its rating weights are placeholders that have not been calibrated against the game.
+Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. The physics fitness turns simulated ride stats into excitement, intensity, and nausea, and it can use either the old fitted weights or the transcribed calculation from OpenRCT2's source.
+
+The headless oracle is built and the benchmark harness can call it, though the gap between what it reports and what the game stored for a known design is not yet explained. See the [research plan](docs/research-plan.md) for where that stands.
 
 ## Try it
 
@@ -85,6 +91,14 @@ A few flags worth knowing:
 - `--station-length N` — platform length in tiles (default 6, minimum 2). Only applies to the generated seed circuit, not a `--seed <path>` track.
 - `--target-excitement MIN:MAX`, `--target-intensity MIN:MAX`, `--target-nausea MIN:MAX` — with `--fitness physics`, aim for a specific rating range instead of maximizing excitement, e.g. `--target-intensity 4:7`. Our rating model is not yet calibrated against the game's real ratings (see the roadmap), so treat these as rough knobs rather than exact targets for now.
 - `--verbose` — print progress each generation.
+
+To compare search methods rather than produce one ride, use the benchmark harness:
+
+```bash
+python run_benchmark.py --methods random ga ga_parts --seeds 25 --evaluations 2000
+```
+
+Every method gets the same number of track evaluations, and results save with full segment lists so a run can be re-judged later without re-running the search. On a machine with OpenRCT2 installed, `--oracle` judges the winning tracks in the real game and `--rescore <results.json>` does the same to a saved run.
 
 Run `python evolve_coaster.py --help` for the full list.
 
@@ -130,9 +144,12 @@ rct2/
   construction.py   Shared slope, bank, lift, energy, and geometry rules
   generate.py       Ride construction from Python segment lists
   mutations.py      Mutation, crossover, random tracks, and repair
-  physics.py        Ride simulation, stats, and approximate ratings
+  physics.py        Ride simulation and stats
+  ratings.py        OpenRCT2's rating calculation, transcribed
   fitness.py        Proxy fitness, physics fitness, and track-rule checks
   evolution.py      Population management and evolution loops
+  benchmark.py      Method comparison at equal evaluation budgets
+  oracle.py         Headless OpenRCT2 driver for the game's own ratings
 tests/               Unit and fixture-based regression tests
 data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
 ```
@@ -148,7 +165,9 @@ For a deeper look, see the [architecture guide](docs/architecture.md), [roadmap]
 | 3 | Author a coaster in Python and run it in OpenRCT2 | Complete |
 | 4 | Evolve constrained coasters with a genetic algorithm | In progress |
 
-Evolution has been benchmarked against random search and wins clearly, and mutation now reaches the full piece vocabulary. The immediate priority is connecting candidate evaluation to real OpenRCT2 ride ratings. The physics model already produces excitement, intensity, and nausea numbers, but nothing has checked them against the game, so the weights behind them are still guesses. The longer-term goal is to accept constraints such as footprint, cost, excitement, intensity, and nausea, then generate a working ride that fits them.
+Evolution has been benchmarked against random search and wins clearly, and mutation now reaches the full piece vocabulary. Rating candidates is no longer a matter of fitted guesses, because the game's own calculation is transcribed in `rct2/ratings.py`.
+
+The immediate priority is closing the gap between the oracle's ratings and the ones the game recorded for a design it shipped. Until that is understood, every method comparison is scored by the same model the methods are searching against, which measures the model as much as the method. The longer-term goal is to accept constraints such as footprint, cost, excitement, intensity, and nausea, then generate a working ride that fits them.
 
 ## References
 

@@ -4,6 +4,65 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-22 — Making the game the judge of a benchmark run
+
+The part-based genome took the median score from 0.92 to 1.87, and making the
+lift hill a mandatory part took it to 4.33, within 0.03 of what the same model
+gives a real shipped Mine Train. Every one of those numbers came from the
+ported rating model, which is also the model every method searches against, so
+what they really say is that the parts GA is better at satisfying
+`rct2/ratings.py` than the flat GA is. Whether it builds better rides is a
+different question and the benchmark harness had no way to ask it. The oracle could read the game's own ratings, but nothing called it:
+`RunResult` carried `real_excitement` and its two siblings behind a comment
+saying they would be filled in later.
+
+`judge_results` fills them now, for every run that already passed the
+buildable-and-completed gate. `rescore` does the same to a saved results file,
+which is the reason the harness stores full segment lists instead of derived
+stats. A comparison that cost an hour of search can be re-judged for the price
+of the judging alone, so the runs already on disk can get a verdict from the
+game without re-running anything. `run_benchmark.py --oracle` judges a fresh
+run, `--rescore <file>` judges an old one, `--oracle-top N` limits it to the
+best N per method, and the summary prints the game's columns beside the ported
+model's rather than replacing them. The gap between those two columns is the
+thing worth reading.
+
+Two details that are less obvious than they look. A track the oracle did not
+rate leaves the real columns empty instead of taking a zero, because a stalled
+train and a ride the game scored badly are different answers and collapsing
+them would quietly punish exactly the candidates worth investigating. And a
+scorer that hands back the wrong number of judgements now raises rather than
+letting `zip` truncate, since a dropped track would shift every later
+judgement onto the wrong run and the numbers would still look plausible.
+
+### A branch I should have looked for first
+
+I built this on `main` and then found PR #52 sitting open, five days old,
+rewriting the same oracle I had just spent the session rewriting. It had
+already found and fixed the bug I had written up as a suspicion. Placement
+heights were inferred from `nextPosition`, every "Invalid height!" retried 8
+units higher and succeeded, and the error compounded for the rest of the ride.
+That branch drives heights from our own elevation table instead, and it runs
+the real Manic Miner end to end in about ten seconds.
+
+So I threw away my version of that file. Mine was written in a container with
+no OpenRCT2 and no RCT2 data, reasoning about what the game would do; theirs
+was debugged by asking the game. What is left here is the harness wiring,
+which #52 does not touch, and it calls `oracle.score_track` rather than
+anything I added, so it works the same on either branch and merges in either
+order.
+
+The batching and stall screening I wrote are gone with the rest. Batching is
+still worth having, and it belongs behind `score_track`'s own interface on top
+of the fixed oracle rather than bolted onto the harness. The stall screen
+turned out to be redundant anyway, because `evaluate_result`'s existing gate
+already refuses to judge a track that does not complete its circuit.
+
+The lesson is cheap to state and I paid full price for it: check open pull
+requests before starting, not just open issues and the default branch.
+
+---
+
 ## 2026-08-16 — The game rejected a ride that passed every check we have
 
 Loaded yesterday's generated coaster into OpenRCT2 and it would not build:
