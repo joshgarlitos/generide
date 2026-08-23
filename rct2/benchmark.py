@@ -256,6 +256,12 @@ class MethodSummary:
     diversity: float
     median_excitement: Optional[float]
     best_excitement: Optional[float]
+    # The game's own verdict on the runs that were judged by the oracle.
+    # None until judge_results has run; `judged` says how many runs the
+    # medians rest on, since a median over 2 of 25 runs is not a median.
+    judged: int = 0
+    median_real_excitement: Optional[float] = None
+    best_real_excitement: Optional[float] = None
 
 
 def summarize(results: list[RunResult]) -> list[MethodSummary]:
@@ -272,6 +278,7 @@ def summarize(results: list[RunResult]) -> list[MethodSummary]:
     summaries = []
     for method, rs in by_method.items():
         scores = sorted(r.ported_excitement for r in rs if r.ported_excitement is not None)
+        real = sorted(r.real_excitement for r in rs if r.real_excitement is not None)
         summaries.append(MethodSummary(
             method=method,
             runs=len(rs),
@@ -279,5 +286,91 @@ def summarize(results: list[RunResult]) -> list[MethodSummary]:
             diversity=diversity(rs),
             median_excitement=statistics.median(scores) if scores else None,
             best_excitement=max(scores) if scores else None,
+            judged=len(real),
+            median_real_excitement=statistics.median(real) if real else None,
+            best_real_excitement=max(real) if real else None,
         ))
     return summaries
+
+
+def _oracle_scorer(tracks: list[list[int]]) -> list:
+    """Score each track in a real headless OpenRCT2, one at a time.
+
+    Kept as a plain loop over `oracle.score_track` so this module stays
+    independent of how the oracle drives the game. Each call costs a game
+    launch on top of the test lap, so a faster batched path belongs in
+    `rct2/oracle.py` behind the same interface rather than here.
+    """
+    from rct2.oracle import score_track
+
+    return [score_track(segments) for segments in tracks]
+
+
+def judge_results(
+    results: list[RunResult],
+    scorer: Optional[Callable[[list[list[int]]], list]] = None,
+    top_n: Optional[int] = None,
+) -> list[RunResult]:
+    """Fill in `real_*` by asking the game, and hand back the same results.
+
+    This is what breaks the circularity the research plan names: every
+    method searches against the ported rating model, so reporting that same
+    model's opinion of the winner measures the model as much as the method.
+    The game is the only judge that isn't also the objective.
+
+    Only results that already passed the buildable-and-completed gate are
+    sent -- the gate stays the gate, and a track the game would refuse to
+    build isn't worth four seconds of its time. `top_n` judges only the best
+    N per method by ported excitement, for when the oracle's per-track cost
+    matters more than judging every seed; the default judges all of them.
+
+    `scorer` takes a list of segment lists and returns one result per track,
+    each with `.status`, `.excitement`, `.intensity`, and `.nausea`. It
+    defaults to the real oracle; tests pass a stand-in. Anything the oracle
+    did not rate (a stalled train, a track the game refused to build) leaves
+    the real columns empty rather than writing a low score, because "we never
+    found out" and "the game hated it" are different answers.
+    """
+    if scorer is None:
+        scorer = _oracle_scorer
+
+    eligible = [r for r in results if r.valid and r.completed]
+    if top_n is not None:
+        by_method: dict[str, list[RunResult]] = {}
+        for r in eligible:
+            by_method.setdefault(r.method, []).append(r)
+        eligible = [
+            r
+            for rs in by_method.values()
+            for r in sorted(rs, key=lambda r: r.ported_excitement or 0.0, reverse=True)[:top_n]
+        ]
+    if not eligible:
+        return results
+
+    judgements = scorer([r.segments for r in eligible])
+    if len(judgements) != len(eligible):
+        # zip would silently truncate here, and a scorer that drops a track
+        # would shift every later judgement onto the wrong run.
+        raise ValueError(
+            f"scorer returned {len(judgements)} judgements for {len(eligible)} tracks"
+        )
+
+    for result, judged in zip(eligible, judgements):
+        if judged.status != "rated":
+            continue
+        result.real_excitement = judged.excitement
+        result.real_intensity = judged.intensity
+        result.real_nausea = judged.nausea
+    return results
+
+
+def rescore(path: Path, scorer=None, top_n: Optional[int] = None) -> list[RunResult]:
+    """Re-judge a saved results file in place, without re-running any search.
+
+    The point of storing full segment lists rather than derived stats: a run
+    that cost an hour of search can be re-judged by a new rating model, or
+    by the game, for the cost of the judging alone.
+    """
+    results = judge_results(load_results(path), scorer=scorer, top_n=top_n)
+    save_results(results, path)
+    return results

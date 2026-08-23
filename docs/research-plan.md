@@ -201,27 +201,39 @@ get back a results file with the full metric set; re-analyse later without
 redoing the compute.
 
 The buildable-and-completable gate and the diversity metric are in from the
-start, as planned. The final judge is not yet swappable to the real game,
-that's step 2 below; right now every method is scored by the same ported
-model. Three methods are registered: `random` (rung 0), `ga` (rung 1) and
-`ga_parts` (rung 2). Rungs 3 through 5 register the same way once they exist.
+start, as planned. Three methods are registered: `random` (rung 0), `ga`
+(rung 1) and `ga_parts` (rung 2). Rungs 3 through 5 register the same way
+once they exist.
+
+The final judge became swappable on 2026-08-22. `judge_results` fills each
+run's `real_*` columns from the headless oracle, `rescore` does it to a saved
+results file without re-running the search, and the summary prints the game's
+columns beside the ported model's. `run_benchmark.py --oracle` judges a fresh
+run and `--rescore <file>` judges an old one. Both need a machine with
+OpenRCT2 installed. Every number in this document still comes from the ported
+model, because no comparison has actually been judged that way yet.
 
 Run at the scale this plan calls for on 2026-08-15: 25 seeds, 2,000
 evaluations, all three methods. Results in the rung table below and the
 reasoning in docs/devlog.md.
 
-**2. Headless oracle.** Issue #42. The driver is built and proven end to end
-(`rct2/oracle.py`, and see `docs/headless-oracle-spike.md`), but nothing calls
-it yet: every number in this document is still our own model's opinion of
-itself. Swapping it in as the final judge is the open piece, and it is what
-breaks the circularity the whole plan is built around. The harness needs a fast
-in-loop scorer regardless, so starting with the ported model as the judge cost
-almost nothing, and re-running old comparisons is cheap once automated.
+**2. Headless oracle. Driver built and proven end to end 2026-08-15, callable
+from the harness as of 2026-08-22.** Issue #42. `rct2/oracle.py` builds a
+track piece by piece in a real headless game and reads the rating back (see
+also `docs/headless-oracle-spike.md`), and `judge_results` points it at a
+benchmark run.
 
-This is now the highest-value remaining step, because the part-based method
-below scores within 0.03 of a real shipped coaster on the ported model. Whether
-that holds up in the game is exactly the question the ported model cannot
-answer about itself.
+Running it is the open piece, and it is what breaks the circularity the whole
+plan is built around. It matters most right now because the part-based method
+below scores within 0.03 of a real shipped coaster on the ported model, and
+whether that holds up in the game is exactly the question the ported model
+cannot answer about itself.
+
+Three things are still unsettled. The oracle reads 3.12 for Manic Miner
+against the 6.2 the game stored, and that gap is not explained. Batching many
+tracks through one game process is worth doing and belongs behind
+`score_track`'s interface. Determinism across repeat runs is unanswered from
+the spike.
 
 **3. Methods, cheapest first.** Run the cheap rungs even though the expensive
 ones are more interesting, because they are the baselines that show whether
@@ -262,6 +274,13 @@ This is the direct fix for the diagnosed problem, and it matches how real
 coaster design works, in named elements rather than individual pieces. The
 parts could be hand-defined or extracted from the 7 shipped designs we can
 fully parse.
+
+Built on 2026-08-15 as rung 2 (`ga_parts`), using hand-defined parts: one
+piece, or one whole pre-built slope run or banked turn. Parts alone took the
+median from 0.92 to 1.87 against rung 1 at the same budget and fitness
+function. Making the lift hill a mandatory part rather than something the
+search had to stumble on took it to 4.33. Every one of those numbers comes
+from the ported model, so the game has confirmed none of it yet.
 
 ### Building piece by piece instead of editing
 

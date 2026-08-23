@@ -17,11 +17,13 @@ from rct2.benchmark import (
     RunResult,
     diversity,
     evaluate_result,
+    judge_results,
     load_results,
     method_ga,
     method_ga_parts,
     method_random,
     reliability,
+    rescore,
     run_benchmark,
     save_results,
     summarize,
@@ -195,3 +197,106 @@ class TestSummarize:
         summary = summarize(results)[0]
         assert summary.median_excitement is None
         assert summary.reliability == 0.0
+
+
+class _FakeJudged:
+    """Stands in for an OracleResult without needing a game installed."""
+
+    def __init__(self, excitement=None, status="rated"):
+        self.status = status
+        self.excitement = excitement
+        self.intensity = (excitement or 0) + 1
+        self.nausea = (excitement or 0) - 1
+
+
+def _run(method="ga", seed=1, valid=True, completed=True, ported=1.0, segments=None):
+    return RunResult(
+        method=method, seed=seed, evaluations_used=100,
+        segments=segments if segments is not None else [seed],
+        valid=valid, completed=completed,
+        highest_drop=8.0, drop_count=3, max_speed_mph=30.0, ride_length_m=200.0,
+        ported_excitement=ported if (valid and completed) else None,
+        ported_intensity=ported if (valid and completed) else None,
+        ported_nausea=ported if (valid and completed) else None,
+    )
+
+
+def test_judging_only_sends_tracks_that_passed_the_gate():
+    # The hard gate stays the gate: a track the game would refuse to build
+    # is not worth four seconds of the game's time.
+    results = [_run(seed=1), _run(seed=2, valid=False, completed=False), _run(seed=3)]
+    sent = []
+
+    def scorer(tracks):
+        sent.extend(tracks)
+        return [_FakeJudged(6.2) for _ in tracks]
+
+    judge_results(results, scorer=scorer)
+
+    assert sent == [[1], [3]]
+    assert results[0].real_excitement == 6.2
+    assert results[1].real_excitement is None
+    assert results[2].real_excitement == 6.2
+
+
+def test_judging_top_n_takes_the_best_per_method():
+    results = [
+        _run(method="ga", seed=1, ported=1.0),
+        _run(method="ga", seed=2, ported=5.0),
+        _run(method="ga_parts", seed=3, ported=2.0),
+        _run(method="ga_parts", seed=4, ported=4.0),
+    ]
+
+    judge_results(results, scorer=lambda tracks: [_FakeJudged(6.0) for _ in tracks], top_n=1)
+
+    judged = {r.seed for r in results if r.real_excitement is not None}
+    assert judged == {2, 4}
+
+
+def test_an_unrated_track_leaves_the_real_columns_empty():
+    # "The game never gave this a rating" and "the game rated it badly" have
+    # to stay distinguishable, or a stalled ride reads as a 0.0 ride.
+    results = [_run(seed=1)]
+
+    judge_results(results, scorer=lambda tracks: [_FakeJudged(status="stalled")])
+
+    assert results[0].real_excitement is None
+
+
+def test_summary_reports_the_game_alongside_the_ported_model():
+    results = [_run(seed=1, ported=1.0), _run(seed=2, ported=3.0)]
+    judge_results(results, scorer=lambda tracks: [_FakeJudged(2.0), _FakeJudged(4.0)])
+
+    row = summarize(results)[0]
+
+    assert row.median_excitement == 2.0
+    assert row.judged == 2
+    assert row.median_real_excitement == 3.0
+    assert row.best_real_excitement == 4.0
+
+
+def test_summary_says_nothing_about_the_game_before_anything_is_judged():
+    row = summarize([_run(seed=1)])[0]
+    assert row.judged == 0
+    assert row.median_real_excitement is None
+
+
+def test_rescoring_a_saved_file_needs_no_search_rerun(tmp_path):
+    path = tmp_path / "results.json"
+    save_results([_run(seed=1, ported=2.0)], path)
+
+    rescore(path, scorer=lambda tracks: [_FakeJudged(6.2) for _ in tracks])
+
+    reloaded = load_results(path)
+    assert reloaded[0].real_excitement == 6.2
+    assert reloaded[0].real_intensity == 7.2
+    # The ported score is kept, not overwritten: the gap between the two is
+    # the finding.
+    assert reloaded[0].ported_excitement == 2.0
+
+
+def test_a_scorer_that_drops_a_track_is_an_error_not_a_silent_shift():
+    results = [_run(seed=1), _run(seed=2)]
+
+    with pytest.raises(ValueError, match="1 judgements for 2 tracks"):
+        judge_results(results, scorer=lambda tracks: [_FakeJudged(6.0)])

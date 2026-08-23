@@ -5,6 +5,8 @@ Usage:
     python run_benchmark.py
     python run_benchmark.py --methods random ga --seeds 25 --evaluations 2000
     python run_benchmark.py --output benchmark_results/2026-08-10.json
+    python run_benchmark.py --methods ga ga_parts --oracle
+    python run_benchmark.py --rescore benchmark_results/2026-08-10.json
 
 See docs/research-plan.md for why this exists and rct2/benchmark.py for the
 comparison design: equal evaluation budgets, a hard buildable-and-completed
@@ -15,7 +17,9 @@ quality rather than reporting best-of-run alone.
 import argparse
 from pathlib import Path
 
-from rct2.benchmark import METHODS, run_benchmark, save_results, summarize
+from rct2.benchmark import (
+    METHODS, judge_results, rescore, run_benchmark, save_results, summarize,
+)
 
 
 def main():
@@ -68,7 +72,40 @@ def main():
              "benchmark_results/<timestamp>.json)",
     )
 
+    parser.add_argument(
+        "--oracle",
+        action="store_true",
+        help="After the run, judge the winning tracks in a real headless OpenRCT2 "
+             "and record the game's own ratings alongside the ported ones. Needs a "
+             "local OpenRCT2 install (see rct2/oracle.py); costs roughly 4s per track.",
+    )
+    parser.add_argument(
+        "--oracle-top",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --oracle or --rescore, judge only the best N runs per method "
+             "(default: judge every valid, completed run)",
+    )
+    parser.add_argument(
+        "--rescore",
+        type=Path,
+        default=None,
+        metavar="RESULTS.JSON",
+        help="Judge a saved results file with the oracle and save it back, without "
+             "re-running any search. Results store full segment lists so this costs "
+             "only the judging.",
+    )
+
     args = parser.parse_args()
+
+    if args.rescore is not None:
+        print(f"Re-scoring {args.rescore} with the headless oracle")
+        results = rescore(args.rescore, top_n=args.oracle_top)
+        print(f"Saved {len(results)} results back to {args.rescore}")
+        print()
+        print_summary(results)
+        return
 
     if args.output is None:
         from datetime import datetime
@@ -86,17 +123,45 @@ def main():
         methods, seeds, args.evaluations,
         max_width=args.max_width, max_depth=args.max_depth,
     )
+    if args.oracle:
+        print("Judging the results in a real headless OpenRCT2...")
+        results = judge_results(results, top_n=args.oracle_top)
     save_results(results, args.output)
     print(f"Saved {len(results)} results to {args.output}")
     print()
 
-    print(f"{'method':<10} {'runs':>5} {'reliability':>12} {'diversity':>10} "
-          f"{'median E':>9} {'best E':>8}")
-    for row in summarize(results):
+    print_summary(results)
+
+
+def print_summary(results):
+    """Ported-model columns always; the game's columns once anything is judged.
+
+    The two are kept side by side deliberately. Every method searches
+    against the ported model, so a gap between the columns is the thing
+    worth looking at -- it says the search is climbing something the game
+    doesn't agree with.
+    """
+    rows = summarize(results)
+    judged_any = any(row.judged for row in rows)
+
+    header = (f"{'method':<10} {'runs':>5} {'reliability':>12} {'diversity':>10} "
+              f"{'median E':>9} {'best E':>8}")
+    if judged_any:
+        header += f" {'judged':>7} {'game med E':>11} {'game best':>10}"
+    print(header)
+
+    for row in rows:
         median = f"{row.median_excitement:.2f}" if row.median_excitement is not None else "n/a"
         best = f"{row.best_excitement:.2f}" if row.best_excitement is not None else "n/a"
-        print(f"{row.method:<10} {row.runs:>5} {row.reliability:>11.0%} "
-              f"{row.diversity:>10.0%} {median:>9} {best:>8}")
+        line = (f"{row.method:<10} {row.runs:>5} {row.reliability:>11.0%} "
+                f"{row.diversity:>10.0%} {median:>9} {best:>8}")
+        if judged_any:
+            real_median = (f"{row.median_real_excitement:.2f}"
+                           if row.median_real_excitement is not None else "n/a")
+            real_best = (f"{row.best_real_excitement:.2f}"
+                         if row.best_real_excitement is not None else "n/a")
+            line += f" {row.judged:>7} {real_median:>11} {real_best:>10}"
+        print(line)
 
 
 if __name__ == "__main__":
