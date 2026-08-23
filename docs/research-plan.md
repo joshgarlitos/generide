@@ -6,13 +6,22 @@ written to be picked up cold.
 
 ## Where we are
 
-The best tracks we generate score around 2 to 4.5 on our estimate of the
-game's rating. A real Mine Train shipped with the game scores 6.2. Runs are
-wildly inconsistent: with everything else held fixed, one random seed
-produced a track with a 16-unit drop and another produced 2.
+**Updated 2026-08-15.** A typical run now scores 4.33 on our port of the game's
+rating formula, with the best at 4.60 and 23 of 25 runs above 4.19. The real
+Mine Train shipped with the game reads 4.63 on that same port. Run-to-run
+consistency, which used to be the biggest single loss, is largely fixed: every
+one of 25 runs closes, completes, and clears the game's drop-height threshold.
 
-Success means matching 6.2 and then beating it, measured in the game itself
-rather than by our own estimate.
+One caveat sits over all of those numbers. The game itself scores that real
+Mine Train 6.2, not 4.63, because three excitement-weighted bonuses are not
+ported and they read the surrounding park rather than the track. Our numbers and
+the reference are on the same ruler, so comparing them is fair, but the ruler is
+short and it is our own. Nothing here has been checked against the game.
+
+Success still means matching and then beating a real shipped coaster, measured
+in the game itself rather than by our own estimate. What has changed is that the
+in-loop estimate now says we are essentially there, which makes actually
+measuring it the next thing that matters.
 
 ## The core problem
 
@@ -90,6 +99,100 @@ scored 5.03 on tracks the game refuses to build.
    Recorded from the start, because the goal is eventually many kinds of
    rides, and retrofitting this metric means re-running everything.
 
+## How the game and our own models divide the work
+
+Scoring a track with our own code takes about 15ms; scoring it in the real game
+takes about 4 seconds. That 250x gap is why an approximation exists at all. But
+"approximate everything cheaply, confirm the winners in the game" is too blunt,
+because the things we could approximate are not all the same kind of thing.
+Three tiers, and only the bottom two are worth approximating.
+
+### Tier 1: rules. Import exactly, never model.
+
+`context.getAllTrackSegments()` hands over the game's own table for all 350
+pieces: each one's height change (`beginZ`, `endZ`), displacement (`endX`,
+`endY`), slope and bank states, arc length, footprint, and flags including
+`startsHalfHeightUp`, `allowsChainLift`, `isInversion` and `isBanked`. It also
+gives `nextSuggestedSegment`, the game's own view of what naturally follows
+what.
+
+Not every rule is in that table, and assuming one was is how this section first
+got written wrong. `allowsChainLift` is `true` for the 60-degree pieces, so it
+does not encode the "Too steep for lift hill" rule at all; it distinguishes
+pieces that can carry a lift in principle (slopes) from those that never can
+(turns, brakes, stations). The steepness limit is applied when the piece is
+actually placed, and it depends on the ride type.
+
+The lesson is the same either way, and it points at a better tool than the
+table. `context.queryAction` runs the game's full placement validation and
+returns its exact error without building anything:
+
+    25_to_60 with lift    -> error=2 "Too steep for lift hill"
+    60_up    with lift    -> error=2 "Too steep for lift hill"
+    60_up    without lift -> error=1 "Invalid height!"
+
+So the authoritative way to know whether we may build something is to ask the
+game to check it, not to replicate its rulebook. Derive per-piece legality by
+querying once and caching, rather than transcribing.
+
+Nearly all of `segments.py` and much of `construction.py` is a hand
+transcription of rules the game will either state or check for us. Both of the
+failures on 2026-08-16 were rules we had transcribed wrong or never known, and
+both were free to ask about. Predicting an answer the game will give you is the
+mistake, not the cost of asking.
+
+This tier costs nothing at runtime once imported, so there is no reason to
+approximate any of it, ever.
+
+### Tier 2: does a train get round. Simulate, but check it far more often.
+
+This needs a real test run, so it cannot be imported. It is also the weakest
+part of the project: `physics.py` reported that a ride completes when the real
+game stalled it three times on brake pieces it does not model at all.
+
+Two properties make this tier deserve game time earlier than ratings do. It is
+binary, so a track that stalls is worthless regardless of how it scores. And it
+is not something a rating can compensate for. Spend oracle calls here before
+spending them on excitement.
+
+### Tier 3: the rating. Approximate, confirm on finalists.
+
+This is the genuinely expensive one and the one the cheap-then-confirm pattern
+was designed for. `ratings.py` scores every candidate during a run and the
+oracle scores the handful that survive.
+
+## Two additions that make the hybrid work
+
+### Feed the game's answers back into the fast model
+
+A hybrid that only reads the game's verdict at the end is a filter. A hybrid
+that learns from it compounds. Every track the oracle scores is a calibration
+point, and the oracle also returns the game's own `highestDropHeight`,
+`maxSpeed`, `totalAirTime` and g-force maxima, which are exactly the quantities
+`physics.py` estimates.
+
+`calibration.py` currently learns only from 204 designs that shipped with the
+game. Those are all good rides, built by people, and they are unlike anything
+evolution produces. Our own failures are the more informative training data.
+
+### Sample the rejected candidates, not only the winners
+
+The failure mode a hybrid actually dies of: the fast model decides what the game
+ever sees, so anything the fast model dislikes becomes invisible. A systematic
+error there does not show up as noise, it silently shrinks the search space.
+
+The insurance is cheap. Periodically send the oracle a few tracks the fast model
+rejected. If the game likes what we threw away, the fast model needs work, and
+we find out in an hour rather than after a month of runs converging on the wrong
+thing.
+
+### Cache game scores against the piece list
+
+`benchmark.py` already saves the full segment list of every result rather than
+just its score, so a saved run can be re-scored without redoing the search.
+Keeping that property means every oracle call is paid for once. Re-running an
+old comparison against a new model is then free.
+
 ## Build order
 
 **1. Benchmark harness. Done, 2026-08-10.** `rct2/benchmark.py` and
@@ -100,32 +203,50 @@ redoing the compute.
 The buildable-and-completable gate and the diversity metric are in from the
 start, as planned. The final judge is not yet swappable to the real game,
 that's step 2 below; right now every method is scored by the same ported
-model. Two methods are registered so far: `random` (rung 0) and `ga` (rung
-1, the current genetic algorithm). Rungs 2 through 5 register the same way
-once they exist.
+model. Three methods are registered: `random` (rung 0), `ga` (rung 1) and
+`ga_parts` (rung 2). Rungs 3 through 5 register the same way once they exist.
 
-Not yet run at the scale the plan calls for (25 seeds, a real evaluation
-budget). A 5-seed, 400-evaluation smoke test confirms the plumbing works;
-see docs/devlog.md (2026-08-10). The actual random-vs-GA comparison, and
-everything after it, is still open.
+Run at the scale this plan calls for on 2026-08-15: 25 seeds, 2,000
+evaluations, all three methods. Results in the rung table below and the
+reasoning in docs/devlog.md.
 
-**2. Headless oracle.** Issue #42. The harness needs a fast in-loop scorer
-regardless, so starting with the ported model as the judge and swapping the
-oracle in afterwards costs almost nothing, and re-running old comparisons is
-cheap once automated.
+**2. Headless oracle.** Issue #42. The driver is built and proven end to end
+(`rct2/oracle.py`, and see `docs/headless-oracle-spike.md`), but nothing calls
+it yet: every number in this document is still our own model's opinion of
+itself. Swapping it in as the final judge is the open piece, and it is what
+breaks the circularity the whole plan is built around. The harness needs a fast
+in-loop scorer regardless, so starting with the ported model as the judge cost
+almost nothing, and re-running old comparisons is cheap once automated.
+
+This is now the highest-value remaining step, because the part-based method
+below scores within 0.03 of a real shipped coaster on the ported model. Whether
+that holds up in the game is exactly the question the ported model cannot
+answer about itself.
 
 **3. Methods, cheapest first.** Run the cheap rungs even though the expensive
 ones are more interesting, because they are the baselines that show whether
 the expensive ones earn their cost.
 
-| Rung | Method | What it tests |
-|---|---|---|
-| 0 | Random legal tracks, keep the best | Whether any search beats none |
-| 1 | Current genetic algorithm | The baseline to beat |
-| 2 | Genetic algorithm over parts, not pieces | Whether representation is the problem |
-| 3 | Build piece by piece with lookahead | Whether avoiding cut-and-join helps |
-| 4 | Same, with a learned guide | Whether learning beats plain search |
-| 5 | Full reinforcement learning | Whether a trained policy beats search |
+| Rung | Method | What it tests | Result |
+|---|---|---|---|
+| 0 | Random legal tracks, keep the best | Whether any search beats none | 12% reliability, median E 0.44 |
+| 1 | Current genetic algorithm | The baseline to beat | 100% reliability, median E 0.92 |
+| 2 | Genetic algorithm over parts, not pieces | Whether representation is the problem | **Yes.** median E 4.33 |
+| 3 | Build piece by piece with lookahead | Whether avoiding cut-and-join helps | not run |
+| 4 | Same, with a learned guide | Whether learning beats plain search | not run |
+| 5 | Full reinforcement learning | Whether a trained policy beats search | not run |
+
+Rung 2 answered the question this plan was written to ask, at 25 seeds and
+2,000 evaluations. Representation was the problem. Parts alone took the median
+from 0.92 to 1.87; making the lift hill a mandatory part rather than something
+the search had to stumble on took it to 4.33, with 25 of 25 runs clearing the
+game's drop-height threshold against 3 of 25 before. See docs/devlog.md
+(2026-08-15).
+
+Rungs 3 through 5 are worth less than they were before this result, since the
+cheap rung is now within 0.03 of a real shipped coaster on the in-loop scorer.
+Verifying that against the game (step 2 above) comes first: there is no point
+paying for a better search until we know what the current one is really worth.
 
 ## The two candidate redesigns
 

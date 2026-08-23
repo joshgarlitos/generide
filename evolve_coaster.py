@@ -14,7 +14,7 @@ from pathlib import Path
 
 from rct2 import physics, td6
 from rct2.construction import default_lift_indices, validate_construction
-from rct2.evolution import evolve
+from rct2.evolution import evolve, evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
     BEGIN_STATION,
@@ -23,6 +23,7 @@ from rct2.generate import (
     MIN_STATION_LENGTH,
     calculate_entrance_positions,
     calculate_space_required,
+    create_hill_circuit,
     create_simple_circuit,
 )
 from rct2.td6 import Entrance, Ride, TrackElement
@@ -136,6 +137,17 @@ def main():
         help="Fitness function: geometric proxy or physics simulation (default: proxy)",
     )
     parser.add_argument(
+        "--genome",
+        choices=["parts", "pieces"],
+        default="parts",
+        help=(
+            "Track representation. 'parts' groups pieces into runs so crossover "
+            "can't split one, and gives every design a lift hill with a tunable "
+            "height; 'pieces' is the older flat list, kept as a baseline. "
+            "See docs/devlog.md 2026-08-15 for the measured difference (default: parts)"
+        ),
+    )
+    parser.add_argument(
         "--max-width",
         type=int,
         default=30,
@@ -218,11 +230,21 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
-        seed = create_simple_circuit(station_length=args.station_length)
-        print(
-            f"Using simple circuit as seed "
-            f"({args.station_length}-tile station platform)"
-        )
+        if args.genome == "parts":
+            # The part-based genome gives every design a lift hill, and a hill
+            # is a straight run longer than repair_circuit can close back into
+            # the flat oval. Seed from a loop that already contains one.
+            seed = create_hill_circuit(station_length=args.station_length)
+            print(
+                f"Using hill circuit as seed "
+                f"({args.station_length}-tile station platform, lift hill)"
+            )
+        else:
+            seed = create_simple_circuit(station_length=args.station_length)
+            print(
+                f"Using simple circuit as seed "
+                f"({args.station_length}-tile station platform)"
+            )
     else:
         seed_path = Path(args.seed)
         if not seed_path.exists():
@@ -270,7 +292,8 @@ def main():
     print()
 
     # Run evolution
-    stats = evolve(
+    run = evolve_parts if args.genome == "parts" else evolve
+    stats = run(
         seed=seed,
         rng=rng,
         fitness_fn=fitness_fn,

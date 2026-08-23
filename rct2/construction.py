@@ -69,6 +69,17 @@ FLAT_BANK_SEGMENTS = {
 }
 
 CHAIN_LIFT_SEGMENTS = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09}
+
+# Which of those a chain lift may actually occupy. The Mine Train's lift tops
+# out at 25 degrees, so putting one on a 60-degree piece (0x05, or either of
+# the 0x07/0x08 transitions into and out of it) gets "Too steep for lift hill"
+# and the game refuses to build the ride at all.
+#
+# Learned the hard way, from the game's own error dialog, after a generated
+# ride passed every check here and then would not place. The headless oracle
+# did not catch it either: it builds track without ever setting the chain lift
+# flag, so no lift rule can fire there. See docs/devlog.md (2026-08-16).
+LIFT_CAPABLE_SEGMENTS = {0x04, 0x06, 0x09}
 FRICTION_PER_SEGMENT = 0.1
 
 # Station pieces drive the train, exactly as a chain lift does.
@@ -118,6 +129,81 @@ def station_length(segments: list[int]) -> int:
     if index >= len(segments) or segments[index] != END_STATION:
         return 0
     return index + 1
+
+
+# The game divides all three ratings when a ride's highest drop falls below
+# this many height units (ratings.py's "requirement_drop_height"). Benchmarked
+# tracks split cleanly on that line: the 3 of 25 ga_parts runs that cleared it
+# scored 3.74-3.85, every run that missed it scored 1.9-2.1, and nothing
+# landed between. See docs/devlog.md (2026-08-15).
+DROP_HEIGHT_THRESHOLD = 8
+
+# A hill climbs gently and drops steeply, which is not a stylistic choice on
+# either half. The climb carries the chain lift, so it is restricted to the
+# 25-degree pieces in LIFT_CAPABLE_SEGMENTS. The drop carries no lift and has
+# no such limit, so it uses 60-degree pieces: they are more exciting, and they
+# give the height back in fewer tiles. Tiles matter because a hill is a
+# straight run that pushes the end of the track away from the station, and
+# repair_circuit may only add 8 pieces to steer it home again.
+#
+# The smallest hill we build is 10, over the threshold above and the same
+# height as the real Manic Miner's biggest drop.
+MIN_HILL_HEIGHT = 10
+MAX_HILL_HEIGHT = 26
+
+
+def _drop_steps(height: int) -> tuple[int, int]:
+    """Steep and gentle middle-piece counts making up a `height` descent.
+
+    The drop is a fixed 10-unit frame (the entry, the two 25-to-60 transitions,
+    and the exit) plus any number of 8-unit steep middles and 2-unit gentle
+    ones, so `height` = 10 + 8*steep + 2*gentle.
+    """
+    remainder = height - MIN_HILL_HEIGHT
+    steep = remainder // 8
+    return steep, (remainder - 8 * steep) // 2
+
+
+def build_hill(height: int = MIN_HILL_HEIGHT) -> list[int]:
+    """Return one climb-then-drop sequence that clears `height` height units.
+
+    The climb uses only pieces a chain lift is allowed to sit on, and the
+    descent gives the whole height back without a single level piece breaking
+    it up, so `physics.simulate` measures it as one drop of exactly `height`.
+
+    The two halves are returned as one list on purpose: grouped into a single
+    genome part they cannot be separated by crossover, which is what stops a
+    tall drop from being assembled by luck and then cut apart. See
+    docs/research-plan.md.
+
+    Args:
+        height: Height units to climb and then drop. Must be even and between
+            MIN_HILL_HEIGHT and MAX_HILL_HEIGHT.
+
+    Raises:
+        ValueError: If height is odd or outside the supported range.
+    """
+    if not MIN_HILL_HEIGHT <= height <= MAX_HILL_HEIGHT:
+        raise ValueError(
+            f"hill height must be in [{MIN_HILL_HEIGHT}, {MAX_HILL_HEIGHT}], "
+            f"got {height}"
+        )
+    if height % 2:
+        raise ValueError(f"hill height must be even, got {height}")
+
+    climb = [0x06] + [0x04] * (height // 2 - 1) + [0x09]
+    steep, gentle = _drop_steps(height)
+    drop = [0x0C, 0x0D] + [0x0B] * steep + [0x0E] + [0x0A] * gentle + [0x0F]
+    return climb + drop
+
+
+def hill_height(part: list[int]) -> int:
+    """Height units a `build_hill` sequence climbs, or 0 if `part` isn't one."""
+    for height in range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2):
+        if part == build_hill(height):
+            return height
+    return 0
+
 
 # Kinetic energy expressed as head (height the train could still climb), in
 # RCT2 height units. Derived from physics.py: v^2 / 2g, converted out of meters
@@ -315,6 +401,27 @@ def check_first_hill_has_lift(segments: list[int], lift_indices: set[int]) -> bo
     return any(index in lift_indices for index in range(start, end))
 
 
+def _lift_steepness_issues(
+    segments: list[int], lift_indices: Set[int],
+) -> list[ValidationIssue]:
+    """Chain lift pieces the game would reject as too steep.
+
+    The game refuses to build the whole ride, with "Too steep for lift hill",
+    rather than quietly dropping the lift from those pieces.
+    """
+    return [
+        ValidationIssue(
+            "lift_too_steep",
+            f"segment {index} carries the chain lift on a piece too steep "
+            f"for it (0x{segments[index]:02X})",
+        )
+        for index in sorted(lift_indices)
+        if index < len(segments)
+        and segments[index] not in LIFT_CAPABLE_SEGMENTS
+        and segments[index] not in STATION_SEGMENTS
+    ]
+
+
 def _energy_issues(segments: list[int], lift_indices: set[int]) -> list[ValidationIssue]:
     """Segments that climb higher than the lift could ever carry the train.
 
@@ -422,5 +529,6 @@ def validate_construction(
     issues.extend(_bank_issues(segments))
     if not check_first_hill_has_lift(segments, resolved):
         issues.append(ValidationIssue("missing_chain_lift", "the first uphill section has no chain lift"))
+    issues.extend(_lift_steepness_issues(segments, resolved))
     issues.extend(_energy_issues(segments, resolved))
     return ConstructionResult(tuple(issues), geometry, frozenset(resolved))

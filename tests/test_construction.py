@@ -4,16 +4,24 @@ import pytest
 
 from rct2 import construction, physics, td6
 from rct2.construction import (
+    DROP_HEIGHT_THRESHOLD,
+    LIFT_CAPABLE_SEGMENTS,
+    MAX_HILL_HEIGHT,
+    MIN_HILL_HEIGHT,
     bank_closing_path,
     bank_state_at,
+    build_hill,
+    build_station,
     default_lift_indices,
     energy_stall_index,
     legal_bank_segments,
     legal_slope_segments,
     slope_closing_path,
+    hill_height,
     slope_state_at,
     validate_construction,
 )
+from rct2.segments import SEGMENTS
 from rct2.evolution import Individual
 from rct2.generate import create_simple_circuit
 from rct2.physics import simulate
@@ -190,3 +198,117 @@ def test_stall_screen_constants_match_the_physics_model():
     assert construction.STALL_HEAD == pytest.approx(
         head_units(physics.MIN_SPEED_MS), abs=1e-3
     )
+
+
+class TestBuildHill:
+    """The lift hill part: one atomic climb-then-drop over the game's
+    drop-height threshold. See docs/research-plan.md."""
+
+    HEIGHTS = list(range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2))
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_climb_and_drop_cancel_out(self, height):
+        """A hill returns the track to the elevation it started at, so it can
+        be dropped in anywhere without shifting everything after it."""
+        deltas = [SEGMENTS[seg].elevation_delta for seg in build_hill(height)]
+        assert sum(deltas) == 0
+        assert sum(d for d in deltas if d > 0) == height
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_physics_measures_it_as_one_drop_of_that_height(self, height):
+        """The descent must be uninterrupted. physics.simulate resets its
+        run at the first non-descending piece, so a hill whose drop is broken
+        up would measure short and miss the threshold it exists to clear."""
+        stats = simulate(build_station() + build_hill(height) + [0x00] * 3)
+        assert stats.highest_drop == height
+        assert stats.drop_count == 1
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_every_hill_clears_the_games_drop_threshold(self, height):
+        assert height >= DROP_HEIGHT_THRESHOLD
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_the_climb_takes_the_chain_lift(self, height):
+        """find_first_hill assigns the lift to the first run of climb pieces,
+        so a hill placed directly after the station must be that run --
+        otherwise the train has no power to reach the top."""
+        segments = build_station() + build_hill(height) + [0x00] * 3
+        lift = default_lift_indices(segments)
+        assert lift
+        assert construction.check_first_hill_has_lift(segments, lift)
+
+    @pytest.mark.parametrize("height", HEIGHTS)
+    def test_hill_height_round_trips(self, height):
+        assert hill_height(build_hill(height)) == height
+
+    def test_hill_height_rejects_anything_that_is_not_a_hill(self):
+        assert hill_height([]) == 0
+        assert hill_height([0x00] * 8) == 0
+        assert hill_height(build_station()) == 0
+        assert hill_height(build_hill(MIN_HILL_HEIGHT)[:-1]) == 0
+
+    def test_rejects_odd_and_out_of_range_heights(self):
+        with pytest.raises(ValueError):
+            build_hill(MIN_HILL_HEIGHT + 1)
+        with pytest.raises(ValueError):
+            build_hill(MIN_HILL_HEIGHT - 2)
+        with pytest.raises(ValueError):
+            build_hill(MAX_HILL_HEIGHT + 2)
+
+
+class TestLiftSteepness:
+    """The Mine Train's chain lift tops out at 25 degrees.
+
+    A generated ride passed every check here and then would not build in the
+    game: "Too steep for lift hill". The headless oracle missed it too, since
+    it places track without ever setting the chain lift flag. See
+    docs/devlog.md (2026-08-16).
+    """
+
+    def test_a_steep_lift_is_a_construction_error(self):
+        segments = (
+            build_station()
+            + [0x06, 0x07, 0x05, 0x08, 0x09, 0x0C, 0x0D, 0x0E, 0x0F]
+            + [0x00] * 3
+        )
+        codes = [i.code for i in validate_construction(segments).issues]
+        assert "lift_too_steep" in codes
+
+    def test_the_error_names_every_offending_piece(self):
+        segments = build_station() + [0x06, 0x07, 0x05, 0x08, 0x09] + [0x00] * 3
+        issues = [
+            i for i in validate_construction(segments).issues
+            if i.code == "lift_too_steep"
+        ]
+        # 0x07, 0x05 and 0x08 are the 60-degree climb and its transitions.
+        assert len(issues) == 3
+
+    @pytest.mark.parametrize(
+        "height", list(range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2))
+    )
+    def test_build_hill_never_produces_one(self, height):
+        segments = build_station() + build_hill(height) + [0x00] * 3
+        codes = [i.code for i in validate_construction(segments).issues]
+        assert "lift_too_steep" not in codes
+
+    @pytest.mark.parametrize(
+        "height", list(range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2))
+    )
+    def test_every_climb_piece_can_carry_a_lift(self, height):
+        """The climb is what the lift sits on, so every rising piece in a hill
+        has to be one the lift is allowed to occupy."""
+        climbing = [
+            seg for seg in build_hill(height)
+            if SEGMENTS[seg].elevation_delta > 0
+        ]
+        assert climbing
+        assert all(seg in LIFT_CAPABLE_SEGMENTS for seg in climbing)
+
+    def test_the_drop_is_still_allowed_to_be_steep(self):
+        """Only the lift is limited. A 60-degree drop is legal, and it is
+        where the speed and the excitement come from."""
+        dropping = [
+            seg for seg in build_hill(MIN_HILL_HEIGHT)
+            if SEGMENTS[seg].elevation_delta < 0
+        ]
+        assert any(seg in {0x0B, 0x0D, 0x0E} for seg in dropping)

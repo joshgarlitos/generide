@@ -13,7 +13,7 @@ from rct2.evolution import (
     evolve_until,
 )
 from rct2.fitness import ProxyFitness
-from rct2.generate import create_simple_circuit
+from rct2.generate import create_hill_circuit, create_simple_circuit
 from rct2.geometry import Position, is_closed_circuit
 from rct2.mutations import BEGIN_STATION, END_STATION
 
@@ -371,7 +371,7 @@ class TestEvolveParts:
 
     def test_evolution_returns_stats(self):
         rng = random.Random(42)
-        seed = create_simple_circuit()
+        seed = create_hill_circuit()
         stats = evolve_parts(seed, rng, generations=5, population_size=10)
 
         assert isinstance(stats, EvolutionStats)
@@ -381,7 +381,7 @@ class TestEvolveParts:
 
     def test_evolution_improves_fitness(self):
         rng = random.Random(42)
-        seed = create_simple_circuit()
+        seed = create_hill_circuit()
         fitness_fn = ProxyFitness()
 
         stats = evolve_parts(
@@ -397,7 +397,7 @@ class TestEvolveParts:
         assert stats.best_fitness >= initial_fitness - 50  # Allow some variance
 
     def test_same_seed_produces_identical_results(self):
-        seed = create_simple_circuit()
+        seed = create_hill_circuit()
 
         rng1 = random.Random(12345)
         stats1 = evolve_parts(seed, rng1, generations=10, population_size=20, mutation_rate=0.1)
@@ -423,14 +423,14 @@ class TestEdgeCases:
 
     def test_evolution_with_small_population(self):
         """Should work with very small population."""
-        seed = create_simple_circuit()
+        seed = create_hill_circuit()
         rng = random.Random(42)
         stats = evolve(seed, rng, generations=3, population_size=3)
         assert stats.best_individual is not None
 
     def test_evolution_with_one_generation(self):
         """Should work with single generation."""
-        seed = create_simple_circuit()
+        seed = create_hill_circuit()
         rng = random.Random(42)
         stats = evolve(seed, rng, generations=1, population_size=10)
         assert len(stats.fitness_history) == 1
