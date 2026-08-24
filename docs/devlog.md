@@ -84,9 +84,10 @@ game. Everything else is the game's number.
 `ridesetvehicle` rejects every argument shape tried, which #52 already
 documented, so the ride runs on the game's defaults. The plugin reads the real
 configuration back and prints it, but nothing parsed that line, so the result
-reported the 1 train and 2 cars we asked for while the game had actually run 3
-trains of 4. Anything calibrated against that would have been calibrated
-against a ride that never existed. The result now carries what actually ran.
+reported the single train we asked for while the game had actually run three,
+12 cars in total against the 2 we requested. Anything calibrated against that
+would have been calibrated against a ride that never existed. The result now
+carries what actually ran.
 
 ---
 
