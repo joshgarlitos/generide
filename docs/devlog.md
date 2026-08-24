@@ -4,6 +4,92 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-23 — The oracle rates Manic Miner, and the port reads high rather than low
+
+Ran the oracle against the fixture on a machine with the game installed. It
+came back `status=timeout` with the train still moving at full speed, which is
+the confusing failure: nothing was wrong with the track.
+
+`timeout_ticks` defaulted to 2000, which is 50 seconds of game time. The game
+measured this ride at 83 seconds. The budget was shorter than the ride, so a
+ride that ran perfectly was reported as a failure, and every track over about
+50 seconds hit the same wall. The stall detector could never have caught it,
+because a train running a long circuit is not still.
+
+Raising it to 12000 rated the ride immediately:
+
+    3.12 / 3.48 / 2.55, against the 6.20 / 6.50 / 4.20 the file stores
+
+The default now comes from the track instead of a constant, budgeting four
+times our own predicted ride time plus two minutes, with a floor. The margin
+is free on a ride that works, because the read loop stops the moment a rating
+arrives, and a genuinely stuck train is caught by the stall detector well
+before the backstop. Too long beats too short here by a wide margin.
+
+### What the game measured, next to what we predict
+
+| stat | game | our physics |
+|---|---|---|
+| highest drop | 10 | 10 |
+| number of drops | 6 | 6 |
+| max speed | 37 mph | 37.8 |
+| average speed | 14 mph | 16.4 |
+| ride length | 710 | 482 m |
+| ride time | 83 s | 65.7 |
+| total air time | 2.37 | 1.57 |
+| max +ve vertical g | 2.67 | 2.33 |
+| max −ve vertical g | −0.86 | −0.51 |
+| max lateral g | 1.55 | 1.35 |
+
+Drop height and drop count land exactly, speed is within a mile an hour, and
+the g-forces are all somewhat low, negative vertical worst at −0.51 against
+−0.86. Ride length is not comparable as printed, since the game's 710 is in
+its own units against our 482 metres.
+
+### The finding that changes the plan
+
+Feed the game's own measurements through our ported rating calculation and it
+returns 4.80 / 6.40 / 4.09. The game, on the same track with the same stats,
+returns 3.12 / 3.48 / 2.55. The port reads 1.54x, 1.84x and 1.60x high.
+
+That inverts the standing explanation. The story until now was that the port
+is missing three excitement bonuses that read the surrounding park, so a track
+built on bare flattened ground would score lower than the same design in a
+park full of scenery and tunnels. That is still true, but it cannot explain
+this gap, because those bonuses only add. The port is already above the game
+before any of them are counted, so adding them widens the gap rather than
+closing it.
+
+Swapping our simulated stats for the game's barely moves the port, 4.63 to
+4.80. So our physics is not the main error either. Something in the port's own
+arithmetic or coverage is, and it is worth more than another search method
+right now, because every method comparison in the benchmark harness is scored
+by this port.
+
+Ruled out already: the per-vehicle multiplier. The game ran 12 cars across 3
+trains where the port assumed 2 per train, and sweeping `cars_per_train` from
+1 to 6 moves excitement by 0.14 total and leaves intensity and nausea
+untouched.
+
+The ratios are not uniform, 1.54 / 1.84 / 1.60, which argues against a single
+missed requirement check, since those divide all three by 2 together. The
+uneven split points at a term that weights the three ratings differently.
+
+One caveat on the comparison: the game does not report total drop height, so
+that one input to the port came from our own simulation rather than from the
+game. Everything else is the game's number.
+
+### A smaller thing found on the way
+
+`ridesetvehicle` rejects every argument shape tried, which #52 already
+documented, so the ride runs on the game's defaults. The plugin reads the real
+configuration back and prints it, but nothing parsed that line, so the result
+reported the 1 train and 2 cars we asked for while the game had actually run 3
+trains of 4. Anything calibrated against that would have been calibrated
+against a ride that never existed. The result now carries what actually ran.
+
+---
+
 ## 2026-08-22 — Making the game the judge of a benchmark run
 
 The part-based genome took the median score from 0.92 to 1.87, and making the

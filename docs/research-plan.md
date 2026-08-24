@@ -229,11 +229,21 @@ below scores within 0.03 of a real shipped coaster on the ported model, and
 whether that holds up in the game is exactly the question the ported model
 cannot answer about itself.
 
-Three things are still unsettled. The oracle reads 3.12 for Manic Miner
-against the 6.2 the game stored, and that gap is not explained. Batching many
-tracks through one game process is worth doing and belongs behind
-`score_track`'s interface. Determinism across repeat runs is unanswered from
-the spike.
+The oracle rated Manic Miner on 2026-08-23, at 3.12 / 3.48 / 2.55 against the
+6.20 / 6.50 / 4.20 the file stores. Chasing that gap turned up something that
+changes the priorities here: fed the game's own measured stats, our ported
+rating calculation returns 4.80 / 6.40 / 4.09, so the port reads 1.5x to 1.8x
+*high* against the game rather than low. The missing park-dependent bonuses
+cannot explain that, because they only add. See docs/devlog.md (2026-08-23).
+
+That makes the port the most valuable thing to fix, ahead of any new search
+method, because every method in the harness is scored by it and the harness
+now has the game to check it against. Substituting the game's stats for ours
+moves the port by 0.17, so our physics is not where the error lives.
+
+Two smaller things stay open. Batching many tracks through one game process is
+worth doing and belongs behind `score_track`'s interface. Determinism across
+repeat runs is unanswered from the spike.
 
 **3. Methods, cheapest first.** Run the cheap rungs even though the expensive
 ones are more interesting, because they are the baselines that show whether

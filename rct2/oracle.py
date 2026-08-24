@@ -750,6 +750,54 @@ def _parse_measurements(line: str) -> Optional[RideMeasurements]:
     return RideMeasurements(**values)
 
 
+_TRAINS_RE = re.compile(r"GENERIDE_TRAINS\|numTrains=(?P<trains>-?\d+)\|carsPerTrain=(?P<cars>-?\d+)")
+
+TICKS_PER_SECOND = 40  # measured at game speed 1, see docs/headless-oracle-spike.md
+
+
+def _parse_trains(line: str) -> Optional[tuple[int, int]]:
+    """Read back the train configuration the game actually gave the ride.
+
+    `ridesetvehicle` rejects every argument shape tried so far, so the ride
+    runs on the game's defaults and what we asked for is not what ran. The
+    plugin reads `ride.vehicles.length` back after opening, and this is where
+    that reaches the caller: a result that claimed 1 train when the game ran 3
+    would quietly corrupt any calibration built on it.
+    """
+    match = _TRAINS_RE.search(line)
+    if match is None:
+        return None
+    trains = int(match.group("trains"))
+    cars = int(match.group("cars"))
+    if trains < 0 or cars < 0:  # the plugin reports -1 when it cannot read them
+        return None
+    return trains, cars
+
+
+def _default_timeout_ticks(segments: list[int]) -> int:
+    """Budget the test lap from the track, not from a flat constant.
+
+    The old default of 2000 ticks was 50 seconds of game time, and the real
+    Manic Miner takes 83. It came back as a timeout: a ride that runs
+    perfectly, reported as a failure, purely because the budget was shorter
+    than the ride. Any track over about 50 seconds hit the same wall.
+
+    The generous margin costs nothing on a ride that works, because the read
+    loop stops the moment a rating arrives, and a genuinely stuck train is
+    caught by the stall detector long before this. It is only the backstop for
+    a ride that neither finishes nor sits still, so it should be too long
+    rather than too short.
+    """
+    from rct2 import physics
+
+    predicted = physics.simulate(segments).ride_time
+    # 4x covers station dwell, several trains sharing the circuit, and our own
+    # ride-time estimate reading low (65.7s predicted against the game's 83s
+    # for Manic Miner). The fixed 120s floor covers a very short track whose
+    # station dwell dominates.
+    return max(4000, int((predicted * 4 + 120) * TICKS_PER_SECOND))
+
+
 def score_track(
     segments: list[int],
     park: Path = DEFAULT_PARK,
@@ -760,7 +808,7 @@ def score_track(
     # collisions unrelated to the track itself. (100, 100) was confirmed
     # empty (bare surface only) during development.
     level_radius: int = 20,  # covers any track within the project's usual 30x30 max footprint
-    timeout_ticks: int = 2000,  # ~50s of game time at normal speed
+    timeout_ticks: Optional[int] = None,  # None sizes it from the track, see _default_timeout_ticks
     process_timeout_s: float = 90.0,
     lift_indices: Optional[Set[int]] = None,
     brake_speed: int = DEFAULT_BRAKE_SPEED,
@@ -784,6 +832,9 @@ def score_track(
     plugin directory available (see module docstring). Only one call should
     run at a time; concurrent calls would overwrite each other's plugin file.
     """
+    if timeout_ticks is None:
+        timeout_ticks = _default_timeout_ticks(segments)
+
     PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
     plugin_path = PLUGIN_DIR / "generide-oracle.js"
     plugin_path.write_text(_build_plugin_source(
@@ -811,6 +862,9 @@ def score_track(
 
     result: Optional[OracleResult] = None
     measurements: Optional[RideMeasurements] = None
+    # What the game actually gave the ride, which is not what we asked for
+    # whenever ridesetvehicle rejects our arguments -- see _parse_trains.
+    actual_trains: Optional[tuple[int, int]] = None
     try:
         deadline = time.time() + process_timeout_s
         for line in process.stdout:
@@ -818,6 +872,8 @@ def score_track(
                 print(line.rstrip())
             if "GENERIDE_STATS" in line:
                 measurements = _parse_measurements(line) or measurements
+            if "GENERIDE_TRAINS" in line:
+                actual_trains = _parse_trains(line) or actual_trains
             if "GENERIDE_RESULT" in line:
                 result = _parse_result(line)
                 if result is not None:
@@ -830,15 +886,17 @@ def score_track(
         process.wait()
         plugin_path.unlink(missing_ok=True)
 
+    ran_trains, ran_cars = actual_trains or (num_trains, cars_per_train)
+
     if result is None:
         return OracleResult(
             excitement=None, intensity=None, nausea=None,
             status="timeout", detail="no GENERIDE_RESULT line seen",
-            num_trains=num_trains, cars_per_train=cars_per_train,
+            num_trains=ran_trains, cars_per_train=ran_cars,
         )
     return replace(
         result, measurements=measurements,
-        num_trains=num_trains, cars_per_train=cars_per_train,
+        num_trains=ran_trains, cars_per_train=ran_cars,
     )
 
 
