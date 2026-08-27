@@ -4,6 +4,59 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-27 — A plan view, and the reason the first one came out solid black
+
+Until now the only way to see a track was to load it in OpenRCT2. That is a
+slow loop for a question as small as "did the hill survive this run?", and it
+is the reason the devlog has no pictures in it after fourteen entries.
+
+`rct2/render.py` draws two things from data we already had. `render_track`
+gives a top-down plan, one square per occupied tile, shaded light to deep
+olive by height. `render_fitness_history` gives the best fitness per
+generation. `evolve_coaster.py --render` writes both next to the `.td6`.
+
+![Manic Miner as a plan view](assets/manic-miner-plan.svg)
+
+That is the real Manic Miner. The dark column is the lift hill, the outlined
+square is where the station starts, and the footprint reads 15 by 18 tiles,
+which is what the devlog has said about this ride since the day we measured
+it. Getting the same answer from a completely different direction is the
+cheapest confirmation the tracer is right that we have had.
+
+### Why the first render was a black rectangle
+
+The existing RLE diagram styles itself with CSS variables, so I did the same:
+`fill:var(--e3)`, with the palette defined in a `<style>` block and a
+`prefers-color-scheme` override for dark mode. Every tile came out solid
+black.
+
+CSS variables only resolve where the stylesheet survives. The RLE diagram
+gets inlined into a page on the site, so its `<style>` is right there. A
+standalone `.svg` in a GitHub repo does not get that: GitHub strips `<style>`
+out of SVGs entirely, and a fill of `var(--e3)` with nothing defining `--e3`
+falls back to black.
+
+The fix is to write the light colours straight onto each element as
+presentation attributes, so the file is correct anywhere, and keep the
+stylesheet for the dark overrides only. CSS beats a presentation attribute
+wherever the stylesheet does survive, so inlining it in a page still gets
+dark mode. There is a test pinning this, because "renders fine in the tool I
+happened to check" is exactly how it shipped black the first time.
+
+The second thing worth pinning: where a track crosses over itself, the same
+tile appears twice at different heights. The higher one has to win or a
+crossing reads as the tunnel rather than the bridge.
+
+### One bug found by writing the caller
+
+`evolve_coaster.py` bound `stats` to the evolution result and then rebound it
+to the physics result partway down, so the run's fitness history was
+unreachable by the time anything wanted to draw it. Renamed the second one.
+Nothing was broken by it before, because nothing had ever asked for the
+history after that point.
+
+---
+
 ## 2026-08-23 — The oracle rates Manic Miner, and the port reads high rather than low
 
 Ran the oracle against the fixture on a machine with the game installed. It

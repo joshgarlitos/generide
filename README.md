@@ -45,8 +45,9 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Evolves a part-based genome as well as a flat one, so crossover cannot cut a lift hill in half, and carries the hill as a mandatory part rather than something the search has to stumble on.
 - Compares search methods through a benchmark harness at equal evaluation budgets, with a hard buildable-and-completed gate and reliability and diversity tracked alongside quality.
 - Builds a track piece by piece in a real headless OpenRCT2 and reads the game's own ratings back, so a benchmark run can be judged by the game rather than by our model of it.
+- Renders a track as a top-down SVG plan shaded by height, and an evolution run as a fitness curve, so a result can be looked at without loading the game.
 - Supports seeded runs so an interesting result or failure can be reproduced.
-- Has 353 passing tests, including regression tests against real OpenRCT2 exports.
+- Has 369 passing tests, including regression tests against real OpenRCT2 exports.
 
 Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. The physics fitness turns simulated ride stats into excitement, intensity, and nausea, and it can use either the old fitted weights or the transcribed calculation from OpenRCT2's source.
 
@@ -91,6 +92,7 @@ A few flags worth knowing:
 - `--station-length N` — platform length in tiles (default 6, minimum 2). Only applies to the generated seed circuit, not a `--seed <path>` track.
 - `--target-excitement MIN:MAX`, `--target-intensity MIN:MAX`, `--target-nausea MIN:MAX` — with `--fitness physics`, aim for a specific rating range instead of maximizing excitement, e.g. `--target-intensity 4:7`. Our rating model is not yet calibrated against the game's real ratings (see the roadmap), so treat these as rough knobs rather than exact targets for now.
 - `--verbose` — print progress each generation.
+- `--render` — also write an SVG plan of the best track and a fitness curve for the run, next to the `.td6`.
 
 To compare search methods rather than produce one ride, use the benchmark harness:
 
@@ -150,6 +152,7 @@ rct2/
   evolution.py      Population management and evolution loops
   benchmark.py      Method comparison at equal evaluation budgets
   oracle.py         Headless OpenRCT2 driver for the game's own ratings
+  render.py         SVG plan views and fitness curves
 tests/               Unit and fixture-based regression tests
 data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
 ```
