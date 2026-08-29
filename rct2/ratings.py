@@ -96,6 +96,7 @@ MINE_TRAIN = {
     "requirement_drop_height": (8, 2, 2, 2),
     "requirement_max_speed": (0xA0000 >> 16, 2, 2, 2),
     "requirement_negative_gs": (make(0, 10), 2, 2, 2),
+    "requirement_length": (0x1720000 >> 16, 2, 2, 2),
     "requirement_num_drops": (2, 2, 2, 2),
     "penalty_lateral_gs": (0, 40960, 35746, 49648),
 }
@@ -325,6 +326,13 @@ class RatingInputs:
 
     max_speed_units: int
     average_speed_units: int
+    # Despite the name, this is the game's own internal length unit (what a
+    # real .td6 header's `ride_length` field stores), not true metres.
+    # `inputs_from_stats` currently fills it from physics.py's simulated
+    # metres instead, which read about 1.43x smaller on the one fixture this
+    # has been checked against. `bonus_length`'s 6000 threshold is generous
+    # enough that the mismatch never mattered; `requirement_length`'s 370 is
+    # not. See the comment above that check in `calculate`.
     ride_length_m: int
     duration_s: int
     max_positive_g: int  # x100
@@ -438,20 +446,32 @@ def calculate(inputs: RatingInputs, table: dict = None,
         ratings.intensity //= i
         ratings.nausea //= n
 
-    # requirement_length is omitted, but not for the reason this comment used
-    # to give. It tests `ride.getStation().SegmentLength`, which is not a
-    # platform measure: `Ride::getTotalLength()` sums that field across
-    # stations to get the ride's total length, so it is track length per
-    # station, and track length is something we do model. What we cannot yet
-    # split is the length between stations, and the check reads station zero
-    # alone, so a two-station ride sees roughly half its circuit.
+    # Confirmed in-game 2026-08-29 (docs/devlog.md): rebuilding the real Manic
+    # Miner track with one station instead of two took the oracle's rating
+    # from 3.12/3.48/2.55 to 6.19/7.03/5.08, against the file's own stored
+    # 6.10/6.50/4.10, with the game itself reporting the station count drop
+    # from 2 to 1. That is `requirementLength` firing: it tests
+    # `ride.getStation().SegmentLength`, station zero alone, so any ride with
+    # more than one station sees roughly half the credit its actual circuit
+    # length would earn if concentrated in one station.
     #
-    # That matters more than it looks. Doubling the oracle's bare-ground
-    # rating of Manic Miner lands within a few percent of the value the game
-    # shipped for it, which is what one missed halving looks like. Implementing
-    # it on that reasoning alone would be guessing, so it waits on the in-game
-    # test named in docs/research-plan.md: build the same track with one
-    # station and see whether the rating doubles.
+    # `inputs.ride_length_m` must be in the game's own internal length units
+    # (what a real .td6 header's `ride_length` field stores, and what
+    # `inputs_from_header` in tests/test_ratings.py and calibration.py both
+    # feed in) for this comparison to mean anything. `inputs_from_stats`,
+    # which scores evolved tracks during a run, currently fills the same
+    # field from `physics.py`'s simulated metres instead, and those two scales
+    # are not the same: driving this exact fixture through both gives 691
+    # game-units against 482 simulated metres, a ratio of about 1.43 that has
+    # not been checked against any other design. `bonus_length`'s threshold of
+    # 6000 is generous enough that this mismatch never mattered before; this
+    # threshold of 370 is not. Until that conversion is calibrated,
+    # `inputs_from_stats` should not be trusted to feed this check correctly.
+    threshold, e, i, n = table["requirement_length"]
+    if inputs.ride_length_m < threshold:
+        ratings.excitement //= e
+        ratings.intensity //= i
+        ratings.nausea //= n
 
     _apply_intensity_penalty(ratings)
     return ratings

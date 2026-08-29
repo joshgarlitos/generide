@@ -105,6 +105,29 @@ def test_failing_a_requirement_halves_every_rating():
     assert fails.nausea == clears.nausea // 2
 
 
+def test_requirement_length_halves_every_rating():
+    """Same behaviour as the drop-height requirement, for track length.
+
+    Confirmed in-game 2026-08-29: rebuilding the real Manic Miner with one
+    station instead of two, so this requirement reads the whole circuit
+    instead of half of it, took the oracle's rating from 3.12/3.48/2.55 to
+    6.19/7.03/5.08. See docs/devlog.md and the comment in ratings.calculate.
+    """
+    base = dict(
+        max_speed_units=20, average_speed_units=10, highest_drop_height=10,
+        duration_s=60, max_positive_g=200, max_negative_g=-50,
+        max_lateral_g=100, num_drops=5,
+        flat_turns=TurnCounts(), banked_turns=TurnCounts(), sloped_turns=TurnCounts(),
+    )
+    threshold = ratings.MINE_TRAIN["requirement_length"][0]
+
+    clears = ratings.calculate(RatingInputs(ride_length_m=threshold, **base))
+    fails = ratings.calculate(RatingInputs(ride_length_m=threshold - 1, **base))
+
+    assert fails.intensity == clears.intensity // 2
+    assert fails.nausea == clears.nausea // 2
+
+
 def test_requirements_compound():
     """Two failed requirements quarter the rating rather than halving it once.
 

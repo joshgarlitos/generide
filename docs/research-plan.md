@@ -237,16 +237,23 @@ intensity across all four and 22 to 37 percent low on excitement, which is
 what skipping the excitement-only park bonuses looks like. See
 docs/devlog.md (2026-08-29).
 
-What is actually odd is the bare-ground rebuild. Doubling its ratings lands
+What was actually odd was the bare-ground rebuild. Doubling its ratings landed
 within a few percent of the shipped values, which is the shape of one missed
-halving, and `requirementLength` is the only requirement we skip and the only
-one whose input is per-station. Our rebuild has two stations and the check
-reads station zero alone.
+halving, and `requirementLength` was the only requirement we skipped and the
+only one whose input is per-station. Our rebuild has two stations and the
+check reads station zero alone.
 
-Settling it needs the game: rebuild Manic Miner with one station and see
-whether the rating roughly doubles. Until that runs, no oracle number on a
-multi-station track should be trusted, and the ported model stays the
-in-loop scorer.
+**Confirmed 2026-08-29.** Rebuilt the same real Manic Miner segment list with
+one station instead of two and the oracle's rating went from 3.12/3.48/2.55 to
+6.19/7.03/5.08, against the file's own stored 6.10/6.50/4.10. `ratings.py` now
+implements `requirement_length`. It only affects the header-driven path used
+by tests and calibration, since checking it against the evolution loop's own
+path turned up a second, separate bug: `inputs_from_stats` feeds this check
+simulated metres from `physics.py` where the header path feeds the game's own
+internal length units, and those two scales differ by roughly 1.43x on the
+one design checked so far. See docs/devlog.md (2026-08-29) for both findings.
+Calibrating that ratio against more than one design, the way lateral g was
+calibrated, is the open piece before this can score evolved tracks directly.
 
 Two smaller things stay open. Batching many tracks through one game process is
 worth doing and belongs behind `score_track`'s interface. Determinism across

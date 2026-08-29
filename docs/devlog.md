@@ -4,6 +4,64 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-29 — The station test, and a second bug it turned up on the way
+
+The previous entry left one thing unverified: whether the bare-ground rebuild
+of Manic Miner reads low because it has two stations where the real ride's
+rating math only credits one. Ran it.
+
+Took the real Manic Miner's exact segment list, the same one behind every
+number in the last two entries, and changed nothing about the track except
+the piece types at the second station's four tiles, from station pieces to
+plain flat track. Same geometry, same drops, same turns, one fewer station.
+The oracle scored the two-station version at 3.12 / 3.48 / 2.55, matching the
+08-23 entry exactly, and the one-station version at 6.19 / 7.03 / 5.08. The
+game itself confirms the station count changed: `GENERIDE_STATIONS|count=2`
+for the original, `count=1` for the edit. Excitement on the one-station
+version lands within two percent of the file's own stored 6.10, intensity
+within eight percent, nausea within nineteen.
+
+So `requirementLength` was firing exactly as suspected: it tests
+`ride.getStation().SegmentLength`, station zero alone, not the ride's total
+length, and a two-station rebuild was only ever getting credit for half its
+circuit. This never touched an evolved track's own score, since everything
+this project generates is single-station, but it meant every comparison
+against the real Manic Miner as a benchmark was measuring our tracks against
+a number that was itself wrong.
+
+`ratings.py` now implements the check: a `requirement_length` entry in the
+`MINE_TRAIN` table at threshold 370 (`0x1720000 >> 16`, the same fixed-point
+shift already used for the speed requirement), read from `MineTrainCoaster.h`
+off a live OpenRCT2 checkout at `/Users/joshgarlitos/Documents/OpenRCT2`.
+`test_requirement_length_halves_every_rating` pins it the same way the
+drop-height requirement is pinned, one unit either side of the threshold.
+
+### The second bug, found while checking whether 370 was safe to add
+
+Before wiring the threshold in, I checked what it would do to a track scored
+through the evolution loop rather than through a real file's header, since a
+minimum bar of 370 clearly wouldn't be a no-op the way `bonus_length`'s very
+generous cap of 6000 has always been. It stalled here: `inputs_from_header`
+(tests, calibration) feeds `ride_length_m` from a real `.td6`'s stored
+`ride_length` field, and `inputs_from_stats` (the path that scores every
+evolved track during a run) feeds it from `physics.py`'s simulated distance
+in metres. Those are not the same scale. Driving both off the exact same real
+Manic Miner segment list gives 691 game-units against 482 simulated metres, a
+ratio of about 1.43 that has not been checked against a second design.
+
+`bonus_length`'s threshold of 6000 is so far above either scale that no real
+coaster has ever tripped it, which is exactly why this had never surfaced.
+`requirement_length`'s 370 sits inside the range both scales actually produce
+for a normal-length coaster, so it is not a no-op in either direction: fed
+raw simulated metres, it would set a stricter bar than the game's real one,
+roughly 370 metres instead of the true equivalent of somewhere near 258. The
+check is now implemented and tested against the header path, where the units
+are already correct. It is not wired into `inputs_from_stats`, and the field
+carries a comment saying why, until the metres-to-game-units ratio is
+calibrated the way lateral g was, against more than one design.
+
+---
+
 ## 2026-08-29 — The port was not the thing that was wrong
 
 Six days ago I wrote that our ported rating calculation reads 1.5x to 1.8x
