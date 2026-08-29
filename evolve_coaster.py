@@ -12,7 +12,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from rct2 import physics, td6
+from rct2 import physics, render, td6
 from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve, evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
@@ -195,6 +195,12 @@ def main():
         default=None,
         help="Random seed for reproducible runs (default: random)",
     )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Also write an SVG plan of the best track and a fitness curve for "
+             "the run, next to the .td6 output",
+    )
 
     args = parser.parse_args()
 
@@ -313,12 +319,14 @@ def main():
     print(f"  Best track valid: {best.is_valid()}")
 
     if args.fitness == "physics":
-        stats = physics.simulate(best.segments)
-        ratings = physics.rate(stats)
-        print(f"  Simulated max speed: {stats.max_speed:.1f} m/s")
-        print(f"  Drops: {stats.drop_count} (total {stats.total_drop_height:.0f} height units)")
-        print(f"  Airtime: {stats.airtime:.1f}s, lateral g: {stats.max_lateral_g:.2f}")
-        print(f"  Circuit completed: {stats.completed}")
+        ride_stats = physics.simulate(best.segments)
+        ratings = physics.rate(ride_stats)
+        print(f"  Simulated max speed: {ride_stats.max_speed:.1f} m/s")
+        print(f"  Drops: {ride_stats.drop_count} "
+              f"(total {ride_stats.total_drop_height:.0f} height units)")
+        print(f"  Airtime: {ride_stats.airtime:.1f}s, "
+              f"lateral g: {ride_stats.max_lateral_g:.2f}")
+        print(f"  Circuit completed: {ride_stats.completed}")
         print(
             f"  Approx ratings: excitement={ratings.excitement:.2f}, "
             f"intensity={ratings.intensity:.2f}, nausea={ratings.nausea:.2f}"
@@ -342,6 +350,21 @@ def main():
     ride = create_ride_from_segments(best.segments, template_path)
     td6.save(ride, args.output)
     print(f"\nSaved evolved track to: {args.output}")
+
+    if args.render:
+        # Written after the export, so a rendering problem can never cost
+        # someone the track they waited for.
+        plan_path = args.output.with_suffix(".plan.svg")
+        curve_path = args.output.with_suffix(".fitness.svg")
+        plan_path.write_text(render.render_track(
+            best.segments, title=f"{args.output.stem} (seed {rng_seed})",
+        ))
+        curve_path.write_text(render.render_fitness_history(
+            stats.fitness_history, stats.valid_ratio_history,
+            title=f"{args.output.stem} fitness (seed {rng_seed})",
+        ))
+        print(f"Saved plan view to:        {plan_path}")
+        print(f"Saved fitness curve to:    {curve_path}")
 
 
 if __name__ == "__main__":

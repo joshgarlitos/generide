@@ -438,10 +438,20 @@ def calculate(inputs: RatingInputs, table: dict = None,
         ratings.intensity //= i
         ratings.nausea //= n
 
-    # requirement_length is omitted: it tests the station's SegmentLength,
-    # which is a station-platform measure we do not model, not total track
-    # length. Guessing at it would silently halve ratings on a rule we have
-    # not verified.
+    # requirement_length is omitted, but not for the reason this comment used
+    # to give. It tests `ride.getStation().SegmentLength`, which is not a
+    # platform measure: `Ride::getTotalLength()` sums that field across
+    # stations to get the ride's total length, so it is track length per
+    # station, and track length is something we do model. What we cannot yet
+    # split is the length between stations, and the check reads station zero
+    # alone, so a two-station ride sees roughly half its circuit.
+    #
+    # That matters more than it looks. Doubling the oracle's bare-ground
+    # rating of Manic Miner lands within a few percent of the value the game
+    # shipped for it, which is what one missed halving looks like. Implementing
+    # it on that reasoning alone would be guessing, so it waits on the in-game
+    # test named in docs/research-plan.md: build the same track with one
+    # station and see whether the rating doubles.
 
     _apply_intensity_penalty(ratings)
     return ratings

@@ -4,7 +4,136 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
-## 2026-08-23 — The oracle rates Manic Miner, and the port reads high rather than low
+## 2026-08-29 — The port was not the thing that was wrong
+
+Six days ago I wrote that our ported rating calculation reads 1.5x to 1.8x
+high against the game, called it the highest-value thing in the project to
+fix, and put that in the research plan. Checking it properly says the
+opposite.
+
+The evidence I had was one comparison: the game rated our bare-ground rebuild
+of Manic Miner at 3.12 / 3.48 / 2.55, and the port, fed the game's own
+measured stats, returned 4.80 / 6.40 / 4.09. One data point, one direction.
+
+Running the port against every shipped Mine Train we have stats for, using
+the ratings the game itself recorded for each:
+
+| design | stored E/I/N | port E/I/N | port ÷ stored |
+|---|---|---|---|
+| Runaway Mine Train | 2.80 / 2.70 / 1.80 | 2.07 / 2.68 / 1.68 | 0.74 / 0.99 / 0.93 |
+| Manic Miner | 6.10 / 6.50 / 4.10 | 4.52 / 6.29 / 3.79 | 0.74 / 0.97 / 0.92 |
+| Gold Rush | 6.10 / 7.00 / 4.70 | 4.77 / 6.94 / 4.15 | 0.78 / 0.99 / 0.88 |
+| Calamity Mine | 7.40 / 7.10 / 5.40 | 4.66 / 6.67 / 4.13 | 0.63 / 0.94 / 0.76 |
+
+Intensity is within 1 to 6 percent on all four. Nausea is 8 to 24 percent
+low. Excitement is 22 to 37 percent low. That is not a port reading high, it
+is a port reading low on exactly the axis where we skipped terms: proximity
+(0.33) and scenery (0.26) are excitement-only, and sheltered adds a little to
+all three. The original diagnosis was right and I talked myself out of it on
+one data point.
+
+I also checked the arithmetic rather than only the outputs. Our
+`gforce_ratings` is equivalent line for line to upstream's
+`ride_ratings_get_gforce_ratings`, and every coefficient in our table matches
+`MineTrainCoaster.h`. There is no bug of the kind I went looking for.
+
+### So the odd one out is the rebuild, not the port
+
+Double the bare-ground rebuild's ratings and you get 6.24 / 6.96 / 5.10
+against the shipped 6.10 / 6.50 / 4.10. Excitement lands within 2 percent,
+intensity within 7. That is the shape of a single missed halving, not a
+scattered modelling error.
+
+We skip exactly one requirement, `requirementLength`, and it is the only one
+whose input is per-station. Our rebuild has two stations, so the circuit's
+length is split between them, and the check reads station zero alone.
+
+The comment in `ratings.py` says that field is "a station-platform measure we
+do not model". That is wrong. `Ride::getTotalLength()` sums `SegmentLength`
+across stations to get the ride's total length, so it is track length per
+station, and track length is something we do model. I have not corrected the
+comment yet, because the fix and the claim should land together with a test
+in the game behind them.
+
+**The test that settles it** needs a machine with OpenRCT2: rebuild Manic
+Miner with one station instead of two and see whether the rating roughly
+doubles. If it does, the oracle needs to match a design's station layout, or
+at minimum report when a requirement fired.
+
+### Two traps found while reading the source
+
+`RatingsMultipliers = { 50, 30, 10 }` sits in `MineTrainCoaster.h` looking
+exactly like a rating multiplier. It is not. It feeds ride *value* in money.
+Anyone porting from that header will reach for it.
+
+`RideRatingsApplyAdjustments` runs after the intensity penalty and applies the
+vehicle object's own multipliers plus an air-time term. We do not implement
+it. Both only add, so neither explains a gap in either direction, but it is a
+real hole and it is not written down anywhere else.
+
+### The lesson, which is the same one as the lateral-g entry
+
+Two readings that agree are not a fit. One reading that disagrees is not a
+finding. Both times the mistake had the same shape: a single measurement, a
+tidy story built on it, and the story written into the plan before anything
+checked it against the rest of the data we already had on disk.
+
+---
+
+## 2026-08-27 — A plan view, and the reason the first one came out solid black
+
+Until now the only way to see a track was to load it in OpenRCT2. That is a
+slow loop for a question as small as "did the hill survive this run?", and it
+is the reason the devlog has no pictures in it after fourteen entries.
+
+`rct2/render.py` draws two things from data we already had. `render_track`
+gives a top-down plan, one square per occupied tile, shaded light to deep
+olive by height. `render_fitness_history` gives the best fitness per
+generation. `evolve_coaster.py --render` writes both next to the `.td6`.
+
+![Manic Miner as a plan view](assets/manic-miner-plan.svg)
+
+That is the real Manic Miner. The dark column is the lift hill, the outlined
+square is where the station starts, and the footprint reads 15 by 18 tiles,
+which is what the devlog has said about this ride since the day we measured
+it. Getting the same answer from a completely different direction is the
+cheapest confirmation the tracer is right that we have had.
+
+### Why the first render was a black rectangle
+
+The existing RLE diagram styles itself with CSS variables, so I did the same:
+`fill:var(--e3)`, with the palette defined in a `<style>` block and a
+`prefers-color-scheme` override for dark mode. Every tile came out solid
+black.
+
+CSS variables only resolve where the stylesheet survives. The RLE diagram
+gets inlined into a page on the site, so its `<style>` is right there. A
+standalone `.svg` in a GitHub repo does not get that: GitHub strips `<style>`
+out of SVGs entirely, and a fill of `var(--e3)` with nothing defining `--e3`
+falls back to black.
+
+The fix is to write the light colours straight onto each element as
+presentation attributes, so the file is correct anywhere, and keep the
+stylesheet for the dark overrides only. CSS beats a presentation attribute
+wherever the stylesheet does survive, so inlining it in a page still gets
+dark mode. There is a test pinning this, because "renders fine in the tool I
+happened to check" is exactly how it shipped black the first time.
+
+The second thing worth pinning: where a track crosses over itself, the same
+tile appears twice at different heights. The higher one has to win or a
+crossing reads as the tunnel rather than the bridge.
+
+### One bug found by writing the caller
+
+`evolve_coaster.py` bound `stats` to the evolution result and then rebound it
+to the physics result partway down, so the run's fitness history was
+unreachable by the time anything wanted to draw it. Renamed the second one.
+Nothing was broken by it before, because nothing had ever asked for the
+history after that point.
+
+---
+
+## 2026-08-23 — The oracle rates Manic Miner, and a reading of the gap that did not hold
 
 Ran the oracle against the fixture on a machine with the game installed. It
 came back `status=timeout` with the train still moving at full speed, which is
@@ -47,6 +176,11 @@ the g-forces are all somewhat low, negative vertical worst at −0.51 against
 its own units against our 482 metres.
 
 ### The finding that changes the plan
+
+**Superseded on 2026-08-29.** The conclusion below, that the port reads high
+against the game, did not survive checking it against the other shipped Mine
+Trains. The measurements in this entry are still good; the reading of them is
+not. See the 2026-08-29 entry.
 
 Feed the game's own measurements through our ported rating calculation and it
 returns 4.80 / 6.40 / 4.09. The game, on the same track with the same stats,

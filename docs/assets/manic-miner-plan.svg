@@ -1,0 +1,194 @@
+<svg viewBox="0 0 376 382" xmlns="http://www.w3.org/2000/svg" role="img" style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#fcfcfa;">
+  <title>Manic Miner, as generide sees it</title>
+  <desc>Top-down plan of a roller coaster track. Each square is one occupied tile, shaded from light (lowest) to deep olive (highest). 89 segments, 15 x 18 tiles, 22 height units of relief</desc>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .e0 { fill: #2f2f27; }
+      .e1 { fill: #3a3d2c; }
+      .e2 { fill: #474d31; }
+      .e3 { fill: #555e36; }
+      .e4 { fill: #64703b; }
+      .e5 { fill: #748340; }
+      .e6 { fill: #8a9a3a; }
+      .e7 { fill: #a0b030; }
+      .bg { fill: #1a1a17; }
+      .tx { fill: #f0efe8; }
+      .ts { fill: #9a9a90; }
+      .ax { stroke: #3a3a33; }
+      .ac { stroke: #a0b030; }
+      .acs { stroke: #9a9a90; }
+      .gap { stroke: #1a1a17; }
+    }
+</style>
+  <rect class="bg" x="0" y="0" width="376" height="382" fill="#fcfcfa"/>
+  <text class="tx" x="24" y="26" font-size="14" font-weight="600" fill="#1a1a1a">Manic Miner, as generide sees it</text>
+  <text class="ts" x="24" y="44" font-size="11" fill="#6a6a64">89 segments, 15 x 18 tiles, 22 height units of relief</text>
+  <rect class="e1 gap" x="24" y="246" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="24" y="230" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="24" y="214" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="24" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="262" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="246" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="230" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="214" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="40" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="56" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="56" y="326" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="56" y="310" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="56" y="294" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="56" y="278" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="56" y="262" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="56" y="246" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="56" y="230" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="56" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="56" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="72" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="72" y="326" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="72" y="262" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="72" y="246" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="72" y="230" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="72" y="214" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="72" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="72" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="88" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="88" y="326" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="88" y="262" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="88" y="230" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="88" y="214" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="88" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="88" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="104" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="104" y="326" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="104" y="310" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="104" y="294" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="104" y="278" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="104" y="262" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="104" y="246" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="104" y="230" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="104" y="214" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="104" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e5 gap" x="120" y="326" width="16" height="16" fill="#849d4e" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e6 gap" x="120" y="310" width="16" height="16" fill="#6b8b33" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e7 gap" x="120" y="294" width="16" height="16" fill="#59670f" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e6 gap" x="120" y="278" width="16" height="16" fill="#6b8b33" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e6 gap" x="120" y="262" width="16" height="16" fill="#6b8b33" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e5 gap" x="120" y="246" width="16" height="16" fill="#849d4e" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="120" y="230" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="120" y="214" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="120" y="198" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="120" y="182" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="120" y="166" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="120" y="150" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="120" y="134" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="120" y="118" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="120" y="102" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="120" y="86" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="120" y="70" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="136" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e5 gap" x="136" y="326" width="16" height="16" fill="#849d4e" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e6 gap" x="136" y="310" width="16" height="16" fill="#6b8b33" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="294" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="278" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="136" y="262" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="246" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="230" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="136" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="136" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="136" y="166" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="150" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="134" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="118" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="102" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="86" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="136" y="70" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="152" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="152" y="326" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="310" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="294" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="152" y="262" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="152" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="152" y="182" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="152" y="166" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="150" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="134" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="152" y="118" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="152" y="102" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="86" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="152" y="70" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e4 gap" x="168" y="342" width="16" height="16" fill="#9cae6a" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="168" y="326" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="168" y="310" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="294" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="278" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="168" y="262" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="246" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="230" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="214" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="168" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="182" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="166" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="168" y="150" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="168" y="134" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="168" y="118" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="168" y="102" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="168" y="86" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="168" y="70" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="184" y="342" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="184" y="326" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="184" y="310" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="184" y="294" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="184" y="278" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="184" y="262" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="184" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="184" y="166" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="184" y="150" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="184" y="118" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="184" y="102" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="184" y="86" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="184" y="70" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="342" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="326" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="310" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="294" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="278" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="200" y="262" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="200" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="200" y="182" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="200" y="166" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="200" y="150" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="200" y="70" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="216" y="326" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="216" y="310" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="216" y="294" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e3 gap" x="216" y="278" width="16" height="16" fill="#b2bd87" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e2 gap" x="216" y="262" width="16" height="16" fill="#c6cba4" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="216" y="246" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="230" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="216" y="214" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="216" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="182" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="166" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="150" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="134" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="86" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="216" y="70" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="294" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="278" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="262" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="246" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="232" y="230" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="232" y="214" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e1 gap" x="232" y="198" width="16" height="16" fill="#d8d9c0" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="150" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="134" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="118" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="102" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="86" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="232" y="70" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="248" y="134" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="248" y="118" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="248" y="102" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="e0 gap" x="248" y="86" width="16" height="16" fill="#e8e6d8" stroke="#fcfcfa" stroke-width="0.5"/>
+  <rect class="ac" x="168" y="182" width="16" height="16" fill="none" stroke="#59670f" stroke-width="2"/>
+</svg>
