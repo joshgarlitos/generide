@@ -230,16 +230,23 @@ whether that holds up in the game is exactly the question the ported model
 cannot answer about itself.
 
 The oracle rated Manic Miner on 2026-08-23, at 3.12 / 3.48 / 2.55 against the
-6.20 / 6.50 / 4.20 the file stores. Chasing that gap turned up something that
-changes the priorities here: fed the game's own measured stats, our ported
-rating calculation returns 4.80 / 6.40 / 4.09, so the port reads 1.5x to 1.8x
-*high* against the game rather than low. The missing park-dependent bonuses
-cannot explain that, because they only add. See docs/devlog.md (2026-08-23).
+6.20 / 6.50 / 4.20 the file stores. I first read that gap as the port scoring
+high and wrote it into this plan; checking it against every shipped Mine Train
+on 2026-08-29 says the opposite. The port is within 1 to 6 percent on
+intensity across all four and 22 to 37 percent low on excitement, which is
+what skipping the excitement-only park bonuses looks like. See
+docs/devlog.md (2026-08-29).
 
-That makes the port the most valuable thing to fix, ahead of any new search
-method, because every method in the harness is scored by it and the harness
-now has the game to check it against. Substituting the game's stats for ours
-moves the port by 0.17, so our physics is not where the error lives.
+What is actually odd is the bare-ground rebuild. Doubling its ratings lands
+within a few percent of the shipped values, which is the shape of one missed
+halving, and `requirementLength` is the only requirement we skip and the only
+one whose input is per-station. Our rebuild has two stations and the check
+reads station zero alone.
+
+Settling it needs the game: rebuild Manic Miner with one station and see
+whether the rating roughly doubles. Until that runs, no oracle number on a
+multi-station track should be trusted, and the ported model stays the
+in-loop scorer.
 
 Two smaller things stay open. Batching many tracks through one game process is
 worth doing and belongs behind `score_track`'s interface. Determinism across
