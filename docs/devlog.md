@@ -4,6 +4,80 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-29 — The "two length scales" theory was wrong; it's one simulation running short
+
+Saved the good-ride-seed123 track as a design from inside the game after
+riding it, which bakes the game's own computed header into the file the way
+every real design in `calibration.csv` already has. Loading it to add that
+row surfaced a mistake from earlier today.
+
+The ride window displays length and drop height in feet: 2,017 ft and 39 ft
+for this ride. The saved file's header stores 616 and 16 (raw height units,
+16 x 0.75 = 12.0). Converting the displayed feet to metres lines up almost
+exactly with both: 2,017 ft is 614.8 m against a stored 616, 39 ft is 11.9 m
+against a stored 12.0. That's the header field genuinely being metres, which
+is what its name and the `# meters` comment on `td6.Ride.ride_length` already
+said, and what I overrode a few hours ago on one data point.
+
+So the "two incompatible length scales" fix from the entry below this one was
+diagnosing the wrong thing. `ride_length_m` is metres whether it comes from a
+real file's header or from `physics.py`'s simulation. What's actually true:
+`physics.py` underestimates the real distance. Header-vs-simulated on the
+real Manic Miner gives a ratio of 1.43; header-vs-simulated on this unrelated
+evolved track gives 1.45. Two different tracks landing within two points of
+each other is a systematic shortfall in the simulation's distance math, not
+noise, and not a units bug. `ratings.py`'s comments and `docs/research-plan.md`
+are corrected to say that instead.
+
+Net effect on the actual work: still correct not to wire `requirement_length`
+into evolution's own scoring yet, since a track scored by `physics.py` right
+now would still fail this check earlier than the real track would. What
+changed is what fixes it: not a conversion factor, `physics.py`'s distance
+calculation itself.
+
+The calibration row went in clean, since `calibration.extract_row` reads the
+same real header fields as every other row: 114 segments, 5.4/6.9/4.3,
+matching the in-game 5.21/6.97/4.31 within normal read-to-read variance.
+
+---
+
+## 2026-08-29 — First real ride, and the brake bug that nearly wasn't caught
+
+Loaded a track evolved with the default settings (100 generations,
+population 50, part-based genome, seed 123) and hit a stall almost
+immediately: a block brake sitting on a plain straight, no turn or drop near
+it, killing the train's speed for no reason. `physics.py` has never modeled
+what a brake does to a train, so nothing during evolution ever weighed
+against inserting one, and `mutations.py` had brakes in the same bucket as
+plain flat track for insertion. Pulled them out of that bucket
+(`SIMPLE_SEGMENTS`) until physics can price them properly; that's the
+cheap fix, issue #35 is the real one.
+
+Re-ran with the fix. The result actually rated in-game:
+
+    Excitement 5.21 (High), Intensity 6.97 (High), Nausea 4.31 (Medium)
+
+against the calibration set's real Mine Trains (Calamity Mine 7.40/7.10/5.40,
+Gold Rush 6.10/7.00/4.70, Manic Miner 6.10/6.50/4.10, Runaway Mine Train
+2.80/2.70/1.80). It lands inside that range on every axis rather than below
+it, and intensity is within a few hundredths of Gold Rush's. First time a
+generide track has been rated by the game and come out competitive with a
+real shipped design instead of noticeably worse.
+
+Max lateral g came back at 2.69, above every real Mine Train in the
+calibration set (all at or under 1.6). Whether that's a rough turn worth
+fixing or a live data point for issue #41 isn't settled; recorded here so
+it doesn't get lost.
+
+Running the oracle against the same segment list to get a second, automated
+read failed at piece 66, a flat segment, before it could rate anything. This
+is the first time the oracle has tried a full evolved track from the parts
+genome rather than a hand-verified real design, so it's an open question
+whether that's a footprint issue, an elevation mismatch on this specific
+piece, or something else. Not chased down today.
+
+---
+
 ## 2026-08-29 — The station test, and a second bug it turned up on the way
 
 The previous entry left one thing unverified: whether the bare-ground rebuild
@@ -37,6 +111,12 @@ off a live OpenRCT2 checkout at `/Users/joshgarlitos/Documents/OpenRCT2`.
 drop-height requirement is pinned, one unit either side of the threshold.
 
 ### The second bug, found while checking whether 370 was safe to add
+
+**Superseded same day.** The "two scales" read below turned out wrong; see
+the 2026-08-29 entry above this one, "First real ride," for the corrected
+version. `ride_length_m` is metres from both callers. The real gap is
+`physics.py` underestimating the game's own measured distance, not a unit
+mismatch.
 
 Before wiring the threshold in, I checked what it would do to a track scored
 through the evolution loop rather than through a real file's header, since a

@@ -41,10 +41,14 @@ from rct2.segments import SEGMENTS
 FLAT_SEGMENTS = [0x00]
 TURN_LEFT_FLAT = [0x10, 0x2A]   # unbanked quarter turns left (5-tile, 3-tile)
 TURN_RIGHT_FLAT = [0x11, 0x2B]  # unbanked quarter turns right
-BRAKES = [0x63, 0xD8]  # brakes, block brakes
 
-# Simple segments that can be inserted individually (all work on flat track, no banking)
-SIMPLE_SEGMENTS = FLAT_SEGMENTS + TURN_LEFT_FLAT + TURN_RIGHT_FLAT + BRAKES
+# Simple segments that can be inserted individually (all work on flat track, no banking).
+# Brakes used to be in this list. physics.py doesn't simulate what a brake does
+# to speed, so nothing ever penalized inserting one, and mutation would drop a
+# block brake into a plain straight for free variety credit -- confirmed
+# in-game 2026-08-29, where one gutted a real evolved ride's speed for no
+# reason. See issue #35: brakes go back in once physics can price them.
+SIMPLE_SEGMENTS = FLAT_SEGMENTS + TURN_LEFT_FLAT + TURN_RIGHT_FLAT
 
 # For backwards compatibility
 TURN_LEFT = TURN_LEFT_FLAT

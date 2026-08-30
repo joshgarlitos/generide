@@ -326,13 +326,13 @@ class RatingInputs:
 
     max_speed_units: int
     average_speed_units: int
-    # Despite the name, this is the game's own internal length unit (what a
-    # real .td6 header's `ride_length` field stores), not true metres.
-    # `inputs_from_stats` currently fills it from physics.py's simulated
-    # metres instead, which read about 1.43x smaller on the one fixture this
-    # has been checked against. `bonus_length`'s 6000 threshold is generous
-    # enough that the mismatch never mattered; `requirement_length`'s 370 is
-    # not. See the comment above that check in `calculate`.
+    # True metres from both callers -- confirmed 2026-08-29 against the feet
+    # a real ride window displays. physics.py's simulated metres read about
+    # 1.44-1.45x smaller than the game's own measured distance on the two
+    # tracks checked so far, which is a real gap in that simulation, not a
+    # different unit. `bonus_length`'s 6000 threshold is generous enough that
+    # the underestimate never mattered; `requirement_length`'s 370 is not.
+    # See the comment above that check in `calculate`.
     ride_length_m: int
     duration_s: int
     max_positive_g: int  # x100
@@ -455,18 +455,28 @@ def calculate(inputs: RatingInputs, table: dict = None,
     # more than one station sees roughly half the credit its actual circuit
     # length would earn if concentrated in one station.
     #
-    # `inputs.ride_length_m` must be in the game's own internal length units
-    # (what a real .td6 header's `ride_length` field stores, and what
-    # `inputs_from_header` in tests/test_ratings.py and calibration.py both
-    # feed in) for this comparison to mean anything. `inputs_from_stats`,
-    # which scores evolved tracks during a run, currently fills the same
-    # field from `physics.py`'s simulated metres instead, and those two scales
-    # are not the same: driving this exact fixture through both gives 691
-    # game-units against 482 simulated metres, a ratio of about 1.43 that has
-    # not been checked against any other design. `bonus_length`'s threshold of
-    # 6000 is generous enough that this mismatch never mattered before; this
-    # threshold of 370 is not. Until that conversion is calibrated,
-    # `inputs_from_stats` should not be trusted to feed this check correctly.
+    # Corrected 2026-08-29: an earlier version of this comment said
+    # `ride_length_m` came in two incompatible unit systems, the game's own
+    # internal length unit versus true metres, depending on caller. That was
+    # wrong. Checking a real save's header against the feet the game's own
+    # ride window displays for the same ride (2,017 ft against a stored 616,
+    # and 39 ft of drop against a stored 12.0) confirms the header field
+    # really is metres, exactly as its name and the old `# meters` comment on
+    # `td6.Ride.ride_length` both say.
+    #
+    # The actual gap is in `physics.py`: its simulated ride length
+    # underestimates the real distance the game measures, consistently, by
+    # about 1.44x on the real Manic Miner fixture and 1.45x on an unrelated
+    # evolved track, which is close enough across two different tracks to be
+    # a systematic modelling shortfall rather than noise. So `inputs.ride_length_m`
+    # is metres from both callers, `inputs_from_header` and `inputs_from_stats`
+    # alike; `inputs_from_stats` is just feeding this check a number that reads
+    # low. `bonus_length`'s threshold of 6000 is generous enough that a ~1.44x
+    # underestimate never moved it; this threshold of 370 is not, so a
+    # borderline evolved track could fail this requirement in our scoring
+    # when the real track, at its true length, would have passed. Fixing
+    # `physics.py`'s distance calculation, not a unit conversion, is what
+    # closes this.
     threshold, e, i, n = table["requirement_length"]
     if inputs.ride_length_m < threshold:
         ratings.excitement //= e

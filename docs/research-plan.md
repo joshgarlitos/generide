@@ -246,14 +246,20 @@ check reads station zero alone.
 **Confirmed 2026-08-29.** Rebuilt the same real Manic Miner segment list with
 one station instead of two and the oracle's rating went from 3.12/3.48/2.55 to
 6.19/7.03/5.08, against the file's own stored 6.10/6.50/4.10. `ratings.py` now
-implements `requirement_length`. It only affects the header-driven path used
-by tests and calibration, since checking it against the evolution loop's own
-path turned up a second, separate bug: `inputs_from_stats` feeds this check
-simulated metres from `physics.py` where the header path feeds the game's own
-internal length units, and those two scales differ by roughly 1.43x on the
-one design checked so far. See docs/devlog.md (2026-08-29) for both findings.
-Calibrating that ratio against more than one design, the way lateral g was
-calibrated, is the open piece before this can score evolved tracks directly.
+implements `requirement_length`, using `ride_length_m` from either caller, real
+metres in both cases.
+
+That took a same-day correction. Checking it against the evolution loop's own
+scoring path first looked like a second, separate bug: `inputs_from_stats`
+seemed to feed this check a different unit than the header-driven path tests
+and calibration use. A real save's header against the feet its own ride
+window displays for the same ride settled it the other way: the header field
+is genuine metres, exactly as named. The actual gap is in `physics.py`, whose
+simulated ride length underestimates the game's own measured distance by
+about 1.44-1.45x, consistent across the real Manic Miner and one evolved
+track. See docs/devlog.md (2026-08-29) for both entries. Fixing that
+simulation, not calibrating a unit ratio, is what's needed before
+`requirement_length` can safely score evolved tracks directly.
 
 Two smaller things stay open. Batching many tracks through one game process is
 worth doing and belongs behind `score_track`'s interface. Determinism across
