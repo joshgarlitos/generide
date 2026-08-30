@@ -4,6 +4,53 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-08-29 — The oracle's placement failure wasn't the track's fault, and neither was my first fix
+
+The entry below this one left open why the oracle failed to place the same
+evolved track you'd just ridden successfully, at piece 66, "Mine Train
+Coaster 1 in the way." Chased it down, and it took two wrong turns to get
+there.
+
+First wrong turn: I found the actual collision. Piece 38 and piece 66 both
+sit on the same tile, 2 height units apart, and our own collision check in
+`geometry.py` only ever compared tiles for exact equality, so it never
+flagged it. OpenRCT2's own source for the Mine Train, `.Heights = { 21, 24,
+4, 7 }` in `MineTrainCoaster.h`, gives a clearance height of 24 raw z-units,
+3 in this project's height units. I wrote a fix that made two tiles on the
+same (x, y) collide whenever they're closer than 3 height units apart, not
+just identical, and it passed every test including the real Manic Miner
+fixture's zero-collision check.
+
+Then I noticed the actual problem with shipping it: you had already
+successfully built and ridden this exact file. If the game really rejects a
+2-height-unit crossing, it should have rejected it for you too, not just for
+the oracle. That contradiction was the tell that the fix was solving the
+wrong layer.
+
+Reading `TrackPlaceAction.cpp` settled it. The clearance check takes a
+`_fromTrackDesign` flag, and when it's set, the check is told to ignore
+collisions with the ride's own ID entirely, specifically because a real
+coaster crossing itself is normal and expected. Loading a saved design, the
+way every real player does, sets that flag. The oracle builds piece by piece
+through the scripting API's own trackplace action, which doesn't, so it
+enforces clearance against its own already-placed track when the real game
+never would.
+
+So the 3-height-unit clearance constant is real, but applying it inside our
+own collision check was wrong; it would have started rejecting or penalizing
+tracks that are actually completely fine to play, which is the opposite
+direction of the mistake this project exists to catch. Reverted `geometry.py`
+back to exact-cell matching, which was already correct for what it's
+supposed to check. The oracle's piece-by-piece build being stricter than
+real design loading is now written down as a known limitation in
+`oracle.py`, unfixed, since the scripting API doesn't appear to expose
+anything equivalent to `_fromTrackDesign`.
+
+Nothing shipped wrong here, but it easily could have. The save-and-check
+step against your actual play session is what caught it.
+
+---
+
 ## 2026-08-29 — The "two length scales" theory was wrong; it's one simulation running short
 
 Saved the good-ride-seed123 track as a design from inside the game after

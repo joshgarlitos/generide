@@ -62,6 +62,26 @@ DEFAULT_BRAKE_SPEED = 30
 # takes a while. Only total stillness counts.
 STALL_TICKS = 1200
 
+# KNOWN LIMITATION, not yet worked around: this module places pieces one at a
+# time via the scripting API's own trackplace action, which enforces vertical
+# clearance against the ride's *own* already-placed track the same as it
+# would against any other ride. A design placed the normal way, by loading a
+# saved .td6 through the ride construction window, does not: OpenRCT2's
+# TrackPlaceAction takes a `_fromTrackDesign` flag that tells its clearance
+# check to ignore the ride under construction's own ID entirely
+# (`ignoreRideId = _fromTrackDesign ? _rideIndex : RideId::GetNull()` in
+# src/openrct2/actions/track/TrackPlaceAction.cpp), because a real coaster
+# routinely crosses itself and that is expected. Confirmed 2026-08-29: a real
+# evolved track (114 segments, docs/devlog.md) crosses itself with 2 height
+# units of clearance at one point, which this module's piece-by-piece build
+# rejects as "Mine Train Coaster 1 in the way" -- and the same file, loaded
+# and ridden normally in-game, worked fine and rated 5.21/6.97/4.31.
+# So a `placement_failed` result from this module does not mean the track is
+# actually invalid; it means this build method is stricter than real design
+# loading on self-crossings tighter than 3 height units apart. No fix is
+# implemented yet -- the scripting API does not appear to expose an
+# equivalent to `_fromTrackDesign`.
+
 
 @dataclass(frozen=True)
 class RideMeasurements:
