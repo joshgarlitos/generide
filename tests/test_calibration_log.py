@@ -1,6 +1,7 @@
 """Tests for the oracle-calibration JSON-lines log."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,43 @@ def test_rated_result_writes_one_line_with_rating_fields(tmp_path: Path):
         "num_drops": None,
         "num_lift_hills": None,
         "max_speed": 42.0,
+        "average_speed": None,
+        "ride_length": None,
+        "ride_time": None,
+        "total_air_time": None,
+        "max_positive_vertical_gs": None,
+        "max_negative_vertical_gs": None,
+        "max_lateral_gs": None,
+    }
+
+
+def test_duck_typed_measurements_does_not_raise_or_become_oracle_error(tmp_path: Path):
+    log_path = tmp_path / "calibration.jsonl"
+    # A stand-in for OracleResult, as an injected test `oracle_scorer` might
+    # return -- measurements is a SimpleNamespace, not a real dataclass, and
+    # only sets some of RideMeasurements' fields.
+    result = SimpleNamespace(
+        excitement=5.0,
+        intensity=6.0,
+        nausea=3.0,
+        status="rated",
+        detail="",
+        stalled_at_index=None,
+        stalled_at_type=None,
+        measurements=SimpleNamespace(highest_drop_height=5, max_speed=10.0),
+    )
+    record = CalibrationRecord.from_oracle_result(
+        role="best", generation=1, rng_seed=1, segments=[1, 2], result=result,
+    )
+    append_record(log_path, record)
+
+    [written] = read_records(log_path)
+    assert written.status == "rated"
+    assert written.measurements == {
+        "highest_drop_height": 5,
+        "num_drops": None,
+        "num_lift_hills": None,
+        "max_speed": 10.0,
         "average_speed": None,
         "ride_length": None,
         "ride_time": None,

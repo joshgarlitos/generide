@@ -5,6 +5,7 @@ track designs according to a pluggable fitness function.
 """
 
 import random
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -462,8 +463,11 @@ def _sample_oracle_calibration_one(
 
     try:
         log_writer(record)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(
+            f"oracle calibration: failed to write log record (gen={gen}, role={role}): {exc}",
+            file=sys.stderr,
+        )
 
 
 def _maybe_sample_oracle_calibration(
@@ -564,6 +568,8 @@ def evolve_parts(
         fitness_fn = ProxyFitness()
     if oracle_interval and oracle_log_writer is None:
         raise ValueError("oracle_log_writer is required when oracle_interval is set")
+    if oracle_interval and oracle_max_calls <= 0:
+        raise ValueError("oracle_max_calls must be > 0 when oracle_interval is set")
 
     platform = station_length(seed) or DEFAULT_STATION_LENGTH
     seed_parts = _ensure_scaffold_parts(

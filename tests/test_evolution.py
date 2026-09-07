@@ -590,6 +590,40 @@ class TestEvolvePartsOracleCalibration:
         with pytest.raises(ValueError):
             evolve_parts(seed, rng, generations=1, population_size=5, oracle_interval=1)
 
+    def test_oracle_interval_without_max_calls_raises(self):
+        """oracle_max_calls defaults to 0, which would silently sample nothing."""
+        seed = create_hill_circuit()
+        rng = random.Random(7)
+        with pytest.raises(ValueError):
+            evolve_parts(
+                seed, rng, generations=1, population_size=5,
+                oracle_interval=1, oracle_log_writer=lambda record: None,
+            )
+
+    def test_log_writer_exception_is_caught_and_does_not_abort_the_run(self, capsys):
+        """A failing log writer must not abort the generation loop."""
+        seed = create_hill_circuit()
+        rng = random.Random(8)
+
+        def raising_log_writer(record):
+            raise OSError("disk full")
+
+        stats = evolve_parts(
+            seed, rng, generations=10, population_size=10,
+            oracle_interval=2, oracle_max_calls=100,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            oracle_log_writer=raising_log_writer,
+        )
+
+        assert stats.generations == 10  # the run completed despite every log write failing
+        err = capsys.readouterr().err
+        assert "oracle calibration: failed to write log record" in err
+        assert "gen=0" in err
+        assert "role=best" in err
+        assert "disk full" in err
+
 
 class TestEdgeCases:
     """Tests for edge cases and error handling."""

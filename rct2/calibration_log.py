@@ -67,7 +67,9 @@ class CalibrationRecord:
         module docstring.
         """
         measurements = (
-            asdict(result.measurements) if result.measurements is not None else None
+            _measurements_to_dict(result.measurements)
+            if result.measurements is not None
+            else None
         )
         return cls(
             role=role,
@@ -104,6 +106,34 @@ class CalibrationRecord:
             status="oracle_error",
             error=str(error),
         )
+
+
+_MEASUREMENT_FIELDS = (
+    "highest_drop_height",
+    "num_drops",
+    "num_lift_hills",
+    "max_speed",
+    "average_speed",
+    "ride_length",
+    "ride_time",
+    "total_air_time",
+    "max_positive_vertical_gs",
+    "max_negative_vertical_gs",
+    "max_lateral_gs",
+)
+
+
+def _measurements_to_dict(measurements: Any) -> dict:
+    """Read `measurements` field-by-field rather than via `dataclasses.asdict()`.
+
+    `asdict()` requires a real dataclass instance and raises `TypeError` on
+    any duck-typed stand-in (a plain dict, a `SimpleNamespace`, ...) -- which
+    the module docstring's "shaped like OracleResult" contract explicitly
+    invites for `oracle_scorer` test doubles. Falling back to `getattr` here
+    keeps that promise for the `measurements` sub-object too, and tolerates a
+    partial stand-in that only sets some fields.
+    """
+    return {field: getattr(measurements, field, None) for field in _MEASUREMENT_FIELDS}
 
 
 def _utc_now() -> str:
