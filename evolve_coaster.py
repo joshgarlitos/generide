@@ -345,7 +345,9 @@ def main():
     print(f"Evolving for {args.generations} generations with population {args.population}")
     print(f"Mutation rate: {args.mutation_rate}")
     if args.oracle_calibrate:
-        worst_case_seconds = args.oracle_max_calls * 90
+        from rct2.oracle import DEFAULT_PROCESS_TIMEOUT_S
+
+        worst_case_seconds = int(args.oracle_max_calls * DEFAULT_PROCESS_TIMEOUT_S)
         print(
             f"Oracle calibration enabled: up to {args.oracle_max_calls} calls, "
             f"up to {worst_case_seconds}s ({worst_case_seconds / 60:.1f} min) added"

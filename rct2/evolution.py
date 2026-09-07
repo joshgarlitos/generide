@@ -8,6 +8,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from rct2.calibration_log import CalibrationRecord
 from rct2.construction import (
     DEFAULT_STATION_LENGTH,
     build_station,
@@ -428,14 +429,12 @@ def _create_offspring_parts(
 
 # How much less often the worst individual is sampled than the best, when
 # oracle calibration is enabled -- both count against the same call budget.
-# See docs/plans/2026-09-07-1611-feat-oracle-calibration-sampling-plan.md
-# (KTD5).
 _ORACLE_WORST_SAMPLE_EVERY = 3
 
 
 def _default_oracle_scorer(segments: list[int]) -> Any:
     """Lazily import the real oracle so this module stays importable with no
-    OpenRCT2 install, mirroring `rct2.benchmark`'s `_oracle_scorer` (KTD2)."""
+    OpenRCT2 install, mirroring `rct2.benchmark`'s `_oracle_scorer`."""
     from rct2.oracle import score_track
 
     return score_track(segments)
@@ -449,14 +448,12 @@ def _sample_oracle_calibration_one(
     scorer: Callable[[list[int]], Any],
     log_writer: Callable[[Any], None],
 ) -> None:
-    """Score one track and log the result, never raising (KTD9).
+    """Score one track and log the result, never raising.
 
     A scorer exception becomes a synthetic `oracle_error` record instead of
     propagating; a log-writer exception is dropped, since there is nowhere
     left to report it.
     """
-    from rct2.calibration_log import CalibrationRecord
-
     try:
         result = scorer(segments)
         record = CalibrationRecord.from_oracle_result(role, gen, rng_seed, segments, result)
@@ -471,7 +468,8 @@ def _sample_oracle_calibration_one(
 
 def _maybe_sample_oracle_calibration(
     gen: int,
-    population: Population,
+    best: Optional[Individual],
+    valid_individuals: list[Individual],
     interval: int,
     max_calls: int,
     calls_so_far: int,
@@ -480,27 +478,23 @@ def _maybe_sample_oracle_calibration(
     log_writer: Callable[[Any], None],
 ) -> int:
     """Sample the best (and, less often, the worst valid) individual against
-    the oracle for calibration. Purely observational: reads `population` and
-    returns the updated call count, never mutating anything the GA loop
-    depends on (KTD1) -- this is what makes R3 hold by construction.
+    the oracle for calibration. Purely observational: takes the generation's
+    already-computed best individual and valid-individual list rather than
+    recomputing either, and returns the updated call count without mutating
+    anything the GA loop depends on.
     """
     if calls_so_far >= max_calls or gen % interval != 0:
         return calls_so_far
 
-    best = population.best()
     if best is not None:
         _sample_oracle_calibration_one("best", gen, rng_seed, best.segments, scorer, log_writer)
         calls_so_far += 1
 
     tick = gen // interval
-    if calls_so_far < max_calls and tick % _ORACLE_WORST_SAMPLE_EVERY == 0:
-        valid = [ind for ind in population.individuals if ind.is_valid()]
-        if valid:
-            worst = min(valid, key=lambda ind: ind.fitness)
-            _sample_oracle_calibration_one(
-                "worst", gen, rng_seed, worst.segments, scorer, log_writer
-            )
-            calls_so_far += 1
+    if calls_so_far < max_calls and tick % _ORACLE_WORST_SAMPLE_EVERY == 0 and valid_individuals:
+        worst = min(valid_individuals, key=lambda ind: ind.fitness)
+        _sample_oracle_calibration_one("worst", gen, rng_seed, worst.segments, scorer, log_writer)
+        calls_so_far += 1
 
     return calls_so_far
 
@@ -548,20 +542,20 @@ def evolve_parts(
         progress_callback: Optional callback(generation, population) for progress
         oracle_interval: When set, sample the best individual against the
             real oracle every this many generations, purely for calibration
-            logging -- never affects fitness, selection, or output (R1, R3).
-            None (the default) disables calibration sampling entirely (KD1).
+            logging -- never affects fitness, selection, or output. None
+            (the default) disables calibration sampling entirely.
         oracle_max_calls: Hard cap on total oracle calls this run; reaching
-            it stops sampling for the rest of the run (R5, KTD4).
+            it stops sampling for the rest of the run.
         oracle_rng_seed: The run's RNG seed, stamped on each log record so
-            multiple runs can share one log file (KTD6). Purely a label --
-            does not affect this function's own randomness.
+            multiple runs can share one log file. Purely a label -- does not
+            affect this function's own randomness.
         oracle_scorer: Callable(segments) -> OracleResult-shaped object,
             injectable for testing. Defaults to `rct2.oracle.score_track`,
             imported lazily so this module stays importable with no
-            OpenRCT2 install (KTD2).
+            OpenRCT2 install.
         oracle_log_writer: Callable(CalibrationRecord) -> None. Required
             when `oracle_interval` is set -- the log path is the caller's
-            decision (KTD7), not something this function invents.
+            decision, not something this function invents.
 
     Returns:
         EvolutionStats with best individual and history
@@ -587,8 +581,9 @@ def evolve_parts(
         best = population.best()
         if best:
             fitness_history.append(best.fitness)
+        valid_individuals = [ind for ind in population.individuals if ind.is_valid()]
         valid_ratio_history.append(
-            population.valid_count() / len(population.individuals)
+            len(valid_individuals) / len(population.individuals)
             if population.individuals else 0.0
         )
 
@@ -598,7 +593,7 @@ def evolve_parts(
         if oracle_interval:
             scorer = oracle_scorer or _default_oracle_scorer
             oracle_calls_made = _maybe_sample_oracle_calibration(
-                gen, population, oracle_interval, oracle_max_calls,
+                gen, best, valid_individuals, oracle_interval, oracle_max_calls,
                 oracle_calls_made, oracle_rng_seed, scorer, oracle_log_writer,
             )
 

@@ -31,7 +31,7 @@ class CalibrationRecord:
 
     role: str  # "best" | "worst"
     generation: int
-    rng_seed: int
+    rng_seed: Optional[int]
     timestamp: str  # UTC, ISO 8601
     segments: list[int]
     status: str  # "rated" | "stalled" | "timeout" | "placement_failed" | "oracle_error"
@@ -56,7 +56,7 @@ class CalibrationRecord:
         cls,
         role: str,
         generation: int,
-        rng_seed: int,
+        rng_seed: Optional[int],
         segments: list[int],
         result: Any,
     ) -> "CalibrationRecord":
@@ -90,11 +90,11 @@ class CalibrationRecord:
         cls,
         role: str,
         generation: int,
-        rng_seed: int,
+        rng_seed: Optional[int],
         segments: list[int],
         error: BaseException,
     ) -> "CalibrationRecord":
-        """Build a synthetic record for a scorer/log_writer call that raised (KTD9)."""
+        """Build a synthetic record for a scorer/log_writer call that raised."""
         return cls(
             role=role,
             generation=generation,

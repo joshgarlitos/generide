@@ -3,7 +3,7 @@
 These tests never run real evolution or the real oracle: `main()`'s
 `evolve`/`evolve_parts` call is monkeypatched to a fake that captures the
 kwargs it was given and returns a stand-in EvolutionStats, so the tests
-exercise only the CLI's own argument parsing, validation, and wiring (U3),
+exercise only the CLI's own argument parsing, validation, and wiring,
 not the GA loop or the oracle itself (already covered in test_evolution.py).
 """
 

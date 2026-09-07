@@ -428,7 +428,7 @@ class TestEvolvePartsOracleCalibration:
         assert stats1.fitness_history == stats2.fitness_history
 
     def test_enabling_calibration_never_changes_evolution_output(self):
-        """Covers R3: identical seed produces identical output with calibration on or off."""
+        """Identical seed produces identical output with calibration on or off."""
         seed = create_hill_circuit()
 
         rng_off = random.Random(99)
@@ -494,13 +494,13 @@ class TestEvolvePartsOracleCalibration:
         invalid = Individual(segments=[0x00], fitness=100.0)  # fails validate_construction
         valid_low = Individual(segments=create_hill_circuit(), fitness=1.0)
         valid_high = Individual(segments=create_hill_circuit(), fitness=50.0)
-        population = Population(individuals=[invalid, valid_low, valid_high])
         logged = []
 
         from rct2.evolution import _maybe_sample_oracle_calibration
 
         _maybe_sample_oracle_calibration(
-            gen=0, population=population, interval=1, max_calls=10, calls_so_far=0,
+            gen=0, best=valid_high, valid_individuals=[valid_low, valid_high],
+            interval=1, max_calls=10, calls_so_far=0,
             rng_seed=1,
             scorer=lambda segments: OracleResult(
                 excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
@@ -512,16 +512,13 @@ class TestEvolvePartsOracleCalibration:
         assert worst_record.segments == valid_low.segments
 
     def test_worst_sample_skipped_when_no_individual_is_valid(self):
-        population = Population(individuals=[
-            Individual(segments=[0x00], fitness=1.0),
-            Individual(segments=[0x00], fitness=2.0),
-        ])
+        best = Individual(segments=[0x00], fitness=2.0)
         logged = []
 
         from rct2.evolution import _maybe_sample_oracle_calibration
 
         _maybe_sample_oracle_calibration(
-            gen=0, population=population, interval=1, max_calls=10, calls_so_far=0,
+            gen=0, best=best, valid_individuals=[], interval=1, max_calls=10, calls_so_far=0,
             rng_seed=1,
             scorer=lambda segments: OracleResult(
                 excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
@@ -567,7 +564,7 @@ class TestEvolvePartsOracleCalibration:
         assert record.detail == "Mine Train Coaster 1 in the way"
 
     def test_scorer_exception_is_caught_and_logged_as_oracle_error(self):
-        """Covers KTD9: a failing oracle call must not abort the generation loop."""
+        """A failing oracle call must not abort the generation loop."""
         seed = create_hill_circuit()
         rng = random.Random(5)
         logged = []
