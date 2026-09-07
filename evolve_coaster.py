@@ -201,11 +201,60 @@ def main():
         help="Also write an SVG plan of the best track and a fitness curve for "
              "the run, next to the .td6 output",
     )
+    parser.add_argument(
+        "--oracle-calibrate",
+        action="store_true",
+        help="Periodically check the run's best track against the real game "
+             "via the headless oracle, purely for calibration logging -- "
+             "never affects fitness or selection. Requires --genome parts "
+             "(default: off)",
+    )
+    parser.add_argument(
+        "--oracle-interval",
+        type=int,
+        default=10,
+        help="Generations between oracle calibration samples (default: 10)",
+    )
+    parser.add_argument(
+        "--oracle-max-calls",
+        type=int,
+        default=20,
+        help="Hard cap on total oracle calls this run (default: 20)",
+    )
+    parser.add_argument(
+        "--oracle-log",
+        type=Path,
+        default=None,
+        help="Calibration log path (default: <output>.oracle-log.jsonl)",
+    )
 
     args = parser.parse_args()
 
     if args.output is None:
         args.output = Path(f"generide-{datetime.now():%Y%m%d-%H%M%S}.td6")
+
+    if args.oracle_calibrate:
+        if args.genome != "parts":
+            print(
+                "Error: --oracle-calibrate requires --genome parts "
+                "(evolve() has no calibration hook)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.oracle_interval < 1:
+            print(
+                f"Error: --oracle-interval must be at least 1, got {args.oracle_interval}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.oracle_max_calls < 1:
+            print(
+                f"Error: --oracle-max-calls must be at least 1, got {args.oracle_max_calls}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.oracle_log is None:
+            args.oracle_log = args.output.with_suffix(".oracle-log.jsonl")
 
     # Setup RNG with seed
     if args.rng_seed is None:
@@ -295,11 +344,19 @@ def main():
 
     print(f"Evolving for {args.generations} generations with population {args.population}")
     print(f"Mutation rate: {args.mutation_rate}")
+    if args.oracle_calibrate:
+        from rct2.oracle import DEFAULT_PROCESS_TIMEOUT_S
+
+        worst_case_seconds = int(args.oracle_max_calls * DEFAULT_PROCESS_TIMEOUT_S)
+        print(
+            f"Oracle calibration enabled: up to {args.oracle_max_calls} calls, "
+            f"up to {worst_case_seconds}s ({worst_case_seconds / 60:.1f} min) added"
+        )
     print()
 
     # Run evolution
     run = evolve_parts if args.genome == "parts" else evolve
-    stats = run(
+    run_kwargs = dict(
         seed=seed,
         rng=rng,
         fitness_fn=fitness_fn,
@@ -308,6 +365,16 @@ def main():
         mutation_rate=args.mutation_rate,
         progress_callback=progress if args.verbose else None,
     )
+    if args.oracle_calibrate:
+        from rct2.calibration_log import append_record
+
+        run_kwargs.update(
+            oracle_interval=args.oracle_interval,
+            oracle_max_calls=args.oracle_max_calls,
+            oracle_rng_seed=rng_seed,
+            oracle_log_writer=lambda record: append_record(args.oracle_log, record),
+        )
+    stats = run(**run_kwargs)
 
     print()
     print("Evolution complete!")
@@ -350,6 +417,9 @@ def main():
     ride = create_ride_from_segments(best.segments, template_path)
     td6.save(ride, args.output)
     print(f"\nSaved evolved track to: {args.output}")
+
+    if args.oracle_calibrate:
+        print(f"Saved oracle calibration log to: {args.oracle_log}")
 
     if args.render:
         # Written after the export, so a rendering problem can never cost

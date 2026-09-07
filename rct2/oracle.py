@@ -62,6 +62,12 @@ DEFAULT_BRAKE_SPEED = 30
 # takes a while. Only total stillness counts.
 STALL_TICKS = 1200
 
+# Default wall-clock kill switch for one score_track() call. Callers that
+# estimate a run's worst-case added time from oracle_max_calls (e.g. the
+# --oracle-calibrate CLI flag) should multiply by this constant rather than
+# hardcoding the number, so the two stay in sync.
+DEFAULT_PROCESS_TIMEOUT_S = 90.0
+
 # KNOWN LIMITATION, not yet worked around: this module places pieces one at a
 # time via the scripting API's own trackplace action, which enforces vertical
 # clearance against the ride's *own* already-placed track the same as it
@@ -829,7 +835,7 @@ def score_track(
     # empty (bare surface only) during development.
     level_radius: int = 20,  # covers any track within the project's usual 30x30 max footprint
     timeout_ticks: Optional[int] = None,  # None sizes it from the track, see _default_timeout_ticks
-    process_timeout_s: float = 90.0,
+    process_timeout_s: float = DEFAULT_PROCESS_TIMEOUT_S,
     lift_indices: Optional[Set[int]] = None,
     brake_speed: int = DEFAULT_BRAKE_SPEED,
     num_trains: int = 1,
