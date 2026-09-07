@@ -6,7 +6,7 @@ track designs according to a pluggable fitness function.
 
 import random
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from rct2.construction import (
     DEFAULT_STATION_LENGTH,
@@ -426,6 +426,85 @@ def _create_offspring_parts(
     return offspring
 
 
+# How much less often the worst individual is sampled than the best, when
+# oracle calibration is enabled -- both count against the same call budget.
+# See docs/plans/2026-09-07-1611-feat-oracle-calibration-sampling-plan.md
+# (KTD5).
+_ORACLE_WORST_SAMPLE_EVERY = 3
+
+
+def _default_oracle_scorer(segments: list[int]) -> Any:
+    """Lazily import the real oracle so this module stays importable with no
+    OpenRCT2 install, mirroring `rct2.benchmark`'s `_oracle_scorer` (KTD2)."""
+    from rct2.oracle import score_track
+
+    return score_track(segments)
+
+
+def _sample_oracle_calibration_one(
+    role: str,
+    gen: int,
+    rng_seed: Optional[int],
+    segments: list[int],
+    scorer: Callable[[list[int]], Any],
+    log_writer: Callable[[Any], None],
+) -> None:
+    """Score one track and log the result, never raising (KTD9).
+
+    A scorer exception becomes a synthetic `oracle_error` record instead of
+    propagating; a log-writer exception is dropped, since there is nowhere
+    left to report it.
+    """
+    from rct2.calibration_log import CalibrationRecord
+
+    try:
+        result = scorer(segments)
+        record = CalibrationRecord.from_oracle_result(role, gen, rng_seed, segments, result)
+    except Exception as exc:
+        record = CalibrationRecord.oracle_error(role, gen, rng_seed, segments, exc)
+
+    try:
+        log_writer(record)
+    except Exception:
+        pass
+
+
+def _maybe_sample_oracle_calibration(
+    gen: int,
+    population: Population,
+    interval: int,
+    max_calls: int,
+    calls_so_far: int,
+    rng_seed: Optional[int],
+    scorer: Callable[[list[int]], Any],
+    log_writer: Callable[[Any], None],
+) -> int:
+    """Sample the best (and, less often, the worst valid) individual against
+    the oracle for calibration. Purely observational: reads `population` and
+    returns the updated call count, never mutating anything the GA loop
+    depends on (KTD1) -- this is what makes R3 hold by construction.
+    """
+    if calls_so_far >= max_calls or gen % interval != 0:
+        return calls_so_far
+
+    best = population.best()
+    if best is not None:
+        _sample_oracle_calibration_one("best", gen, rng_seed, best.segments, scorer, log_writer)
+        calls_so_far += 1
+
+    tick = gen // interval
+    if calls_so_far < max_calls and tick % _ORACLE_WORST_SAMPLE_EVERY == 0:
+        valid = [ind for ind in population.individuals if ind.is_valid()]
+        if valid:
+            worst = min(valid, key=lambda ind: ind.fitness)
+            _sample_oracle_calibration_one(
+                "worst", gen, rng_seed, worst.segments, scorer, log_writer
+            )
+            calls_so_far += 1
+
+    return calls_so_far
+
+
 def evolve_parts(
     seed: list[int],
     rng: random.Random,
@@ -436,6 +515,11 @@ def evolve_parts(
     elitism: int = 2,
     tournament_size: int = 3,
     progress_callback: Optional[Callable[[int, Population], None]] = None,
+    oracle_interval: Optional[int] = None,
+    oracle_max_calls: int = 0,
+    oracle_rng_seed: Optional[int] = None,
+    oracle_scorer: Optional[Callable[[list[int]], Any]] = None,
+    oracle_log_writer: Optional[Callable[[Any], None]] = None,
 ) -> EvolutionStats:
     """Part-based counterpart to `evolve`.
 
@@ -462,12 +546,30 @@ def evolve_parts(
         elitism: Number of best individuals to preserve each generation
         tournament_size: Number of candidates for tournament selection
         progress_callback: Optional callback(generation, population) for progress
+        oracle_interval: When set, sample the best individual against the
+            real oracle every this many generations, purely for calibration
+            logging -- never affects fitness, selection, or output (R1, R3).
+            None (the default) disables calibration sampling entirely (KD1).
+        oracle_max_calls: Hard cap on total oracle calls this run; reaching
+            it stops sampling for the rest of the run (R5, KTD4).
+        oracle_rng_seed: The run's RNG seed, stamped on each log record so
+            multiple runs can share one log file (KTD6). Purely a label --
+            does not affect this function's own randomness.
+        oracle_scorer: Callable(segments) -> OracleResult-shaped object,
+            injectable for testing. Defaults to `rct2.oracle.score_track`,
+            imported lazily so this module stays importable with no
+            OpenRCT2 install (KTD2).
+        oracle_log_writer: Callable(CalibrationRecord) -> None. Required
+            when `oracle_interval` is set -- the log path is the caller's
+            decision (KTD7), not something this function invents.
 
     Returns:
         EvolutionStats with best individual and history
     """
     if fitness_fn is None:
         fitness_fn = ProxyFitness()
+    if oracle_interval and oracle_log_writer is None:
+        raise ValueError("oracle_log_writer is required when oracle_interval is set")
 
     platform = station_length(seed) or DEFAULT_STATION_LENGTH
     seed_parts = _ensure_scaffold_parts(
@@ -479,6 +581,7 @@ def evolve_parts(
 
     fitness_history = []
     valid_ratio_history = []
+    oracle_calls_made = 0
 
     for gen in range(generations):
         best = population.best()
@@ -491,6 +594,13 @@ def evolve_parts(
 
         if progress_callback:
             progress_callback(gen, population)
+
+        if oracle_interval:
+            scorer = oracle_scorer or _default_oracle_scorer
+            oracle_calls_made = _maybe_sample_oracle_calibration(
+                gen, population, oracle_interval, oracle_max_calls,
+                oracle_calls_made, oracle_rng_seed, scorer, oracle_log_writer,
+            )
 
         population.individuals.sort(key=lambda ind: ind.fitness, reverse=True)
 

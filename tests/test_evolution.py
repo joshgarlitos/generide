@@ -16,6 +16,7 @@ from rct2.fitness import ProxyFitness
 from rct2.generate import create_hill_circuit, create_simple_circuit
 from rct2.geometry import Position, is_closed_circuit
 from rct2.mutations import BEGIN_STATION, END_STATION
+from rct2.oracle import OracleResult
 
 
 class TestIndividual:
@@ -409,6 +410,188 @@ class TestEvolveParts:
         assert stats1.fitness_history == stats2.fitness_history
         assert stats1.valid_ratio_history == stats2.valid_ratio_history
         assert stats1.best_individual.segments == stats2.best_individual.segments
+
+
+class TestEvolvePartsOracleCalibration:
+    """Tests for the oracle-calibration sampling hook in evolve_parts()."""
+
+    def test_disabled_by_default_output_is_unchanged(self):
+        """Not passing oracle_interval must match the pre-feature behavior exactly."""
+        seed = create_hill_circuit()
+        rng1 = random.Random(42)
+        stats1 = evolve_parts(seed, rng1, generations=10, population_size=10)
+
+        rng2 = random.Random(42)
+        stats2 = evolve_parts(seed, rng2, generations=10, population_size=10)
+
+        assert stats1.best_individual.segments == stats2.best_individual.segments
+        assert stats1.fitness_history == stats2.fitness_history
+
+    def test_enabling_calibration_never_changes_evolution_output(self):
+        """Covers R3: identical seed produces identical output with calibration on or off."""
+        seed = create_hill_circuit()
+
+        rng_off = random.Random(99)
+        stats_off = evolve_parts(seed, rng_off, generations=15, population_size=10)
+
+        rng_on = random.Random(99)
+        stats_on = evolve_parts(
+            seed, rng_on, generations=15, population_size=10,
+            oracle_interval=3, oracle_max_calls=100, oracle_rng_seed=99,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            oracle_log_writer=lambda record: None,
+        )
+
+        assert stats_on.best_individual.segments == stats_off.best_individual.segments
+        assert stats_on.fitness_history == stats_off.fitness_history
+        assert stats_on.valid_ratio_history == stats_off.valid_ratio_history
+
+    def test_scorer_called_on_expected_generations_with_best_segments(self):
+        seed = create_hill_circuit()
+        rng = random.Random(1)
+        best_at_gen = {}
+
+        def spy(gen, population):
+            best_at_gen[gen] = population.best().segments
+
+        logged = []
+        evolve_parts(
+            seed, rng, generations=20, population_size=10,
+            progress_callback=spy,
+            oracle_interval=5, oracle_max_calls=100,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            oracle_log_writer=logged.append,
+        )
+
+        best_records = [r for r in logged if r.role == "best"]
+        assert [r.generation for r in best_records] == [0, 5, 10, 15]
+        for record in best_records:
+            assert record.segments == best_at_gen[record.generation]
+
+    def test_worst_sample_cadence_is_every_third_best_tick(self):
+        seed = create_hill_circuit()
+        rng = random.Random(2)
+        logged = []
+        evolve_parts(
+            seed, rng, generations=40, population_size=10,
+            oracle_interval=5, oracle_max_calls=100,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            oracle_log_writer=logged.append,
+        )
+
+        worst_gens = [r.generation for r in logged if r.role == "worst"]
+        # Best-ticks land on gen 0, 5, ..., 35 (8 ticks); worst fires every
+        # 3rd tick (0, 3, 6) -> gen 0, 15, 30.
+        assert worst_gens == [0, 15, 30]
+
+    def test_worst_sample_excludes_construction_invalid_individuals(self):
+        invalid = Individual(segments=[0x00], fitness=100.0)  # fails validate_construction
+        valid_low = Individual(segments=create_hill_circuit(), fitness=1.0)
+        valid_high = Individual(segments=create_hill_circuit(), fitness=50.0)
+        population = Population(individuals=[invalid, valid_low, valid_high])
+        logged = []
+
+        from rct2.evolution import _maybe_sample_oracle_calibration
+
+        _maybe_sample_oracle_calibration(
+            gen=0, population=population, interval=1, max_calls=10, calls_so_far=0,
+            rng_seed=1,
+            scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            log_writer=logged.append,
+        )
+
+        [worst_record] = [r for r in logged if r.role == "worst"]
+        assert worst_record.segments == valid_low.segments
+
+    def test_worst_sample_skipped_when_no_individual_is_valid(self):
+        population = Population(individuals=[
+            Individual(segments=[0x00], fitness=1.0),
+            Individual(segments=[0x00], fitness=2.0),
+        ])
+        logged = []
+
+        from rct2.evolution import _maybe_sample_oracle_calibration
+
+        _maybe_sample_oracle_calibration(
+            gen=0, population=population, interval=1, max_calls=10, calls_so_far=0,
+            rng_seed=1,
+            scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            log_writer=logged.append,
+        )
+
+        assert [r.role for r in logged] == ["best"]
+
+    def test_max_calls_cap_stops_sampling_for_the_rest_of_the_run(self):
+        seed = create_hill_circuit()
+        rng = random.Random(3)
+        logged = []
+        evolve_parts(
+            seed, rng, generations=30, population_size=10,
+            oracle_interval=5, oracle_max_calls=2,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=1.0, intensity=1.0, nausea=1.0, status="rated",
+            ),
+            oracle_log_writer=logged.append,
+        )
+
+        # Interval 5 over 30 generations would otherwise fire at gen 0, 5, ..., 25
+        # (6 best-samples); the cap of 2 must stop it after the second call.
+        assert len(logged) == 2
+
+    def test_placement_failed_result_reaches_log_writer_unchanged(self):
+        seed = create_hill_circuit()
+        rng = random.Random(4)
+        logged = []
+        evolve_parts(
+            seed, rng, generations=1, population_size=5,
+            oracle_interval=1, oracle_max_calls=1,
+            oracle_scorer=lambda segments: OracleResult(
+                excitement=None, intensity=None, nausea=None,
+                status="placement_failed", detail="Mine Train Coaster 1 in the way",
+            ),
+            oracle_log_writer=logged.append,
+        )
+
+        [record] = logged
+        assert record.status == "placement_failed"
+        assert record.detail == "Mine Train Coaster 1 in the way"
+
+    def test_scorer_exception_is_caught_and_logged_as_oracle_error(self):
+        """Covers KTD9: a failing oracle call must not abort the generation loop."""
+        seed = create_hill_circuit()
+        rng = random.Random(5)
+        logged = []
+
+        def raising_scorer(segments):
+            raise FileNotFoundError("OpenRCT2 binary not found")
+
+        stats = evolve_parts(
+            seed, rng, generations=10, population_size=10,
+            oracle_interval=2, oracle_max_calls=100,
+            oracle_scorer=raising_scorer,
+            oracle_log_writer=logged.append,
+        )
+
+        assert stats.generations == 10  # the run completed despite every oracle call failing
+        assert logged
+        assert all(r.status == "oracle_error" for r in logged)
+        assert "OpenRCT2 binary not found" in logged[0].error
+
+    def test_oracle_interval_without_log_writer_raises(self):
+        seed = create_hill_circuit()
+        rng = random.Random(6)
+        with pytest.raises(ValueError):
+            evolve_parts(seed, rng, generations=1, population_size=5, oracle_interval=1)
 
 
 class TestEdgeCases:
