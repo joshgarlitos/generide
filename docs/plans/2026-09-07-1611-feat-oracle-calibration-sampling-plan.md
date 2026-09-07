@@ -38,7 +38,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 **Sampling behavior**
 
 - R1. When explicitly enabled, `evolve_parts()` samples the current generation's best individual every N generations and passes its segment list to `oracle.score_track()`, logging the result.
-- R2. Less often than the best, the worst construction-valid individual in the current generation is also sampled and logged the same way.
+- R2. Less often than the best, the worst construction-valid individual in the current generation is also sampled and logged the same way, to check whether the proxy fitness's low ranking for that track still holds up against the real game's rating.
 - R3. Enabling or disabling sampling never changes `evolve_parts()`'s own output: `best_individual.segments`, `fitness_history`, and `valid_ratio_history` are bit-identical for the same seed whether or not calibration is on.
 - R4. A `placement_failed` oracle result is logged as "unjudgeable, skip" — never as a bad score or as evidence the track itself is broken.
 - R5. Total oracle calls in a run are capped; reaching the cap stops sampling for the rest of that run.
@@ -46,7 +46,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 **CLI and operator experience**
 
 - R6. Sampling is off by default. An operator opts in with new flags on `evolve_coaster.py`.
-- R7. Passing the calibration flags together with `--genome pieces` (which has no sampling hook) is a hard error, not a silent no-op.
+- R7. Passing `--oracle-calibrate` with `--genome pieces` (which has no sampling hook) is a hard error, not a silent no-op.
 - R8. When calibration is enabled, the CLI prints the worst-case added wall-clock time before the run starts.
 
 ### Key Decisions
@@ -77,10 +77,11 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 - **KTD2.** `rct2.oracle` is imported lazily inside the hook function, and the hook accepts an injectable scorer callable (default `oracle.score_track`), mirroring `rct2/benchmark.py`'s `_oracle_scorer` pattern. This keeps `rct2/evolution.py` importable with no OpenRCT2 install, and keeps tests independent of a real game.
 - **KTD3.** All four `OracleResult.status` values (`rated`, `stalled`, `timeout`, `placement_failed`) are written to the log uniformly, one record each. The writer never special-cases `placement_failed` into a different code path than the other three; "unjudgeable, skip" (R4) is a label on the record, decided when the log is later read, not a different write path.
 - **KTD4.** Reaching `--oracle-max-calls` stops sampling for the rest of the run. The interval is never widened to spread remaining budget across remaining generations.
-- **KTD5.** The worst individual is sampled on every 3rd interval tick that also samples the best, counted against the same call budget. The worst candidate is drawn from construction-valid individuals only (`ind.is_valid()`), via `min(...)` over that filtered set — sampling a construction-invalid track would almost always just return `placement_failed` and waste a call, and it isn't the "fast model might be wrong about an uncertain track" case docs/research-plan.md's rejected-candidate sampling is actually about.
+- **KTD5.** The worst individual is sampled on every 3rd interval tick that also samples the best, counted against the same call budget. The worst candidate is drawn from construction-valid individuals only (`ind.is_valid()`), via `min(...)` over that filtered set — sampling a construction-invalid track would almost always just return `placement_failed` and waste a call. This checks whether the proxy's low-fitness ranking agrees with the real game (R2), which is a narrower question than the "fast model might be wrong about an uncertain track" rejected-candidate insurance docs/research-plan.md describes — that broader mechanism is separate, undertaken work.
 - **KTD6.** The log format is JSON Lines: one JSON object per oracle call, appended to disk as it happens, never batched into a single JSON array at the end — a crash mid-run then loses nothing already collected. Each record carries the run's `rng_seed` and a UTC timestamp, so multiple runs appending to the same default log path stay distinguishable.
-- **KTD7.** New `evolve_coaster.py` flags, following its existing argparse style (short forms, inline defaults in `help=`): `--oracle-calibrate` (`action="store_true"`), `--oracle-interval` (`type=int`), `--oracle-max-calls` (`type=int`), `--oracle-log` (`type=Path`, defaulting off `args.output.with_suffix(...)` the way `--render`'s outputs already do). Passing `--oracle-calibrate` with `--genome pieces` raises a clear error, matching the existing `--station-length` validation style (`evolve_coaster.py:232-235`).
+- **KTD7.** New `evolve_coaster.py` flags, following its existing argparse style (short forms, inline defaults in `help=`): `--oracle-calibrate` (`action="store_true"`), `--oracle-interval` (`type=int`, `default=10`), `--oracle-max-calls` (`type=int`, `default=20`), `--oracle-log` (`type=Path`, defaulting off `args.output.with_suffix(...)` the way `--render`'s outputs already do). Passing `--oracle-calibrate` with `--genome pieces` raises a clear error, matching the existing `--station-length` validation style (`evolve_coaster.py:232-235`). The same validation style rejects `--oracle-interval` below 1 and `--oracle-max-calls` below 1, so a mistyped value fails loudly before the run starts rather than crashing partway through or silently disabling sampling.
 - **KTD8.** Before the generation loop starts, when calibration is enabled, the CLI prints one line stating the worst-case added time (`max_calls * 90s`, from `score_track`'s `process_timeout_s` default), alongside the existing pre-run lines (`RNG seed:`, generation/population settings).
+- **KTD9.** If the scorer or log writer call raises rather than returning a result, the hook catches the exception, logs it via `log_writer` as a synthetic `oracle_error` status (carrying the exception's string form, distinct from any `OracleResult.status` value), and continues the generation loop. A missing OpenRCT2 install, a crashed game, or a full disk then costs one skipped calibration sample, never the run in progress.
 
 ### Assumptions
 
@@ -94,7 +95,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 
 **Goal:** add the per-generation sampling hook so a calibration-enabled run logs oracle results without changing the GA's own output.
 
-**Requirements:** R1, R2, R3, R4, R5. Governs KD1-KD4 via KTD1, KTD3, KTD5.
+**Requirements:** R1, R2, R3, R4, R5. Governs KD1-KD4 via KTD1, KTD3, KTD5, KTD9.
 
 **Dependencies:** none.
 
@@ -108,6 +109,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 - On a worst-sample tick (every 3rd best-tick, KTD5): compute the worst construction-valid individual inline (`ind.is_valid()` filter, `min` by fitness); skip the worst sample entirely if no individual in the generation is valid.
 - Track and enforce `max_calls` across both best and worst samples combined (KTD4); once reached, no further calls occur for the rest of the run.
 - Never touch `population`, `next_gen`, elitism, or tournament selection — the function's only side effect is calling `scorer` and `log_writer`.
+- Wrap the `scorer` and `log_writer` calls in a try/except; on exception, call `log_writer` again with a synthetic `oracle_error` record (KTD9) and continue to the next generation rather than propagating.
 - `evolve_parts()`'s new parameters default to values that disable the hook entirely (KD1), so existing callers and existing tests are unaffected.
 
 **Patterns to follow:** the existing `progress_callback` parameter already threaded through `evolve_parts()`'s loop is the shape to mirror for a per-generation, read-only observer hook.
@@ -121,6 +123,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 - Max-calls cap: with `max_calls` set below the number of ticks that would otherwise fire, sampling stops after the cap and no further scorer calls happen for the rest of the run, even though the interval would otherwise call again.
 - Reproducibility (covers R3): two runs with the same `rng_seed`, one with calibration enabled and one without, produce bit-identical `best_individual.segments`, `fitness_history`, and `valid_ratio_history`.
 - `placement_failed` from the scorer is passed to `log_writer` unchanged (not swallowed, not converted to a score) — proves R4 at the hook level; U2 proves the writer's actual label.
+- A scorer that raises an exception (covers KTD9): the exception is caught, a synthetic `oracle_error` record reaches `log_writer`, and the generation loop continues to completion rather than aborting.
 
 **Verification:** the new test class in `tests/test_evolution.py` passes, and the existing `TestEvolveParts`/`TestReproducibility` classes still pass unmodified.
 
@@ -130,7 +133,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 
 **Goal:** a small, dataclass-backed JSON-lines writer that turns an `OracleResult` into one appended log record.
 
-**Requirements:** R4, R5 (the record format that lets a reader treat `placement_failed` as unjudgeable). Governs KD4 via KTD3, KTD6.
+**Requirements:** R4, R5 (the record format that lets a reader treat `placement_failed` as unjudgeable). Governs KD4 via KTD3, KTD6, KTD9.
 
 **Dependencies:** none (can be built independently of U1, wired together at U1's `log_writer` parameter).
 
@@ -139,9 +142,9 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 - `tests/test_calibration_log.py` (new)
 
 **Approach:**
-- Define a small dataclass capturing: the sampled role (`"best"` or `"worst"`), generation number, `rng_seed`, a UTC timestamp, and the `OracleResult` fields (`status`, `excitement`, `intensity`, `nausea`, `detail`, `stalled_at_index`, `stalled_at_type`, `measurements`) plus the segment list, following `RunResult`'s precedent in `rct2/benchmark.py` of storing the full segment list on every record.
+- Define a small dataclass capturing: the sampled role (`"best"` or `"worst"`), generation number, `rng_seed`, a UTC timestamp, and the `OracleResult` fields (`status`, `excitement`, `intensity`, `nausea`, `detail`, `stalled_at_index`, `stalled_at_type`, `measurements`) plus the segment list, following `RunResult`'s precedent in `rct2/benchmark.py` of storing the full segment list on every record. Make the rating fields optional so a synthetic `oracle_error` record (KTD9, carrying the exception's string form in place of a rating) fits the same dataclass without a separate schema.
 - A single append function writes one JSON line per call, opening the file in append mode each time (or keeping it open for the run's duration — implementer's choice, either satisfies KTD6's crash-safety intent).
-- All four `status` values write through the same path (KTD3) — no branching that treats `placement_failed` differently at write time.
+- All four `OracleResult.status` values write through the same path (KTD3), and the synthetic `oracle_error` status (KTD9) writes through it too — no branching that treats any status differently at write time.
 
 **Patterns to follow:** `rct2/benchmark.py`'s `RunResult.to_dict()`/`from_dict()` `dataclasses.asdict`-based JSON pattern.
 
@@ -149,6 +152,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 - A `rated` result writes one JSON line with all rating fields populated.
 - A `stalled` result writes one line with `status="stalled"` and no rating fields.
 - A `placement_failed` result writes one line with `status="placement_failed"`, distinguishable by a downstream reader from a `rated` or `stalled` line by status alone.
+- A synthetic `oracle_error` record (covers KTD9) writes one line with `status="oracle_error"` and no rating fields, carrying the exception's string form.
 - Two calls append two lines to the same file, in order, without corrupting the first line.
 - Each line round-trips: written then re-read, its fields match what was passed in.
 
@@ -170,7 +174,7 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 
 **Approach:**
 - Add `--oracle-calibrate`, `--oracle-interval`, `--oracle-max-calls`, `--oracle-log` per KTD7, in the existing flag block (`evolve_coaster.py:87-198`).
-- Validate `--oracle-calibrate` requires `--genome parts`; raise the same style of clear, immediate error as the existing `--station-length` check (`evolve_coaster.py:232-235`) rather than proceeding.
+- Validate `--oracle-calibrate` requires `--genome parts`, and that `--oracle-interval >= 1` and `--oracle-max-calls >= 1`; raise the same style of clear, immediate error as the existing `--station-length` check (`evolve_coaster.py:232-235`) rather than proceeding.
 - Default `--oracle-log` off `args.output.with_suffix(...)`, mirroring `--render`'s derived sibling paths (`evolve_coaster.py:357-358`).
 - When enabled, print the KTD8 estimate line before calling `run(...)` (the existing `evolve_parts`/`evolve` dispatch at `evolve_coaster.py:301`), alongside the existing `RNG seed:` and settings lines.
 - Thread the new flags through to `evolve_parts(...)` only when `args.genome == "parts"`.
@@ -180,6 +184,8 @@ A same-session `ce-debug` investigation confirmed the one known blocker — the 
 **Test scenarios:**
 - `--oracle-calibrate --genome parts` with valid interval/cap values parses and threads through to `evolve_parts()` with sampling enabled.
 - `--oracle-calibrate --genome pieces` raises the documented error and does not start a run.
+- `--oracle-interval 0` (or a negative value) raises a clear error before the run starts, rather than crashing partway through.
+- `--oracle-max-calls 0` (or a negative value) raises a clear error before the run starts.
 - No `--oracle-calibrate` flag: behavior is unchanged from before this plan (default off, per R6).
 - `--oracle-log` omitted: the log path defaults off `args.output`'s stem, following the `--render` sibling-path precedent.
 - The upfront estimate line prints when calibration is enabled and is absent when it isn't.
