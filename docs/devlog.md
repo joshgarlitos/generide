@@ -4,6 +4,32 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-09-07 — Asking for a smaller ride broke something invisible on a normal-sized one
+
+Wanted to see whether the generator could handle a genuinely tight footprint, not just the default 30x30 box, so I ran the exact same evolution at 10x20. It didn't hang — it looked like it hung, which is a different and more interesting failure.
+
+The first false lead: piping the run's output through `tail` and killing it showed zero progress lines, which reads exactly like a process stuck before its first generation. It wasn't. Python fully buffers stdout when it isn't attached to a terminal, and a plain `kill` never flushes that buffer, so "no output" here meant "no output I could see," not "no output happened." Running the same command with `python3 -u` to a real file showed the loop working from generation zero.
+
+So it wasn't stuck, it was just getting slower and heavier every generation, and eventually that's indistinguishable from stuck if you don't wait long enough. I built a small instrumented version that logged the population's average genome length alongside timing, and the shape of it was unambiguous: average length climbing from 38.6 to 97.3 segments by generation 68, still accelerating, and per-generation time climbing right alongside it.
+
+The actual mechanism took three pieces landing on each other. `repair_circuit()` only ever appends segments to close an open loop — it's never had a way to shrink one, and that's fine when it rarely needs to run. A tight footprint means it runs constantly, and needs more segments each time to route around a smaller box. And `ProxyFitness` already capped its length reward at `ideal_length`, but I'd never noticed that the elevation, turn, and variety rewards weren't capped the same way — so a padding segment past that point kept earning reward for every hill or turn it happened to contain, which outweighed the much smaller over-length penalty by a wide margin. Nothing was actually selecting against a track that kept growing. Two correct, narrow pieces of logic combined into a hole neither one has on its own.
+
+The fix is one line: score elevation, turn, and variety the same way length already was, over `segments[:ideal_length]` instead of the whole list. Reran the exact failing case afterward — same seed, same tight box — and average length now plateaus around 50-58 instead of climbing, holding steady the entire way through 250 generations. That run finished (it never had before) and produced a real, valid 56-segment track that loads and plays.
+
+The rating gap it produced was expected, not a symptom of anything wrong: 10x20 scored excitement 2.37 against the 30x30 ride's 5.27, with a shorter, slower, lower ride to show for it. Less floor space is less room for the height and speed that ratings are actually measuring. This is PR #58, and it's the first entry in a new `docs/solutions/` writeup, the first thing this project has tried to make searchable for itself instead of just narratable.
+
+---
+
+## 2026-09-07 — Wiring the oracle in, without letting it touch the wheel
+
+Wrote up the plan, ran it through doc review, then implemented, reviewed, and shipped opt-in oracle calibration sampling for `evolve_parts()` (PR #57). Every N generations, the best individual — and less often, the worst construction-valid one — gets sent through the real headless OpenRCT2 oracle, and the result lands in a new JSON-lines log next to the run, not anywhere near fitness or selection. `evolve()`'s selection pressure is exactly what it was before; the only observable difference from turning this on is a `--oracle-calibrate` flag and a log file.
+
+Two things came out of the review that mattered. Worst-individual sampling only checks whether the proxy fitness's low ranking holds up against the real game, which is a narrower claim than the "rejected-candidate insurance" idea in `docs/research-plan.md` — that's a real gap, deliberately deferred rather than solved here. And the reviewer flagged that `evolve_parts()` grew from 9 parameters to 14 for this, when a `progress_callback`-based extension point (or a `benchmark.py`-style separate scoring pass) could have kept the GA loop's own signature untouched. That reverses a decision I'd already settled during planning, so I left it flagged instead of unwinding it mid-review — worth revisiting if this loop grows another feature or two.
+
+Ran a real, non-mocked smoke test against the actual headless oracle and it worked end to end: a valid rated result, a correctly shaped log line. Then generated an actual ride from it (`generide-demo.td6`, 100 generations, default 30x30 footprint) and loaded it in-game myself: Excitement 5.27 (High), Intensity 7.16 (High), Nausea 4.34 (Medium). First time this project's own numbers and the game's numbers for the same ride are sitting in front of me at once.
+
+---
+
 ## 2026-08-29 — The oracle's placement failure wasn't the track's fault, and neither was my first fix
 
 The entry below this one left open why the oracle failed to place the same

@@ -260,3 +260,36 @@ def test_reward_weights_reach_the_score():
             generous.evaluate(segments) > baseline.evaluate(segments)
             for segments in corpus
         ), f"{name} never changed a score, so it is not wired into evaluate()"
+
+
+def test_padding_past_ideal_length_earns_no_elevation_turn_or_variety_reward():
+    """Repair-added segments past ideal_length must not keep earning reward.
+
+    Without this, a track's elevation/turn/variety reward kept growing with
+    every segment regardless of ideal_length, so it easily outweighed
+    over_length_penalty (0.5/segment by default) and let genome length
+    ratchet upward with nothing to stop it -- exactly what repair_circuit's
+    append-only repair does under a tight footprint, where more corrective
+    segments are needed to close the loop.
+    """
+    fitness_fn = WeightedProxyFitness(
+        ideal_length=5,
+        invalid_construction_penalty=0.0,
+        open_circuit_penalty=0.0,
+        bounds_penalty_per_tile=0.0,
+        collision_penalty_per_tile=0.0,
+        underground_penalty_per_unit=0.0,
+        slope_violation_penalty=0.0,
+        bank_violation_penalty=0.0,
+        energy_violation_penalty=0.0,
+        missing_lift_penalty=0.0,
+        stall_penalty=0.0,
+        short_penalty_per_segment=0.0,
+    )
+    prefix = [0x00] * 5
+    flat_padding = [0x00] * 5
+    hilly_padding = [0x06, 0x09, 0x10, 0x11, 0x06]  # elevation changes + turns
+
+    assert fitness_fn.evaluate(prefix + flat_padding) == fitness_fn.evaluate(
+        prefix + hilly_padding
+    )

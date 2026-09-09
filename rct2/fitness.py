@@ -121,10 +121,12 @@ class WeightedProxyFitness:
     geometry only and silently skipped every construction-validity penalty,
     which meant weights tuned here produced tracks the game would reject.
 
-    Rewards track length (up to `ideal_length`), elevation changes, balanced
-    left/right turns, and segment variety. `ideal_length` defaults to 80,
-    matching the median element count (82) across the 204 shipped designs in
-    `data/calibration.csv` -- the old default of 50 sat below their 25th
+    Rewards track length, elevation changes, balanced left/right turns, and
+    segment variety, all counted only up to `ideal_length` -- a segment past
+    that point earns none of those rewards, so nothing but the over-length
+    penalty responds to a track growing further. `ideal_length` defaults to
+    80, matching the median element count (82) across the 204 shipped designs
+    in `data/calibration.csv` -- the old default of 50 sat below their 25th
     percentile (62), so fitness was penalizing tracks for growing past a
     length shorter than three-quarters of what the game itself ships.
     Penalizes construction invalidity,
@@ -211,17 +213,27 @@ class WeightedProxyFitness:
             score += self.ideal_length * self.length_weight
             score -= (length - self.ideal_length) * self.over_length_penalty
 
+        # Elevation, turn, and variety rewards only count up to ideal_length,
+        # same as the length reward above. Padding segments beyond that point
+        # (e.g. from repair_circuit closing a loop) still contain hills and
+        # turns, so counting them here would keep rewarding a track for
+        # growing past ideal_length just as strongly as before it -- which
+        # made over_length_penalty too weak to ever outweigh them, and let
+        # genome length ratchet upward with no ceiling under a tight
+        # footprint, where more repair is needed to close the loop.
+        reward_segments = segments[: self.ideal_length]
+
         # Elevation changes: reward hills
-        elevation_changes = count_elevation_changes(segments)
+        elevation_changes = count_elevation_changes(reward_segments)
         score += elevation_changes * self.elevation_weight
 
         # Turns: reward balanced turns (both directions)
-        left_turns = count_turns(segments, direction="left")
-        right_turns = count_turns(segments, direction="right")
+        left_turns = count_turns(reward_segments, direction="left")
+        right_turns = count_turns(reward_segments, direction="right")
         score += min(left_turns, right_turns) * self.turn_balance_weight
 
         # Variety: unique segment types used
-        unique_segments = count_segment_variety(segments)
+        unique_segments = count_segment_variety(reward_segments)
         score += unique_segments * self.variety_weight
 
         # Penalties
