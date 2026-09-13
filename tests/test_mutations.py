@@ -1,10 +1,12 @@
 """Tests for mutation operators."""
 
+import inspect
 import random
 
 import pytest
 
 import rct2.mutations
+from rct2.fitness import ProxyFitness
 from rct2.construction import (
     BANK_TRANSITIONS,
     DEFAULT_STATION_LENGTH,
@@ -528,6 +530,43 @@ class TestPartsRepresentation:
         parts = generate_random_track_parts(rng, min_length=5, max_length=10)
         track = flatten_parts(parts)
         assert len(track) >= 5 + 2  # min_length + station
+
+    def test_generate_random_track_parts_default_reaches_new_max_length(self):
+        """The default max_length moved from 30 to 50 -- confirm the wider
+        range is actually honored under the *default* argument, not just
+        accepted when passed explicitly. Calling with an explicit
+        max_length=50 (as an earlier version of this test did) would pass
+        identically whether the default were 30 or 50, since it never
+        consults the default at all.
+
+        Compares against the true old-default-reachable length, measured
+        directly with max_length=30 rather than hand-derived from the
+        station/hill constants, since a hill's segment count doesn't equal
+        its height constant (MAX_HILL_HEIGHT is a height, not a length).
+        """
+        seeds = range(50)
+        old_max = max(
+            len(flatten_parts(generate_random_track_parts(random.Random(s), max_length=30)))
+            for s in seeds
+        )
+        new_max = max(
+            len(flatten_parts(generate_random_track_parts(random.Random(s))))
+            for s in seeds
+        )
+        assert new_max > old_max
+
+    def test_default_max_length_stays_below_default_ideal_length(self):
+        """Pins KTD3's invariant: generate_random_track_parts's default
+        max_length must stay below ProxyFitness's default ideal_length, so
+        no generation-0 individual starts at the reward ceiling with zero
+        room to grow. Nothing in the code connects the two constants, so a
+        future change to either one that violates this margin should fail
+        loudly here rather than silently.
+        """
+        default_max_length = inspect.signature(
+            generate_random_track_parts
+        ).parameters["max_length"].default
+        assert default_max_length < ProxyFitness().ideal_length
 
 
 class TestHillIsAlwaysPresent:

@@ -684,7 +684,7 @@ def ensure_hill_parts(
 def generate_random_track_parts(
     rng: random.Random,
     min_length: int = 8,
-    max_length: int = 30,
+    max_length: int = 50,
     station_tiles: int = DEFAULT_STATION_LENGTH,
 ) -> list[list[int]]:
     """Part-based counterpart to `generate_random_track`.

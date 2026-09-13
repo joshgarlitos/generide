@@ -125,10 +125,13 @@ class WeightedProxyFitness:
     segment variety, all counted only up to `ideal_length` -- a segment past
     that point earns none of those rewards, so nothing but the over-length
     penalty responds to a track growing further. `ideal_length` defaults to
-    80, matching the median element count (82) across the 204 shipped designs
-    in `data/calibration.csv` -- the old default of 50 sat below their 25th
-    percentile (62), so fitness was penalizing tracks for growing past a
-    length shorter than three-quarters of what the game itself ships.
+    100, calibrated against the four real Mine Train designs in
+    `data/calibration.csv` (`ride_type == 17`) rather than the broader
+    all-ride-type population: Calamity Mine (142 elements), Gold Rush (104),
+    Manic Miner (89), and Runaway Mine Train (82), median 96.5 -- the old
+    default of 80 sat below every one of them, matching only the
+    all-ride-type median across all 204 shipped designs, not this project's
+    Mine-Train-only focus.
     Penalizes construction invalidity,
     open circuits, excessive footprint, collisions, going below ground, illegal
     slope and bank transitions, energy shortfalls, a first hill with no chain
@@ -145,7 +148,7 @@ class WeightedProxyFitness:
         # Footprint and length configuration
         max_width: int = 30,
         max_depth: int = 30,
-        ideal_length: int = 80,
+        ideal_length: int = 100,
         min_length: int = 8,
         # Rewards
         length_weight: float = 2.0,
@@ -301,7 +304,7 @@ class ProxyFitness(WeightedProxyFitness):
         self,
         max_width: int = 30,
         max_depth: int = 30,
-        ideal_length: int = 80,
+        ideal_length: int = 100,
         stall_penalty: float = 500.0,
     ) -> None:
         super().__init__(

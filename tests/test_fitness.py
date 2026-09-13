@@ -168,7 +168,7 @@ def _mixed_corpus(count: int = 40) -> list[list[int]]:
     corpus = [
         create_simple_circuit(),
         [0x00] * 3,                    # below min_length
-        [0x02, 0x01] + [0x00] * 90,    # past ideal_length (80, since 2026-08-09)
+        [0x02, 0x01] + [0x00] * 120,   # past ideal_length (100, since 2026-09-13)
         BREAKS_SLOPE,
         BREAKS_BANK,
         CLIMBS_TOO_HIGH,
@@ -179,6 +179,17 @@ def _mixed_corpus(count: int = 40) -> list[list[int]]:
         low = rng.randint(4, 45)
         corpus.append(generate_random_track(rng, low, low + 25))
     return corpus
+
+
+def test_ideal_length_default_matches_mine_train_calibration():
+    """Pins the calibrated default so a future edit can't silently drift it.
+
+    100 is chosen from the four real Mine Train designs in
+    data/calibration.csv (82, 89, 104, 142) -- see rct2/fitness.py's
+    WeightedProxyFitness docstring for the full rationale.
+    """
+    assert WeightedProxyFitness().ideal_length == 100
+    assert ProxyFitness().ideal_length == 100
 
 
 def test_weighted_defaults_match_proxy_exactly():
