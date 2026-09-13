@@ -4,6 +4,20 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-09-13 — ideal_length was tuned to the wrong population
+
+Went back to close out issue #43, which had been sitting open since the ideal_length raise from 50 to 80 back in August: that number came from the median across all 204 shipped designs in `data/calibration.csv`, every ride type the game ships mixed together. This project only builds Mine Trains. Filtering the same data down to just Mine Train Coasters (`ride_type == 17`) gives four real designs -- Calamity Mine at 142 segments, Gold Rush at 104, Manic Miner at 89, Runaway Mine Train at 82 -- and every one of them was still longer than the 80-segment ceiling I'd been rewarding tracks up to. I'd tuned the number to the wrong population the whole time.
+
+Raised `ideal_length` to 100, which sits above the two shorter real designs and eases (without removing) the penalty on the two longer ones. Also raised `generate_random_track_parts`'s separate `max_length` from 30 to 50, since it had never been touched when `ideal_length` moved in August and was capping the very first, randomly-generated slice of each run's population well short of even the old ceiling.
+
+The one thing I made myself check before shipping it: this raises the ceiling on exactly the reward mechanism the genome-bloat fix from a few days ago (2026-09-07) had to cap in the first place. Widening a cap that was just added to stop runaway growth is the kind of change that deserves a second look, not blind trust that the earlier fix generalizes. So I ran the exact tight-footprint reproduction from that fix, before and after this change, at the same seed: genome length still plateaued around 50-56 segments both times, nowhere near the hundreds-of-segments runaway the original bug produced. Per-generation time crept up a little (1.80s to 1.89s), which makes sense -- a wider reward window means tracks are allowed to run a bit longer before the penalty bites -- but nothing like the bloat pattern reopening.
+
+A code reviewer also flagged something I hadn't considered: `generate_random_track_parts` is the same function both fitness paths call to build generation 0, so raising `max_length` reaches the physics-based scoring path too, not just the cheap geometric one I'd been testing against. I ran that comparison too and it came back a non-issue -- 124 seconds before, 125 after, for 100 generations -- because `PhysicsFitness` never had an `ideal_length`-shaped reward to widen in the first place; only the initial population's random slice is affected, and that washes out.
+
+Net result at the default 30x30 footprint: the evolved track's length went from 82 segments to 98, much closer to what a real Mine Train actually runs, with no drop in construction validity.
+
+---
+
 ## 2026-09-07 — Asking for a smaller ride broke something invisible on a normal-sized one
 
 Wanted to see whether the generator could handle a genuinely tight footprint, not just the default 30x30 box, so I ran the exact same evolution at 10x20. It didn't hang — it looked like it hung, which is a different and more interesting failure.

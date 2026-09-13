@@ -50,7 +50,9 @@ Two experiments on 2026-08-09 both failed for this reason:
 
 Two other changes did work and are committed: mutations can no longer dig
 below ground, and `ideal_length` rose from 50 to 80 to match the shipped
-designs' median of 82.
+designs' median of 82. (`ideal_length` moved again on 2026-09-13, to 100,
+calibrated against the Mine-Train-specific rows in `data/calibration.csv`
+rather than the all-ride-type median -- see `docs/devlog.md`.)
 
 ## Measurement comes first
 
