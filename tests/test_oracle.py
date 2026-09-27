@@ -76,3 +76,60 @@ def test_reads_back_the_train_configuration_the_game_actually_used():
 def test_an_unreadable_train_configuration_is_not_a_number():
     assert _parse_trains("'GENERIDE_TRAINS|numTrains=-1|carsPerTrain=2'") is None
     assert _parse_trains("'GENERIDE_PLACE|i=0|type=1|error=0'") is None
+
+
+# ---------------------------------------------------------------------------
+# Which game binary score_track launches, and cleanup when it cannot.
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+import pytest
+
+
+class _Launched(Exception):
+    pass
+
+
+def _capture_launch(monkeypatch):
+    launched = []
+
+    def fake_popen(argv, **kwargs):
+        launched.append(argv)
+        raise _Launched
+
+    monkeypatch.setattr(oracle.subprocess, "Popen", fake_popen)
+    return launched
+
+
+def test_score_track_launches_the_overridden_binary(monkeypatch, tmp_path):
+    monkeypatch.setenv("GENERIDE_OPENRCT2_BINARY", "/opt/games/OpenRCT2")
+    launched = _capture_launch(monkeypatch)
+    with pytest.raises(_Launched):
+        oracle.score_track([0x02, 0x01])
+    assert launched[0][0] == "/opt/games/OpenRCT2"
+
+
+def test_score_track_defaults_to_the_mac_app_binary(monkeypatch):
+    monkeypatch.delenv("GENERIDE_OPENRCT2_BINARY")
+    launched = _capture_launch(monkeypatch)
+    with pytest.raises(_Launched):
+        oracle.score_track([0x02, 0x01])
+    assert launched[0][0] == oracle.OPENRCT2_BINARY
+
+
+def test_an_explicit_binary_argument_wins(monkeypatch):
+    launched = _capture_launch(monkeypatch)
+    with pytest.raises(_Launched):
+        oracle.score_track([0x02, 0x01], binary="/elsewhere/OpenRCT2")
+    assert launched[0][0] == "/elsewhere/OpenRCT2"
+
+
+def test_a_failed_launch_removes_the_plugin_it_wrote(monkeypatch):
+    # The conftest points the binary at a path that does not exist, so the
+    # real Popen raises; the plugin written just before must not be left in
+    # the game's plugin folder.
+    with pytest.raises(FileNotFoundError):
+        oracle.score_track([0x02, 0x01])
+    assert oracle.PLUGIN_DIR.is_dir()
+    assert list(oracle.PLUGIN_DIR.iterdir()) == []
