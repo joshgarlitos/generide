@@ -271,6 +271,7 @@ style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto
 peaking at {hi:.2f}. A dashed line shows the share of the population that was \
 buildable.</desc>
   <style>{_THEME}</style>
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
   <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
 {_escape(title)}</text>
   <text class="ts" x="{left}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(subtitle)}</text>
@@ -466,6 +467,7 @@ style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto
   <title>{_escape(title)}</title>
   <desc>{_escape(reason)}</desc>
   <style>{_THEME}</style>
+  <rect class="bg" x="0" y="0" width="320" height="80" fill="{LIGHT["bg"]}"/>
   <text class="tx" x="16" y="32" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
 {_escape(title)}</text>
   <text class="ts" x="16" y="52" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(reason)}</text>

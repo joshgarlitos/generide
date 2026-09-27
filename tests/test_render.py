@@ -167,3 +167,17 @@ def test_profile_of_empty_track_uses_empty_state():
     svg = render_profile([], title="Nothing")
     root = ET.fromstring(svg)
     assert "no pieces" in root.find("{http://www.w3.org/2000/svg}desc").text
+
+
+@pytest.mark.parametrize("svg", [
+    render_track(FLAT_OVAL),
+    render_profile(FLAT_OVAL),
+    render_fitness_history([1.0, 2.0, 2.5]),
+    render_track([]),
+], ids=["plan", "profile", "fitness", "empty"])
+def test_every_picture_paints_a_background_the_dark_theme_can_recolor(svg):
+    # Without it the root's light background shows through in dark mode
+    # while the text turns light, and the title vanishes.
+    root = ET.fromstring(svg)
+    backgrounds = root.findall("{http://www.w3.org/2000/svg}rect[@class='bg']")
+    assert backgrounds
