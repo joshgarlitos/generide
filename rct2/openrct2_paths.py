@@ -131,14 +131,20 @@ def sanitize_name(raw: str) -> str:
 
 def _check_template(template: str) -> None:
     try:
-        fields = [f for _, f, _, _ in string.Formatter().parse(template) if f is not None]
+        parts = [p for p in string.Formatter().parse(template) if p[1] is not None]
     except ValueError as exc:
         raise InvalidName(f"The template {template!r} has an unmatched brace.") from exc
-    for f in fields:
-        if f not in TEMPLATE_FIELDS:
-            allowed = ", ".join("{" + x + "}" for x in TEMPLATE_FIELDS)
+    allowed = ", ".join("{" + x + "}" for x in TEMPLATE_FIELDS)
+    for _, field_name, format_spec, conversion in parts:
+        if field_name not in TEMPLATE_FIELDS:
             raise InvalidName(
-                f"The template uses {{{f}}}, which is not one of {allowed}."
+                f"The template uses {{{field_name}}}, which is not one of {allowed}."
+            )
+        # Plain fields only: a format spec such as {name:>999999999} would
+        # build an enormous string.
+        if format_spec or conversion:
+            raise InvalidName(
+                f"Write template fields plainly, as one of {allowed}."
             )
 
 
@@ -205,13 +211,20 @@ def install(run_id: str, name: str, replace: bool = False) -> Dict[str, Any]:
         raise FileNotFoundError(f"run {run_id} has no exported ride to install")
 
     dest = Path(state.track_dir) / f"{final}.td6"
+    data = source.read_bytes()
     existed = dest.exists()
-    if existed and not replace:
-        raise InstallConflict(final, dest)
-
-    tmp = dest.with_name(f".{final}.generide-tmp")
-    tmp.write_bytes(source.read_bytes())
-    os.replace(tmp, dest)
+    if replace:
+        tmp = dest.with_name(f".{final}.generide-tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    else:
+        # Create-only, so a design that appears after the check above is
+        # still never overwritten.
+        try:
+            with dest.open("xb") as f:
+                f.write(data)
+        except FileExistsError:
+            raise InstallConflict(final, dest) from None
 
     entry = {"name": final, "file": str(dest), "replaced": existed}
     runrecord.record_install(run_id, entry)

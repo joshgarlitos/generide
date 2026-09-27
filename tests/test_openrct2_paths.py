@@ -231,3 +231,28 @@ class TestUiSettings:
     def test_a_bad_template_is_not_saved(self):
         with pytest.raises(InvalidName):
             save_ui_settings({"name_templates": ["{name} {oops}"]})
+
+
+class TestTemplateLimits:
+    @pytest.mark.parametrize("template", ["{name:>999999999}", "{name!r}", "{seed:0>5}"])
+    def test_format_specs_and_conversions_are_refused(self, template):
+        with pytest.raises(InvalidName):
+            apply_template(template, name="x", seed=1, now=CLOCK)
+
+
+def test_install_never_overwrites_a_design_that_appears_mid_install(game, finished_run, monkeypatch):
+    """Without replace, the copy only ever creates the file, so a design that
+    lands between the conflict check and the copy is not clobbered."""
+    dest = game.tracks / "Race.td6"
+    real_exists = type(dest).exists
+
+    def exists_then_appear(path):
+        found = real_exists(path)
+        if path == dest and not found:
+            dest.write_bytes(b"arrived first")
+        return found
+
+    monkeypatch.setattr(type(dest), "exists", exists_then_appear)
+    with pytest.raises(InstallConflict):
+        install(finished_run, "Race")
+    assert dest.read_bytes() == b"arrived first"

@@ -179,3 +179,15 @@ class TestRerun:
         stored = request_from_args(_parser().parse_args(["--seed", "simple"]))
         assert stored["seed_track"] is None
         assert validate(form_values(stored)).ok
+
+
+class TestSeedTrackPaths:
+    def test_a_relative_seed_track_is_stored_absolute(self, tmp_path, monkeypatch):
+        """Runs started from the page execute in their own run folder, so a
+        relative path would point somewhere else there."""
+        (tmp_path / "seed.td6").write_bytes(b"x")
+        monkeypatch.chdir(tmp_path)
+        values = validate({"seed_track": "seed.td6"}).values
+        assert values["seed_track"] == str(tmp_path / "seed.td6")
+        stored = request_from_args(_parser().parse_args(["--seed", "seed.td6"]))
+        assert stored["seed_track"] == str(tmp_path / "seed.td6")

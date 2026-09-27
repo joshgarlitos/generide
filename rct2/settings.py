@@ -312,6 +312,10 @@ def validate(raw_values: Dict[str, Any]) -> Validation:
             path = Path(value).expanduser()
             if path.suffix.lower() != ".td6" or not path.is_file():
                 err = f"{s.label} must be an existing .td6 file; {value} is not one."
+            else:
+                # Absolute, because a run started from the page executes in
+                # its own run folder, where a relative path means nothing.
+                value = str(path.resolve())
         else:  # pragma: no cover - table entries are fixed above
             raise ValueError(f"unknown setting kind {s.kind}")
         if err:
@@ -379,7 +383,7 @@ def request_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         elif s.kind == "path" and value is not None:
             # "simple" is the CLI's name for the generated loop, which is
             # what the page means by no seed track.
-            value = None if value == "simple" else str(value)
+            value = None if value == "simple" else str(Path(value).expanduser().resolve())
         request[s.key] = value
     return request
 

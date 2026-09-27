@@ -30,6 +30,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
@@ -560,6 +561,9 @@ class App:
             response = _json_response(404, {"error": "No such run."})
         except runrecord.UnsupportedSchema as exc:
             response = _json_response(409, {"error": str(exc)})
+        except Exception as exc:  # the page gets an answer, never a dropped connection
+            traceback.print_exc()
+            response = _json_response(500, {"error": f"Something went wrong: {exc}"})
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
         return response
@@ -747,7 +751,14 @@ class App:
 
     # -- check, install, download -------------------------------------------
 
+    def _require_finished(self, record: Dict[str, Any]) -> None:
+        # The CLI writes best.td6 a moment before it finishes the record;
+        # touching the record in that window could lose one of the writes.
+        if record.get("status") == "running":
+            raise ApiError(409, "This run is still going. Wait for it to finish.")
+
     def start_check(self, run_id: str) -> Response:
+        self._require_finished(runrecord.load_record(run_id))
         if not (runrecord.run_dir(run_id) / runrecord.BEST_TD6).is_file():
             raise ApiError(409, "This run has no exported ride to check.")
         state = openrct2_paths.availability()
@@ -797,6 +808,7 @@ class App:
 
     def install(self, run_id: str, body: Dict[str, Any]) -> Response:
         run = runrecord.load_run(run_id)
+        self._require_finished(run.record)
         final = self._final_name(run.record, body.get("name"), body.get("template"))
         warnings = _warnings(run_detail(run)["best"], run.record)
         if warnings and body.get("confirm") is not True:
@@ -855,7 +867,13 @@ def _handler_for(app: App):
         sys_version = ""
 
         def _serve(self) -> None:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0:
+                self.send_error(400)
+                return
             if length > MAX_BODY:
                 self.send_error(413)
                 return

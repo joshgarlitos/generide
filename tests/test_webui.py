@@ -587,3 +587,42 @@ class TestDisplay:
         assert pieces["delta_display"][0] == ""
         assert pieces["delta_display"][1].startswith("-")
         assert pieces["changed"] is True
+
+
+class TestRobustness:
+    def test_check_and_install_wait_until_the_run_finishes(self, app, game):
+        run_id = runrecord.create_run(seed=1, request={}, settings=[], generations=5)
+        (runrecord.run_dir(run_id) / "best.td6").write_bytes(MANIC_MINER.read_bytes())
+        for action, body in (("check", {}), ("install", {"name": "Early"})):
+            response = call(app, "POST", f"/api/runs/{run_id}/{action}", body)
+            assert response.status == 409, action
+            assert "still going" in response.json()["error"]
+        assert list(game.tracks.iterdir()) == []
+        assert runrecord.load_record(run_id)["check_status"] is None
+
+    def test_an_unexpected_error_is_a_json_500(self, app, monkeypatch):
+        def boom():
+            raise RuntimeError("disk on fire")
+
+        monkeypatch.setattr(app, "list_runs", boom)
+        response = call(app, "GET", "/api/runs")
+        assert response.status == 500
+        assert "disk on fire" in response.json()["error"]
+
+    @pytest.mark.parametrize("length", ["-5", "lots"])
+    def test_a_malformed_content_length_is_a_400(self, length):
+        import http.client
+
+        server, made = make_server(0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", made.port, timeout=5)
+            conn.putrequest("POST", "/api/validate", skip_accept_encoding=True)
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", length)
+            conn.endheaders()
+            assert conn.getresponse().status == 400
+        finally:
+            server.shutdown()
+            server.server_close()
