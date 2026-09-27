@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from rct2 import openrct2_paths, runrecord, td6
-from rct2.generate import create_hill_circuit
 from rct2.openrct2_paths import (
     InstallConflict,
     InvalidName,

@@ -141,7 +141,6 @@ class TestOracleCalibrateFlag:
 # ---------------------------------------------------------------------------
 
 import hashlib
-import json
 import os
 import signal
 

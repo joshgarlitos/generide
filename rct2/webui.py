@@ -31,7 +31,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from rct2 import openrct2_paths, render, runrecord, settings
+from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "webui_static"
@@ -166,9 +167,24 @@ def _latest_game_check(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return checks[-1] if checks else None
 
 
+def _game_ratings(record: Dict[str, Any]) -> Dict[str, Any]:
+    """The game's own ratings from the latest check, when the game rated it."""
+    check = _latest_game_check(record)
+    if not check or check.get("status") != "rated":
+        return {}
+    return {k: check.get(k) for k in ("excitement", "intensity", "nausea")}
+
+
+def _final_result(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The finished run's ride summary, as the CLI saved it, if it has one."""
+    result = record.get("result")
+    if result and "stats" in result:
+        return dict(result, generation=record.get("generations_run"))
+    return None
+
+
 def _best_summary(run: runrecord.Run) -> Optional[Dict[str, Any]]:
-    """The best ride so far: the final result when there is one, otherwise a
-    summary of the latest improvement (a live run's best)."""
+    """A summary of the latest improvement: a live or unfinished run's best."""
     if not run.improvements:
         return None
     request = run.record.get("request") or {}
@@ -186,16 +202,14 @@ def _headline(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[st
     source: Dict[str, Any] = {}
     if best:
         stats = dict(best.get("stats") or {})
-        from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS
-
         if "max_speed" in stats:
             stats["max_speed_mph"] = stats["max_speed"] * MPH_PER_MS
         if "highest_drop" in stats:
             stats["highest_drop_m"] = stats["highest_drop"] * HEIGHT_UNIT_M
         source = dict(best, stats=stats)
-    check = _latest_game_check(record)
-    if check and check.get("status") == "rated":
-        source["game"] = {k: check.get(k) for k in ("excitement", "intensity", "nausea")}
+    game = _game_ratings(record)
+    if game:
+        source["game"] = game
     return {key: _dig(source, path) for key, _, path, _ in HEADLINE_STATS}
 
 
@@ -225,8 +239,6 @@ def _stats_view(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[
     Every number from generide's own simulation is an estimate. The game's
     ratings appear only in their own column, beside ours, never instead.
     """
-    from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS
-
     if not best or "stats" not in best:
         return {"simulated": [], "ratings": []}
     st = best["stats"]
@@ -252,8 +264,7 @@ def _stats_view(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[
         ("Completes the circuit", circuit),
         ("Footprint", footprint),
     ]
-    check = _latest_game_check(record)
-    game = check if check and check.get("status") == "rated" else {}
+    game = _game_ratings(record)
     estimated = best.get("estimated") or {}
     ratings = []
     for key in ("excitement", "intensity", "nausea"):
@@ -295,8 +306,8 @@ def _list_entry(record: Dict[str, Any]) -> Dict[str, Any]:
     if record.get("status") == "unreadable":
         return {"id": run_id, "status": "unreadable", "name": run_id,
                 "error": record.get("error"), "created": ""}
-    best = record.get("result") or None
-    if best is None or "stats" not in best:
+    best = _final_result(record)
+    if best is None:
         try:
             best = _best_summary(runrecord.load_run(run_id))
         except (OSError, ValueError):
@@ -329,10 +340,8 @@ def _list_entry(record: Dict[str, Any]) -> Dict[str, Any]:
 def run_detail(run: runrecord.Run, now: Optional[float] = None) -> Dict[str, Any]:
     now = time.time() if now is None else now
     record = run.record
-    best = _best_summary(run)
     result = record.get("result")
-    if result and "stats" in result:
-        best = dict(result, generation=record.get("generations_run"))
+    best = _final_result(record) or _best_summary(run)
     directory = runrecord.run_dir(run.id)
     return {
         "id": run.id,
