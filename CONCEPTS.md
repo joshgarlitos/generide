@@ -23,3 +23,8 @@ The fast, geometry-only scoring function used to rank every individual during se
 
 ### Genome bloat
 The failure mode where genome length grows without bound across generations instead of settling near a target length. It happens when an operator that can only lengthen a genome, never shorten it, runs regularly, while fitness scoring puts no matching downward pressure on genomes past that target length — so nothing in selection favors a shorter genome over a longer one, and length ratchets upward generation after generation.
+
+## Runs
+
+### Run record
+The saved account of one evolution run: the request that started it (constraints, seed, settings), snapshots of the best ride as it progressed, the final track and its stats, and what happened to the result afterwards (a real-game check, an install). A rerun is a new run record that points back to the run it was copied from, so the two can be compared. Runs started from the CLI and from the web UI produce the same kind of record.
