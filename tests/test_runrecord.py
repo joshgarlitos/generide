@@ -94,6 +94,14 @@ class TestRoundTrip:
         with pytest.raises(FileExistsError):
             _make(run_id="20260927T093612Z-s5")
 
+    def test_explicit_id_may_use_a_directory_made_ahead_of_time(self):
+        directory = library_root() / "20260927T093612Z-s6"
+        directory.mkdir(parents=True)
+        (directory / "console.log").write_text("starting\n")
+        assert list_runs() == []  # nothing to show until the run file exists
+        assert _make(run_id="20260927T093612Z-s6") == "20260927T093612Z-s6"
+        assert (directory / "console.log").exists()
+
     def test_same_second_and_seed_gets_a_numeric_suffix(self):
         first = _make(seed=3, now=CLOCK)
         second = _make(seed=3, now=CLOCK)

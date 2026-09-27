@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>generide</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/library">generide</a>
+    <nav aria-label="Main">
+      <a href="#/new" data-nav="new">New run</a>
+      <a href="#/library" data-nav="library">Library</a>
+      <a href="#/library" id="active-chip" class="active-chip" hidden>
+        <span class="pulse" aria-hidden="true"></span><span id="active-chip-text">Running</span>
+      </a>
+    </nav>
+  </header>
+  <main id="view" tabindex="-1">
+    <p class="muted">Loading…</p>
+  </main>
+  <noscript><p class="banner warn">generide's page needs JavaScript turned on.</p></noscript>
+</body>
+</html>

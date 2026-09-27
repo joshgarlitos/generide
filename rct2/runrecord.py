@@ -172,8 +172,8 @@ def create_run(
     `request` is the ride request in form terms (what the page shows);
     `settings` is the CLI argument list the run was started with, so a run
     can always be repeated exactly. With `run_id` given (the web server picks
-    one so it knows the directory before the process starts), that id must be
-    new. Without one, an id is made from the time and seed, with a numeric
+    one so it knows the directory before the process starts), no run may
+    already be saved under that id. Without one, an id is made from the time and seed, with a numeric
     suffix when another run already has it.
     """
     now = now or datetime.now(timezone.utc)
@@ -181,8 +181,12 @@ def create_run(
     root.mkdir(parents=True, exist_ok=True)
 
     if run_id is not None:
+        # The web server may already have made the directory (it starts the
+        # run's console log there); the id is taken once a run file exists.
         directory = run_dir(run_id)
-        directory.mkdir()  # FileExistsError when the id is taken
+        directory.mkdir(exist_ok=True)
+        if (directory / RUN_FILE).exists():
+            raise FileExistsError(f"run {run_id} already exists")
     else:
         base = new_run_id(seed, now)
         suffix = 1
@@ -333,6 +337,8 @@ def list_runs() -> List[Dict[str, Any]]:
     for directory in root.iterdir():
         if not directory.is_dir() or not RUN_ID_PATTERN.fullmatch(directory.name):
             continue
+        if not (directory / RUN_FILE).exists():
+            continue  # a run the web server is still starting
         try:
             records.append(_repair(directory, _read_record(directory)))
         except (OSError, ValueError) as exc:
