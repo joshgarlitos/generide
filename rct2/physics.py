@@ -15,7 +15,7 @@ Unit conventions:
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Set
+from typing import Dict, List, NamedTuple, Optional, Set
 
 from rct2 import construction
 from rct2.segments import SEGMENTS, Segment
@@ -198,40 +198,74 @@ def _vertical_g(
     return base + math.copysign(dynamic, dtheta)
 
 
-def simulate(
+class TracePoint(NamedTuple):
+    """One piece of the ride as the energy walk saw it.
+
+    Distances are meters along the track, heights are RCT2 height units
+    relative to the station, speeds are m/s. `drop` numbers the counted drop
+    this piece belongs to (1 for the first), or None when the piece is not
+    part of one. On the piece where the train stalls, `stalled` is set, the
+    exit speed is 0, and no distance or time is added.
+
+    A NamedTuple rather than a frozen dataclass because `simulate()` runs on
+    every fitness evaluation and builds one of these per piece; a frozen
+    dataclass made that walk twice as slow.
+    """
+
+    index: int
+    segment: int
+    distance_start_m: float
+    distance_m: float
+    height_in: int
+    height_out: int
+    speed_in: float
+    speed_out: float
+    mean_speed: float
+    time_s: float
+    g_vertical: float
+    g_lateral: Optional[float]  # None on straight pieces
+    on_lift: bool  # chain lift or station, both drive the train
+    is_station: bool
+    drop: Optional[int]
+    stalled: bool
+
+
+@dataclass(frozen=True)
+class RideTrace:
+    points: List[TracePoint]
+    completed: bool
+    stall_index: Optional[int]
+
+
+def trace(
     segments: list[int],
     lift_indices: Optional[Set[int]] = None,
-) -> RideStats:
-    """Run the energy-method walk over a track and collect ride stats."""
+) -> RideTrace:
+    """Walk a track piece by piece with the energy method.
+
+    This is the one walk the project has: `simulate()` aggregates its ride
+    stats from these points, so a side profile drawn from the trace and the
+    numbers shown next to it can never disagree.
+    """
     if lift_indices is None:
         lift_indices = construction.default_lift_indices(segments)
 
+    points: List[TracePoint] = []
     speed = LIFT_SPEED_MS
-    max_speed = speed
-    ride_length = 0.0
-    ride_time = 0.0
-    airtime = 0.0
-    max_positive_g = 1.0
-    max_negative_g = 1.0
-    max_lateral_g = 0.0
-    completed = True
-    stall_index: Optional[int] = None
-
+    distance = 0.0
     elevation = 0
     slope_state = "flat"
-    descent_run = 0
-    in_drop = False
-    drop_count = 0
-    total_drop_height = 0.0
-    highest_drop = 0.0
     prev_angle = 0.0
+    drop_count = 0
+    in_drop = False
 
     for index, seg_id in enumerate(segments):
         segment = SEGMENTS.get(seg_id, SEGMENTS[0x00])
         geometry = segment_length(segment)
         dz_m = segment.elevation_delta * HEIGHT_UNIT_M
+        is_station = seg_id in _STATION_SEGMENTS
 
-        on_lift = index in lift_indices or seg_id in _STATION_SEGMENTS
+        on_lift = index in lift_indices or is_station
         if on_lift:
             exit_speed = max(speed, LIFT_SPEED_MS)
         else:
@@ -239,30 +273,32 @@ def simulate(
             v_sq -= 2 * FRICTION_COEFF * GRAVITY * geometry.length_m
             exit_speed = math.sqrt(max(0.0, v_sq))
             if exit_speed < MIN_SPEED_MS:
-                completed = False
-                stall_index = index
-                break
+                points.append(TracePoint(
+                    index=index, segment=seg_id,
+                    distance_start_m=distance, distance_m=distance,
+                    height_in=elevation, height_out=elevation,
+                    speed_in=speed, speed_out=0.0, mean_speed=0.0, time_s=0.0,
+                    g_vertical=math.cos(prev_angle), g_lateral=None,
+                    on_lift=False, is_station=is_station, drop=None, stalled=True,
+                ))
+                return RideTrace(points=points, completed=False, stall_index=index)
 
         mean_speed = max(MIN_SPEED_MS, (speed + exit_speed) / 2)
         segment_time = geometry.length_m / mean_speed
-        ride_length += geometry.length_m
-        ride_time += segment_time
+        distance_start = distance
+        distance += geometry.length_m
 
         slope_state, _ = construction._step_slope(slope_state, seg_id)
         angle = _SLOPE_ANGLE_RAD[slope_state]
         g_vert = _vertical_g(prev_angle, angle, mean_speed, geometry.length_m)
-        max_positive_g = max(max_positive_g, g_vert)
-        max_negative_g = min(max_negative_g, g_vert)
-        if g_vert < 0:
-            airtime += segment_time
         prev_angle = angle
 
+        lateral_g: Optional[float] = None
         if geometry.radius_m is not None:
             # Linear in speed, same reasoning as the vertical term above.
             lateral_g = GFORCE_LATERAL_COEFF * mean_speed / geometry.radius_m
             if seg_id in _BANKED_TURNS:
                 lateral_g = max(0.0, lateral_g - BANK_LATERAL_CREDIT)
-            max_lateral_g = max(max_lateral_g, lateral_g)
 
         # Drop tracking: OpenRCT2 counts a drop the moment the train enters a
         # run of downward-sloped elements (Vehicle.cpp's testing-flags walk),
@@ -272,24 +308,66 @@ def simulate(
         # counted drops (see issue #33: a 2-unit descent, a flat stretch, then
         # an 8-unit descent reads as 2 drops in the game, not 1).
         if segment.elevation_delta < 0:
-            descent_run += -segment.elevation_delta
             if not in_drop:
                 drop_count += 1
                 in_drop = True
+            drop: Optional[int] = drop_count
         else:
-            if descent_run > 0:
-                total_drop_height += descent_run
-                highest_drop = max(highest_drop, descent_run)
-            descent_run = 0
             in_drop = False
+            drop = None
+
+        points.append(TracePoint(
+            index=index, segment=seg_id,
+            distance_start_m=distance_start, distance_m=distance,
+            height_in=elevation, height_out=elevation + segment.elevation_delta,
+            speed_in=speed, speed_out=exit_speed, mean_speed=mean_speed,
+            time_s=segment_time, g_vertical=g_vert, g_lateral=lateral_g,
+            on_lift=on_lift, is_station=is_station, drop=drop, stalled=False,
+        ))
         elevation += segment.elevation_delta
-
         speed = exit_speed
-        max_speed = max(max_speed, speed)
 
-    if descent_run > 0:
-        total_drop_height += descent_run
-        highest_drop = max(highest_drop, descent_run)
+    return RideTrace(points=points, completed=True, stall_index=None)
+
+
+def simulate(
+    segments: list[int],
+    lift_indices: Optional[Set[int]] = None,
+) -> RideStats:
+    """Run the energy-method walk over a track and collect ride stats."""
+    ride = trace(segments, lift_indices)
+
+    max_speed = LIFT_SPEED_MS
+    ride_length = 0.0
+    ride_time = 0.0
+    airtime = 0.0
+    max_positive_g = 1.0
+    max_negative_g = 1.0
+    max_lateral_g = 0.0
+    drop_heights: Dict[int, float] = {}
+
+    for point in ride.points:
+        if point.stalled:
+            break
+        ride_length += point.distance_m - point.distance_start_m
+        ride_time += point.time_s
+        max_positive_g = max(max_positive_g, point.g_vertical)
+        max_negative_g = min(max_negative_g, point.g_vertical)
+        if point.g_vertical < 0:
+            airtime += point.time_s
+        if point.g_lateral is not None:
+            max_lateral_g = max(max_lateral_g, point.g_lateral)
+        if point.drop is not None:
+            drop_heights[point.drop] = (
+                drop_heights.get(point.drop, 0) + point.height_in - point.height_out
+            )
+        max_speed = max(max_speed, point.speed_out)
+
+    total_drop_height = 0.0
+    highest_drop = 0.0
+    for height in drop_heights.values():
+        total_drop_height += height
+        highest_drop = max(highest_drop, height)
 
     avg_speed = ride_length / ride_time if ride_time > 0 else 0.0
     return RideStats(
@@ -297,15 +375,15 @@ def simulate(
         avg_speed=avg_speed,
         ride_length=ride_length,
         ride_time=ride_time,
-        drop_count=drop_count,
+        drop_count=len(drop_heights),
         total_drop_height=total_drop_height,
         highest_drop=highest_drop,
         max_positive_g=max_positive_g,
         max_negative_g=max_negative_g,
         max_lateral_g=max_lateral_g,
         airtime=airtime,
-        completed=completed,
-        stall_index=stall_index,
+        completed=ride.completed,
+        stall_index=ride.stall_index,
     )
 
 

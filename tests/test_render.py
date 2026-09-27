@@ -16,6 +16,7 @@ from rct2.render import (
     _elevation_band,
     plan_track,
     render_fitness_history,
+    render_profile,
     render_track,
 )
 
@@ -128,3 +129,41 @@ def test_the_valid_share_is_optional_and_drawn_behind_when_given():
 def test_an_empty_history_renders_a_card():
     root = ET.fromstring(render_fitness_history([]))
     assert "no generations" in "".join(root.itertext())
+
+
+def _manic_miner_lifts():
+    ride = td6.load("data/sample_rides/manic_miner_test.td6")
+    return {i for i, e in enumerate(ride.elements) if e.chain_lift}
+
+
+def test_profile_of_a_real_design_is_parseable_and_marks_the_lift():
+    svg = render_profile(manic_miner_segments(), _manic_miner_lifts(), title="Manic Miner")
+    root = ET.fromstring(svg)
+    ns = "{http://www.w3.org/2000/svg}"
+    assert root.tag == ns + "svg"
+    assert root.find(ns + "title").text == "Manic Miner"
+    assert root.findall(f".//{ns}path[@data-series='lift']")
+    assert root.findall(f".//{ns}path[@data-series='height']")
+    assert root.findall(f".//{ns}path[@data-series='speed']")
+
+
+def test_profile_marks_each_counted_drop():
+    from rct2.physics import simulate
+
+    segments, lifts = manic_miner_segments(), _manic_miner_lifts()
+    root = ET.fromstring(render_profile(segments, lifts))
+    markers = root.findall(".//{http://www.w3.org/2000/svg}*[@data-drop]")
+    assert len(markers) == simulate(segments, lifts).drop_count
+
+
+def test_profile_marks_the_stall_point():
+    root = ET.fromstring(render_profile([0x00] * 30, lift_indices=set()))
+    stall = root.findall(".//{http://www.w3.org/2000/svg}*[@data-series='stall']")
+    assert stall
+    assert "stalls" in ET.tostring(root, encoding="unicode")
+
+
+def test_profile_of_empty_track_uses_empty_state():
+    svg = render_profile([], title="Nothing")
+    root = ET.fromstring(svg)
+    assert "no pieces" in root.find("{http://www.w3.org/2000/svg}desc").text
