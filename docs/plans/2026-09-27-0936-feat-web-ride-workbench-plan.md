@@ -204,7 +204,7 @@ flowchart TB
 - KTD1. **Runs execute as a child `evolve_coaster.py` process, never inside the web server.** The server starts the CLI with the run's settings and a run id, then reads the run record the CLI writes. Terminal runs and page runs take the same code path, which is what makes R3 and AE8 hold. Stop becomes a signal to that process (KTD6), a crash in evolution cannot take the server down, and the server stays responsive while a run pins a CPU core. Rejected: running `evolve_parts()` in a server thread, which needs its own copy of the CLI's wiring and blocks on the GIL during scoring.
 - KTD2. **Standard library only.** The server is `http.server.ThreadingHTTPServer` with a small JSON API; the page is one HTML file, one stylesheet, and one plain JavaScript file with no build step; live updates poll every second. `requirements.txt` stays `pytest` only and everything runs on CI's Python 3.9. Rejected: a web framework (new dependency for a single-user local tool) and server-sent events (a streaming connection the stdlib server handles poorly, for no visible gain at one-second updates).
 - KTD3. **Pictures are server-rendered SVG, reusing `rct2/render.py`.** The plan, the new side profile, and the fitness curve come from Python and the page inlines them. They share one palette and dark mode, and the drawing stays testable in pytest. Rejected: a JavaScript charting library (dependency and a second rendering path to keep consistent).
-- KTD4. **The library is a folder of run directories.** Default root `~/.generide/runs/`, overridable with the `GENERIDE_HOME` environment variable (root becomes `$GENERIDE_HOME/runs/`). Each run gets a sortable id (UTC date-time plus seed) and a directory holding: a run file (schema version, request, CLI settings, status, pid, timings, parent run id, final result, check results, installs), a progress log with one line per generation, an improvements log with the full track each time the best ride improves (R27), and the exported `best.td6`. Append-only logs mean a crash loses nothing already written, following `rct2/calibration_log.py`. Rejected: SQLite (harder to inspect and clear by hand, against the "folder I can wipe" decision) and a single JSON file per run (rewritten every generation).
+- KTD4. **The library is a folder of run directories.** Default root `~/.generide/runs/`, overridable with the `GENERIDE_HOME` environment variable (root becomes `$GENERIDE_HOME/runs/`). Each run gets a sortable id (UTC date-time plus seed) and a directory holding: a run file (schema version, request, CLI settings, status, pid, timings, parent run id, final result, check status, check results, installs), a progress log with one line per generation, an improvements log with the full track each time the best ride improves (R27), and the exported `best.td6`. Append-only logs mean a crash loses nothing already written, following `rct2/calibration_log.py`. Rejected: SQLite (harder to inspect and clear by hand, against the "folder I can wipe" decision) and a single JSON file per run (rewritten every generation).
 - KTD5. **The CLI writes a run record by default.** New flags: `--run-id` (used by the server so it knows the directory before the process starts), `--parent-run` (rerun lineage, R23), and `--no-record` (opt out). The CLI prints the record's location. `--output` behaves exactly as today, and the record's `best.td6` is an extra copy.
 - KTD6. **Stopping is cooperative.** `evolve()` and `evolve_parts()` gain an optional stop check consulted once per generation; when it fires they return the best so far, and `EvolutionStats.generations` reports the generations actually run. The CLI turns SIGINT and SIGTERM into that check, so Ctrl-C in a terminal and Stop on the page both produce a finished record with status `stopped` and an exported ride (R12, AE3).
 - KTD7. **One settings table drives the form and its validation.** A new module lists every page-exposed setting with its CLI flag, type, default, range, up-front or advanced group, and help text (R4, R5). One validator returns errors keyed by field (R6). A test pins every entry to the CLI's argparse flag and default so the two cannot drift. The CLI keeps its own argparse definitions. Rejected: generating argparse from the table, which rewrites a tested CLI for no user-visible gain.
@@ -212,8 +212,8 @@ flowchart TB
 - KTD9. **The side profile comes from a per-piece trace in `rct2/physics.py`.** The energy walk records one point per piece (distance along the ride, height, speed in and out, on lift, in drop, stall) and `simulate()` is rebuilt on top of that same walk, so the profile and the stats can never disagree. A test compares `simulate()` before and after on every sample ride (stop condition in the Goal Capsule).
 - KTD10. **Time remaining uses a rolling window; stagnation uses a fixed rule.** Remaining time is the mean duration of the last 10 generations times generations left, shown as "estimating" for the first 3. A whole-run average would underestimate once genomes grow, per `docs/solutions/performance-issues/genome-bloat-from-uncapped-fitness-rewards.md`. The no-improvement notice (R11) shows when the best score has not changed for at least 20 generations and at least a quarter of the planned run. Both are pure functions of the progress log, so they are unit-tested and easy to tune.
 - KTD11. **OpenRCT2 access is one small module with overridable paths.** The game binary defaults to `rct2.oracle.OPENRCT2_BINARY` and the track folder to `~/Library/Application Support/OpenRCT2/track/`, overridable with `GENERIDE_OPENRCT2_BINARY` and `GENERIDE_TRACK_DIR` (per the macOS-only Key Decision). Check and install are available only when those paths exist (AE1). Checks run one at a time behind a lock, and a check is refused while the active run uses oracle calibration, because both install the same plugin file into OpenRCT2's plugin folder (`rct2/oracle.py` docstring: "Only one call should run at a time").
-- KTD12. **Install names are sanitized and never overwrite silently.** A name has path separators and control characters removed, is trimmed, and capped at 60 characters, and becomes `<name>.td6`. Templates use `{name}`, `{date}`, `{time}`, and `{seed}` and are saved in `~/.generide/settings.json`. An existing file returns a conflict the page resolves by asking to replace or rename (AE5). Every install is appended to the run record.
-- KTD13. **The server listens on 127.0.0.1 only and never takes a file path for run data from the browser.** Run ids are checked against the id pattern before any file access, which rules out path traversal through the API. The one path the form accepts, a seed track, must be an existing `.td6` file. No authentication: it is a single-user tool on the player's own machine.
+- KTD12. **Install names are sanitized and never overwrite silently.** A name has path separators and control characters removed, is trimmed, and capped at 60 characters, and becomes `<name>.td6`. Templates use `{name}`, `{date}`, `{time}`, and `{seed}` and are saved in `$GENERIDE_HOME/settings.json` (default `~/.generide/settings.json`), under the same root as the library (KTD4). An existing file returns a conflict the page resolves by asking to replace or rename (AE5). Every install is appended to the run record.
+- KTD13. **The server listens on 127.0.0.1 only, accepts only requests from its own page, and never takes a file path for run data from the browser.** Any request whose Host header is not `127.0.0.1:<port>` or `localhost:<port>` is rejected, which defeats DNS rebinding. Every state-changing request (start, stop, check, install, delete, saving settings) is rejected when it carries an Origin other than the server's own, or a Content-Type other than `application/json`, so another website open in the player's browser cannot drive the server. Run ids are checked against the id pattern before any file access, which rules out path traversal through the API. The one path the form accepts, a seed track, must be an existing `.td6` file. No accounts or passwords: it is a single-user tool on the player's own machine.
 
 ### High-Level Technical Design
 
@@ -292,7 +292,7 @@ tests/
 | Risk | Mitigation |
 |---|---|
 | A page check and a calibrating run both write the oracle plugin file | KTD11 lock plus refusal while a calibrating run is active |
-| Server closes while a run continues | The child keeps writing its record; on restart the server finds the live pid and shows the run as running, or marks it interrupted if the pid is gone |
+| Server closes while a run continues | The child runs in its own session, so Ctrl-C on the server does not stop it, and it keeps writing its record; on restart the server finds the live pid and shows the run as running, or marks it interrupted if the pid is gone |
 | Rebuilding `simulate()` on the trace shifts a number | Equality test over every sample ride before the refactor lands (U2) |
 | Tests write into the developer's real home folder | Autouse fixture in `tests/conftest.py` (U3) |
 | Browser code has no automated tests | Keep logic in Python (validation, diffs, ETA, SVG) and keep the JavaScript to fetching and placing results; manual Chromium check in the Verification Contract |
@@ -379,13 +379,15 @@ tests/
   1. Add `--run-id`, `--parent-run`, and `--no-record`.
   2. Unless `--no-record`, create the run at start with the full request and settings, append progress from the progress callback on every generation (always, not only with `--verbose`), and append an improvement whenever the best fitness rises.
   3. Install SIGINT and SIGTERM handlers that set a flag the evolution stop check reads.
-  4. At the end, compute ride stats, estimated ratings, and footprint used (from `render.plan_track`) for the best ride, export `best.td6` into the run directory, and finish with status completed, stopped, or failed.
-  5. Keep console output as today, plus one line naming the record location.
+  4. After evolution returns, append a final improvement from the returned best individual when its fitness is above the last logged improvement, or when none was logged. The progress callback runs before each generation breeds, so the last generation's offspring never reach it.
+  5. At the end, compute ride stats, estimated ratings, and footprint used (from `render.plan_track`) for the best ride, export `best.td6` into the run directory, and finish with status completed, stopped, or failed.
+  6. Keep console output as today, plus one line naming the record location.
 - **Patterns to follow:** existing `_fake_run` monkeypatching in `tests/test_evolve_coaster.py`.
 - **Test scenarios:**
   - Covers AE8. A CLI run writes a run directory with progress for each generation, at least one improvement, a `best.td6`, and status completed.
   - `--output` still writes the same `.td6` bytes as before for a fixed seed.
   - `--no-record` writes nothing under `GENERIDE_HOME`.
+  - The last improvement's track equals the exported `best.td6`, including when the final generation produced a new best.
   - `--parent-run` is stored as the run's parent.
   - Covers AE3. A stop requested mid-run yields status stopped, the generations actually run, and an exported best ride.
   - A run with no construction-valid ride finishes as failed, keeps its improvements, and exports nothing, while still exiting with code 1.
@@ -417,13 +419,14 @@ tests/
 - **Goal:** The page can tell whether the game is available, check a ride in it one at a time, and install a ride under a safe name without overwriting silently.
 - **Requirements:** R2, R16, R17, R18, R19, R20, AE1, AE5; KTD11, KTD12.
 - **Dependencies:** U3.
-- **Files:** `rct2/openrct2_paths.py`, `tests/test_openrct2_paths.py`.
+- **Files:** `rct2/openrct2_paths.py`, `rct2/oracle.py`, `tests/test_openrct2_paths.py`, `tests/test_oracle.py`.
 - **Approach:**
   1. Resolve the binary and track folder from environment overrides or macOS defaults, and report availability with a reason when missing.
   2. Name handling: sanitize, apply a template, and detect a clash in the track folder.
   3. Install copies the run's `best.td6` to the track folder under the final name, with an explicit replace flag required when the file exists, and records the install in the run.
   4. Check wraps `rct2.oracle.score_track` behind a process-wide lock, records the result (status, game ratings, stall location, detail) in the run, and maps each oracle status to a plain-language message.
-  5. Naming templates are read from and saved to `~/.generide/settings.json`.
+  5. `score_track` gains an optional binary argument whose default is resolved at call time from `GENERIDE_OPENRCT2_BINARY`, falling back to `OPENRCT2_BINARY`. The page's check and the CLI's calibration sampling then both launch the overridden game. Launch failure (for example a missing binary) must still remove the plugin file it wrote.
+  6. Naming templates are read from and saved to `settings.json` under the `GENERIDE_HOME` root (KTD12).
 - **Patterns to follow:** the injectable scorer in `evolve_parts()` (`oracle_scorer`), so tests never need OpenRCT2.
 - **Test scenarios:**
   - Covers AE1. With the binary path pointing at a missing file, availability reports check and install unavailable with a reason.
@@ -433,6 +436,8 @@ tests/
   - A successful install puts a byte-identical `.td6` in the track folder and appends the install to the run.
   - A check with a fake scorer returning `stalled` at piece 42 records the status and yields a message naming the piece.
   - Two checks started together run one after the other, never overlapping in the fake scorer.
+  - With `GENERIDE_OPENRCT2_BINARY` set, `score_track` launches that path (patched process launch), and without it launches `OPENRCT2_BINARY`.
+  - When launching the game fails, the plugin file written for that call is removed.
 - **Verification:** tests pass with no OpenRCT2 present, as in CI.
 
 ### U7. Web server and JSON API
@@ -442,24 +447,29 @@ tests/
 - **Dependencies:** U2, U3, U4, U5, U6.
 - **Files:** `rct2/webui.py`, `generide_web.py`, `tests/test_webui.py`.
 - **Approach:**
-  1. Keep request handling as plain functions from request data to response data, with a thin `http.server` adapter, so most tests call handlers directly.
-  2. Run supervisor: start `evolve_coaster.py` as a child with validated arguments and a new run id, refuse a second start while one is active (AE2), send SIGTERM on stop, and reap the child.
+  1. Keep request handling as plain functions from request data to response data, with a thin `http.server` adapter, so most tests call handlers directly. The adapter enforces the Host, Origin, and JSON checks in KTD13 before any handler runs.
+  2. Run supervisor: start `evolve_coaster.py` as a child with validated arguments, a new run id, and `--output` and `--oracle-log` pointing into that run's directory, so page runs write nothing outside the library. The child starts in its own session, so Ctrl-C on the server does not reach it. The server refuses a second start while one is active (AE2), sends SIGTERM on stop, and reaps the child.
   3. Endpoints for: settings table and defaults, validate, start, stop, active run status (generation, elapsed, remaining, stagnation, latest best stats), list runs, get run, rerun form values, compare two or three runs (input differences and stat deltas), availability, check, install (with conflict reply), download `.td6`, delete, and SVG for a run's plan, profile, and fitness curve.
   4. Result summaries flag construction failures and incomplete circuits so the page can warn (R15), and label every rating as estimated or game-checked.
-  5. Checks run in a background thread so the request returns immediately; the page polls the run for the result. A check is refused while an active run uses oracle calibration (KTD11).
+  5. Checks run in a background thread so the request returns immediately; the run's check status reads `checking` until the result is recorded, and the page polls the run for it. A second check on a run whose status is `checking` is refused. A check is refused while an active run uses oracle calibration (KTD11).
   6. `generide_web.py` binds 127.0.0.1 on a default port, prints the URL, and opens the browser unless `--no-browser`.
 - **Patterns to follow:** root-level entry scripts such as `run_benchmark.py`.
 - **Test scenarios:**
   - Starting a run with a fake child command creates a run and reports it active; a second start returns a refusal naming the active run (covers AE2).
   - Stopping sends the stop signal and the run ends as stopped.
+  - The child is started in a new session, separate from the server's process group.
+  - A page-started run writes nothing outside `GENERIDE_HOME`, including in the server's working directory.
   - Status for an active run reports generation, remaining-time estimate, and stagnation from its progress log.
   - Compare of two runs differing only in intensity window and seed reports exactly those inputs as different, plus stat deltas.
   - Compare refuses one run or four runs.
   - Invalid form values return field errors and start nothing.
   - Unknown or malformed run ids return not found without touching the file system.
+  - A request with a foreign Host header returns 403.
+  - A state-changing request with a foreign Origin, or with a `text/plain` body, returns 403 and starts, stops, installs, or deletes nothing.
   - Plan, profile, and fitness SVG endpoints return SVG for a completed run.
   - Download returns the run's `.td6` bytes.
   - Check is refused while a calibrating run is active.
+  - While a check runs, the run reports check status `checking`, and a second check request for that run is refused.
   - Integration: a real `ThreadingHTTPServer` on port 0 serves the page and the settings endpoint over HTTP.
   - Integration: a real short CLI child run (few generations, small population) started through the API finishes as completed and appears in the run list.
 - **Verification:** tests pass on Python 3.9.
@@ -471,14 +481,16 @@ tests/
 - **Dependencies:** U7.
 - **Files:** `rct2/webui_static/index.html`, `rct2/webui_static/app.js`, `rct2/webui_static/style.css`.
 - **Approach:**
-  1. New run: up-front settings with help text, a collapsed advanced section, field errors shown next to fields, and a start button disabled while a run is active.
-  2. Live view: generation, elapsed, remaining, a pulsing alive indicator, best ride plan and profile, key stats, fitness curve, stagnation notice, and a stop button.
-  3. Result: plan, profile, stats with estimate labels, failure banners, check button and results next to estimates, name field with template picker, install with the restart note (R19) and replace-or-rename prompt, and download.
-  4. Library: newest-first list with key inputs, headline stats, check and install badges, open, rerun, compare selection, and delete with confirmation.
-  5. Compare: two or three columns with changed inputs highlighted, plans and profiles side by side, stat deltas marked.
-  6. Colors follow the palette in `rct2/render.py` so the inlined SVGs sit naturally in light and dark mode.
+  1. Navigation: the page opens to the Library, or straight to New Run when the library is empty. A bar across the top links New Run, Library, and the active run while one is going; Result and Compare open from the Library.
+  2. New run: up-front settings with help text, a collapsed advanced section, field errors shown next to fields, and a start button disabled while a run is active.
+  3. Live view: generation, elapsed, remaining, a pulsing alive indicator, best ride plan and profile, key stats, fitness curve, stagnation notice, and a stop button.
+  4. Result: plan, profile, stats with estimate labels, failure banners, check button (disabled and showing "checking" while a check runs) and results next to estimates, name field with template picker, install with the restart note (R19) and replace-or-rename prompt, and download.
+  5. Library: newest-first list with key inputs, headline stats, check and install badges, open, rerun, compare selection, and delete with confirmation.
+  6. Compare: two or three columns with changed inputs highlighted, plans and profiles side by side, stat deltas marked.
+  7. Colors follow the palette in `rct2/render.py` so the inlined SVGs sit naturally in light and dark mode.
 - **Execution note:** keep all decisions in the API; the JavaScript fetches, renders returned data, and polls. Prefer a smoke check in Chromium over unit tests here.
 - **Test scenarios:** manual, in Chromium, because the repo has no JavaScript test setup and KTD2 rules out adding one. Logic behind each check is covered by U7's API tests.
+  - With an empty library the page opens on New Run; with saved runs it opens on the Library, and the top bar reaches New Run, Library, and an active run from any screen.
   - Covers F1. Every up-front setting shows its help text and default; opening the advanced section reveals the rest.
   - Entering excitement 7 to 5 shows the error beside that field and the run does not start.
   - Covers F2. A running run updates generation, elapsed, and remaining about once a second, and the plan and profile change when the best ride improves.
@@ -514,7 +526,7 @@ tests/
 |---|---|---|
 | Unit and integration tests | `pytest` (CI runs it on Python 3.9 via `.github/workflows/tests.yml`) | U1 to U7 |
 | Physics unchanged | U2's equality test over `data/sample_rides/` | U2 |
-| No home-folder writes in tests | Run `pytest` with `HOME` pointed at an empty temp folder and confirm it stays empty | U3, U4 |
+| No home-folder writes in tests | Run `pytest` with `HOME` pointed at an empty temp folder and confirm it stays empty | U3, U4, U6 |
 | Dependencies unchanged | `requirements.txt` still lists only `pytest` | All |
 | Manual page walkthrough | Start `python generide_web.py --no-browser`, open it in Chromium, then: start a 30-generation run, watch it update, stop it, open the result, rerun with one changed input, compare the two, delete one. Repeat in dark mode and at 390px width. | U7, U8 |
 | Real game check and install | On the player's Mac: check a finished ride, install it under a template name, restart OpenRCT2, and find it under Mine Train in Track Designs | U6, U8 |
