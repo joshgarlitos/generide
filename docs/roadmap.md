@@ -98,5 +98,14 @@ Presentation can grow too: names, colors, scenery, and batches of different fina
 | Feed oracle results back into calibration | Planned |
 | Model brakes and train length in the physics | Planned |
 | Calibrate ratings against headless OpenRCT2 | Next |
-| Track renderer and per-run plots | Planned |
+| Track renderer and per-run plots | Complete |
+| Side profile of a ride, drawn from the physics trace | Complete |
+| Run library shared by the CLI and the web UI | Complete |
+| Local web UI: request form, live runs, results, check, install, library, comparison | Complete |
+| In-game OpenRCT2 panel that talks to generide | Planned |
+| Rotatable 3D view of a track | Planned |
+| Several runs at once from the web UI | Planned |
+| Headless check and install on Windows and Linux | Planned |
+| Replay how a ride evolved, from the run library | Planned |
+| Use the run library as data for tuning or training | Planned |
 | Accept a request with footprint and rating targets | Complete |

@@ -4,6 +4,26 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-09-27: A web page to drive it, and a record of every run
+
+Until now the only way in was `evolve_coaster.py` and its twenty-odd flags, and the only way to judge a ride was to copy it into the game, restart, build it, and ride it. I've installed rides that turned out to be duds that way. This build puts a page in front of all of it (`python generide_web.py`): a request form that explains every setting, a live view of the run, a result with a plan, a side profile, and stats, a check in the headless game, install under a chosen name, and a library where any run can be rerun with one change and compared with the original. The plan is `docs/plans/2026-09-27-0936-feat-web-ride-workbench-plan.md` (issue #63).
+
+The piece everything else sits on is the run record. Every run, from the page or the terminal, now writes a folder under `~/.generide/runs/` with its request, one line of progress per generation, the full track every time the best ride improves, and whatever happened to the result afterwards. The page starts runs by launching the CLI as a child process with a run id it picked, then just reads the record the CLI writes, so a terminal run shows up in the library exactly like a page run. The improvements log keeps whole tracks rather than scores, so a replay of how a ride evolved can be built later without collecting anything new.
+
+A few things worth writing down:
+
+- The side profile needed per-piece data that `physics.simulate()` computed and threw away. I pulled the energy walk out into `physics.trace()` and rebuilt `simulate()` on top of it, so the picture and the numbers next to it cannot disagree. Before touching it I recorded `simulate()`'s output for the sample ride and fifteen other tracks, completed and stalled, and the rebuilt version matches all of them exactly. The first version made `simulate()` twice as slow, because it built a frozen dataclass per piece; switching the point type to a NamedTuple got that to 1.5 times, which is about 1% of a whole physics-scored run. The CLI's exported `.td6` for a fixed seed is byte for byte what it was, pinned by a test.
+- Stopping is cooperative. `evolve()` and `evolve_parts()` take a stop check they consult once per generation, and the CLI turns Ctrl-C and SIGTERM into it, so Ctrl-C in a terminal and Stop on the page both end with the best ride exported and the run saved as stopped early. A second Ctrl-C still quits at once.
+- `oracle.score_track` wrote its plugin into the game's real plugin folder before launching the game, outside the cleanup block, so a missing or broken game binary left the plugin behind. It now cleans up on a failed launch too, and takes the game's location from `GENERIDE_OPENRCT2_BINARY` at call time.
+- The first install-name sanitizer turned `../../etc/passwd` into `.. etc passwd`, a name starting with dots, because it stripped leading dots once and then trimmed spaces. The test for it caught that before it shipped.
+- The fitness curve and the empty-state picture never painted the background rectangle the dark theme recolors. On a light page nobody could tell; on a dark one the title turned light over a light background and vanished.
+
+Time left and the "stopped improving" notice are the two numbers I expect to retune. Time left is the mean of the last 10 generation times, shown as "estimating" for the first 3, because genomes grow over a run and a whole-run average reads short. The notice shows once the best score has held for 20 generations and a quarter of the planned run. Both live in `rct2/runrecord.py` as constants. I haven't watched enough real runs through the page to move them yet.
+
+Still to do by hand: check a finished ride in the real game, install it under a template name, restart OpenRCT2, and find it under Mine Train. The tests cover the logic with a fake game, and the page was walked through in Chromium in light and dark mode and at phone width, but the real game only exists on my Mac.
+
+---
+
 ## 2026-09-13 — ideal_length was tuned to the wrong population
 
 Went back to close out issue #43, which had been sitting open since the ideal_length raise from 50 to 80 back in August: that number came from the median across all 204 shipped designs in `data/calibration.csv`, every ride type the game ships mixed together. This project only builds Mine Trains. Filtering the same data down to just Mine Train Coasters (`ride_type == 17`) gives four real designs -- Calamity Mine at 142 segments, Gold Rush at 104, Manic Miner at 89, Runaway Mine Train at 82 -- and every one of them was still longer than the 80-segment ceiling I'd been rewarding tracks up to. I'd tuned the number to the wrong population the whole time.
