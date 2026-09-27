@@ -80,7 +80,7 @@ def create_ride_from_segments(
     )
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Evolve coaster tracks using genetic algorithm"
     )
@@ -228,6 +228,11 @@ def main():
         help="Calibration log path (default: <output>.oracle-log.jsonl)",
     )
 
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.output is None:
