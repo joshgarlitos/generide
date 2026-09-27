@@ -47,7 +47,10 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Builds a track piece by piece in a real headless OpenRCT2 and reads the game's own ratings back, so a benchmark run can be judged by the game rather than by our model of it.
 - Renders a track as a top-down SVG plan shaded by height, and an evolution run as a fitness curve, so a result can be looked at without loading the game.
 - Supports seeded runs so an interesting result or failure can be reproduced.
-- Has 369 passing tests, including regression tests against real OpenRCT2 exports.
+- Draws a ride's side profile (height and speed along the track, lift and drops marked) from the same piece-by-piece walk the ride stats come from.
+- Saves every run, from the terminal or the web UI, to a run library with its request, progress, every improvement of the best ride, and what happened to the result.
+- Runs a local web UI for setting up requests, watching runs live, checking results in the headless game, installing them, and comparing runs side by side.
+- Has 652 passing tests, including regression tests against real OpenRCT2 exports.
 
 Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. The physics fitness turns simulated ride stats into excitement, intensity, and nausea, and it can use either the old fitted weights or the transcribed calculation from OpenRCT2's source.
 
@@ -66,6 +69,35 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pytest
 ```
+
+### Use the web UI
+
+The easiest way in is the web UI, which runs on your own machine:
+
+```bash
+python generide_web.py
+```
+
+It opens `http://127.0.0.1:8765/` in your browser (add `--no-browser` to just print the address, or `--port N` to use another port). It only listens on your own machine. The page has four screens:
+
+- **New run.** Every setting the page supports, each with a plain explanation, its default, and its allowed range. The settings that shape the ride are up front; the rest sit under Advanced settings. Mistakes are pointed out beside the field before anything starts. Rating windows aim at generide's own estimates, not the game's real ratings.
+- **The run.** While a run is going: the generation, time elapsed and time left, the best ride so far as a plan and a side profile, the best score by generation, and a notice when the score has stopped improving. Stop ends the run and keeps its best ride. Only one run goes at a time.
+- **The result.** The plan, the side profile, and the ride stats, with every number from generide's own model labeled as an estimate. A ride that fails construction checks or whose train does not finish the circuit is flagged, and installing it asks first. From here you can check the ride in the real game (it builds the ride in a headless OpenRCT2 and shows the game's ratings next to ours), install it into OpenRCT2 under a name you type or a naming template like `{name} {date} {time}`, or download the `.td6`. Installing never overwrites an existing design without asking. If OpenRCT2 is already open, restart it to see a newly installed design.
+- **Library.** Every saved run, newest first, including runs started from the terminal. Open one, rerun it with changes (every input, the seed included, starts out the same as the source run, so your change is the only difference), delete it, or tick two or three and compare them: changed inputs are highlighted, and the pictures and stats sit side by side.
+
+The run library lives in `~/.generide/runs/`, one folder per run. It is generide's own folder, separate from the game: you can clear it, or delete runs from the page, without touching rides already installed in OpenRCT2. Naming templates are saved in `~/.generide/settings.json`.
+
+Checking and installing work on macOS only for now, and need OpenRCT2. Everything else works without it; the page says why check and install are off when the game is not found. These environment variables point generide somewhere else:
+
+| Variable | What it sets | Default |
+|---|---|---|
+| `GENERIDE_HOME` | generide's own folder (library and settings) | `~/.generide` |
+| `GENERIDE_OPENRCT2_BINARY` | the OpenRCT2 program used for checks | `/Applications/OpenRCT2 2.app/Contents/MacOS/OpenRCT2` |
+| `GENERIDE_TRACK_DIR` | the folder rides are installed into | `~/Library/Application Support/OpenRCT2/track/` |
+
+Runs started from the page keep going if you stop the server with Ctrl-C; start it again and they show up where you left them.
+
+### Use the command line
 
 Generate the hand-authored test circuit:
 
@@ -93,6 +125,7 @@ A few flags worth knowing:
 - `--target-excitement MIN:MAX`, `--target-intensity MIN:MAX`, `--target-nausea MIN:MAX` — with `--fitness physics`, aim for a specific rating range instead of maximizing excitement, e.g. `--target-intensity 4:7`. Our rating model is not yet calibrated against the game's real ratings (see the roadmap), so treat these as rough knobs rather than exact targets for now.
 - `--verbose` — print progress each generation.
 - `--render` — also write an SVG plan of the best track and a fitness curve for the run, next to the `.td6`.
+- `--no-record`: do not save the run to the run library. Every run is saved there by default, so it shows up in the web UI's library; the CLI prints where. Ctrl-C stops a run at the next generation and still exports its best ride.
 
 To compare search methods rather than produce one ride, use the benchmark harness:
 
@@ -152,7 +185,14 @@ rct2/
   evolution.py      Population management and evolution loops
   benchmark.py      Method comparison at equal evaluation budgets
   oracle.py         Headless OpenRCT2 driver for the game's own ratings
-  render.py         SVG plan views and fitness curves
+  render.py         SVG plan views, side profiles, and fitness curves
+  runrecord.py      The run library shared by the CLI and the web UI
+  settings.py       The web UI's settings table and validation
+  openrct2_paths.py Game locations, the one-at-a-time game check, and install
+  webui.py          The web UI's server and JSON API
+  webui_static/     The page: one HTML file, one stylesheet, one script
+generide_web.py      Starts the web UI
+evolve_coaster.py    Command-line evolution
 tests/               Unit and fixture-based regression tests
 data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
 ```

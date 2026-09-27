@@ -13,6 +13,7 @@ for the duration of one run and removed afterward.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -27,6 +28,10 @@ from rct2.geometry import Position, occupied_tiles
 from rct2.segments import SEGMENTS
 
 OPENRCT2_BINARY = "/Applications/OpenRCT2 2.app/Contents/MacOS/OpenRCT2"
+# Set this to point generide at an OpenRCT2 installed somewhere else. Read
+# when a check runs, not at import, so the web UI and the CLI's calibration
+# sampling both follow it.
+BINARY_ENV = "GENERIDE_OPENRCT2_BINARY"
 PLUGIN_DIR = Path.home() / "Library/Application Support/OpenRCT2/plugin"
 DEFAULT_PARK = Path.home() / "Library/Application Support/OpenRCT2/save/Forest Frontiers.park"
 
@@ -824,6 +829,12 @@ def _default_timeout_ticks(segments: list[int]) -> int:
     return max(4000, int((predicted * 4 + 120) * TICKS_PER_SECOND))
 
 
+def resolve_binary() -> str:
+    """The OpenRCT2 executable to launch: `$GENERIDE_OPENRCT2_BINARY`, or the
+    macOS app path this module was developed against."""
+    return os.environ.get(BINARY_ENV) or OPENRCT2_BINARY
+
+
 def score_track(
     segments: list[int],
     park: Path = DEFAULT_PARK,
@@ -840,6 +851,7 @@ def score_track(
     brake_speed: int = DEFAULT_BRAKE_SPEED,
     num_trains: int = 1,
     cars_per_train: int = 2,
+    binary: Optional[str] = None,
 ) -> OracleResult:
     """Build `segments` in a real, headless OpenRCT2 and run a train on it.
 
@@ -857,7 +869,11 @@ def score_track(
     duration of this call and removes it afterward -- there is no isolated
     plugin directory available (see module docstring). Only one call should
     run at a time; concurrent calls would overwrite each other's plugin file.
+
+    `binary` defaults to `resolve_binary()`, read at call time.
     """
+    if binary is None:
+        binary = resolve_binary()
     if timeout_ticks is None:
         timeout_ticks = _default_timeout_ticks(segments)
 
@@ -869,10 +885,16 @@ def score_track(
         num_trains=num_trains, cars_per_train=cars_per_train,
     ))
 
-    process = subprocess.Popen(
-        [OPENRCT2_BINARY, str(park), "--headless"],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-    )
+    try:
+        process = subprocess.Popen(
+            [binary, str(park), "--headless"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+    except BaseException:
+        # A game that cannot even start must not leave our plugin behind in
+        # the player's real plugin folder.
+        plugin_path.unlink(missing_ok=True)
+        raise
     # Break on a parsed result rather than a "done" marker string: any other
     # plugin sitting in the same real plugin folder (there is no isolated
     # one -- see module docstring) could print a similarly generic marker

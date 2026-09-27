@@ -13,9 +13,10 @@ without looking like they came from different projects.
 """
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence
+from typing import AbstractSet, Iterable, Optional, Sequence
 
 from rct2.geometry import OccupiedTile, Position, occupied_tiles, track_bounds
+from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS, trace
 
 # Matches docs/assets/rle-diagram.svg. Kept as one block so a change to the
 # design system is one edit rather than a hunt through string literals.
@@ -270,6 +271,7 @@ style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto
 peaking at {hi:.2f}. A dashed line shows the share of the population that was \
 buildable.</desc>
   <style>{_THEME}</style>
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
   <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
 {_escape(title)}</text>
   <text class="ts" x="{left}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(subtitle)}</text>
@@ -292,6 +294,166 @@ fill="{LIGHT["text_sec"]}">generation</text>
 """
 
 
+def render_profile(
+    segments: Sequence[int],
+    lift_indices: Optional[AbstractSet[int]] = None,
+    title: str = "Side profile",
+) -> str:
+    """The ride unrolled into a side view: height along the track, with speed.
+
+    The plan view shows where a ride goes but not what it does, and what it
+    does is the part that makes it worth building: how high the lift climbs,
+    where the drops fall, how fast the train is going when it gets there.
+    Drawn from `physics.trace`, the same walk the ride stats come from, so
+    the picture and the numbers next to it cannot disagree.
+
+    Height is the solid line, with the lift hill drawn over it in a heavier
+    stroke. Speed is the dashed line on its own right-hand scale. Each
+    counted drop is numbered where it starts, and a train that stalls gets a
+    cross where it stops.
+    """
+    ride = trace(list(segments), set(lift_indices) if lift_indices is not None else None)
+    if not ride.points:
+        return _empty_svg(title, "no pieces: the track is empty")
+
+    w, h = 640, 300
+    left, right, top_pad, bottom = 56, 60, 52, 44
+    plot_w = w - left - right
+    plot_h = h - top_pad - bottom
+
+    length = max(ride.points[-1].distance_m, 1.0)
+    heights = [0] + [p.height_out for p in ride.points]
+    lo_z, hi_z = min(heights), max(heights)
+    climb_m = (hi_z - lo_z) * HEIGHT_UNIT_M
+    if hi_z <= lo_z:
+        lo_z, hi_z = lo_z - 1, hi_z + 1
+    top_speed = max([p.speed_in for p in ride.points] + [p.speed_out for p in ride.points])
+    top_speed = max(top_speed, 1.0)
+
+    def x_at(distance: float) -> float:
+        return round(left + plot_w * distance / length, 1)
+
+    # Room above the highest point for the drop label that usually sits there.
+    head = 16
+
+    def y_height(z: float) -> float:
+        return round(top_pad + plot_h - (plot_h - head) * (z - lo_z) / (hi_z - lo_z), 1)
+
+    def y_speed(v: float) -> float:
+        return round(top_pad + plot_h - plot_h * v / top_speed, 1)
+
+    def path(pairs: Sequence[tuple]) -> str:
+        return " ".join(f"{'M' if i == 0 else 'L'}{x},{y}" for i, (x, y) in enumerate(pairs))
+
+    height_pts = [(x_at(0.0), y_height(ride.points[0].height_in))]
+    speed_pts = [(x_at(0.0), y_speed(ride.points[0].speed_in))]
+    for p in ride.points:
+        height_pts.append((x_at(p.distance_m), y_height(p.height_out)))
+        speed_pts.append((x_at(p.distance_m), y_speed(p.speed_out)))
+
+    # Contiguous runs of chain-lift pieces (not the station, which also
+    # drives the train but is not what anyone means by "the lift").
+    lift_paths = []
+    run: list = []
+    for p in ride.points:
+        if p.on_lift and not p.is_station and not p.stalled:
+            if not run:
+                run.append((x_at(p.distance_start_m), y_height(p.height_in)))
+            run.append((x_at(p.distance_m), y_height(p.height_out)))
+        elif run:
+            lift_paths.append(run)
+            run = []
+    if run:
+        lift_paths.append(run)
+
+    layers = []
+    for pairs in lift_paths:
+        layers.append(
+            f'<path class="ac" data-series="lift" d="{path(pairs)}" fill="none" '
+            f'stroke="{LIGHT["accent"]}" stroke-width="6" stroke-opacity="0.45" '
+            f'stroke-linecap="round"/>'
+        )
+    layers.append(
+        f'<path class="acs" data-series="speed" d="{path(speed_pts)}" fill="none" '
+        f'stroke="{LIGHT["text_sec"]}" stroke-width="1.2" stroke-dasharray="4 3"/>'
+    )
+    layers.append(
+        f'<path class="ac" data-series="height" d="{path(height_pts)}" fill="none" '
+        f'stroke="{LIGHT["accent"]}" stroke-width="2"/>'
+    )
+
+    seen_drops = set()
+    for p in ride.points:
+        if p.drop is None or p.drop in seen_drops:
+            continue
+        seen_drops.add(p.drop)
+        x, y = x_at(p.distance_start_m), y_height(p.height_in)
+        layers.append(
+            f'<text class="tx" data-drop="{p.drop}" x="{x}" y="{round(y - 7, 1)}" '
+            f'text-anchor="middle" font-size="10" font-weight="600" '
+            f'fill="{LIGHT["text"]}">D{p.drop}</text>'
+        )
+
+    notes = []
+    if not ride.completed:
+        stop = ride.points[-1]
+        x, y = x_at(stop.distance_m), y_height(stop.height_in)
+        layers.append(
+            f'<path class="tx" data-series="stall" d="M{x - 5},{y - 5} L{x + 5},{y + 5} '
+            f'M{x - 5},{y + 5} L{x + 5},{y - 5}" stroke="{LIGHT["text"]}" '
+            f'stroke-width="2" fill="none"/>'
+        )
+        layers.append(
+            f'<text class="tx" x="{x}" y="{round(y + 18, 1)}" text-anchor="middle" '
+            f'font-size="10" fill="{LIGHT["text"]}">stalls here</text>'
+        )
+        notes.append(f"the train stalls on piece {stop.index + 1}")
+
+    top_mph = top_speed * MPH_PER_MS
+    drops = len(seen_drops)
+    subtitle = (
+        f"{round(ride.points[-1].distance_m)} m long, {climb_m:.1f} m of height, "
+        f"top speed {top_mph:.0f} mph, {drops} drop{'s' if drops != 1 else ''}"
+    )
+    if notes:
+        subtitle += ", " + ", ".join(notes)
+
+    return f"""<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" role="img" \
+style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,\
+'Helvetica Neue',Arial,sans-serif;background:{LIGHT["bg"]};">
+  <title>{_escape(title)}</title>
+  <desc>Side profile of a roller coaster: height along the ride as a solid line, \
+with the lift hill drawn heavier, and speed as a dashed line on the right-hand \
+scale. Drops are numbered where they start. {_escape(subtitle)}.</desc>
+  <style>{_THEME}</style>
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
+  <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
+{_escape(title)}</text>
+  <text class="ts" x="{left}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(subtitle)}</text>
+  <line class="ax" x1="{left}" y1="{top_pad}" x2="{left}" y2="{top_pad + plot_h}" \
+stroke="{LIGHT["border"]}" stroke-width="1"/>
+  <line class="ax" x1="{left}" y1="{top_pad + plot_h}" x2="{left + plot_w}" y2="{top_pad + plot_h}" \
+stroke="{LIGHT["border"]}" stroke-width="1"/>
+  <text class="ts" x="{left - 8}" y="{top_pad + head + 4}" text-anchor="end" font-size="10" \
+fill="{LIGHT["text_sec"]}">{hi_z * HEIGHT_UNIT_M:.0f} m</text>
+  <text class="ts" x="{left - 8}" y="{top_pad + plot_h}" text-anchor="end" font-size="10" \
+fill="{LIGHT["text_sec"]}">{lo_z * HEIGHT_UNIT_M:.0f} m</text>
+  <text class="ts" x="{left + plot_w + 6}" y="{top_pad + 4}" font-size="10" \
+fill="{LIGHT["text_sec"]}">{top_mph:.0f} mph</text>
+  <text class="ts" x="{left + plot_w + 6}" y="{top_pad + plot_h}" font-size="10" \
+fill="{LIGHT["text_sec"]}">0 mph</text>
+  <text class="ts" x="{left + plot_w + 6}" y="{top_pad + plot_h + 18}" font-size="10" \
+fill="{LIGHT["text_sec"]}">speed</text>
+  <text class="ts" x="{left}" y="{h - 16}" font-size="10" fill="{LIGHT["text_sec"]}">station</text>
+  <text class="ts" x="{left + plot_w}" y="{h - 16}" text-anchor="end" font-size="10" \
+fill="{LIGHT["text_sec"]}">{round(ride.points[-1].distance_m)} m</text>
+  <text class="ts" x="{left + plot_w / 2}" y="{h - 16}" text-anchor="middle" font-size="10" \
+fill="{LIGHT["text_sec"]}">distance along the ride</text>
+{chr(10).join("  " + layer for layer in layers)}
+</svg>
+"""
+
+
 def _empty_svg(title: str, reason: str) -> str:
     """Something renderable for a track or run with nothing in it.
 
@@ -305,6 +467,7 @@ style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto
   <title>{_escape(title)}</title>
   <desc>{_escape(reason)}</desc>
   <style>{_THEME}</style>
+  <rect class="bg" x="0" y="0" width="320" height="80" fill="{LIGHT["bg"]}"/>
   <text class="tx" x="16" y="32" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
 {_escape(title)}</text>
   <text class="ts" x="16" y="52" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(reason)}</text>

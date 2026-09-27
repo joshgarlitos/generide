@@ -8,11 +8,13 @@ Usage:
 
 import argparse
 import random
+import signal
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-from rct2 import physics, render, td6
+from rct2 import physics, render, runrecord, settings, td6
 from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve, evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
@@ -80,7 +82,7 @@ def create_ride_from_segments(
     )
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Evolve coaster tracks using genetic algorithm"
     )
@@ -228,6 +230,31 @@ def main():
         help="Calibration log path (default: <output>.oracle-log.jsonl)",
     )
 
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Id for this run's saved record. The web UI sets it so it knows "
+             "where the record is before the run starts (default: made from "
+             "the time and seed)",
+    )
+    parser.add_argument(
+        "--parent-run",
+        type=str,
+        default=None,
+        help="Id of the saved run this one reruns, kept so the two can be compared",
+    )
+    parser.add_argument(
+        "--no-record",
+        action="store_true",
+        help="Do not save this run to the run library (~/.generide/runs, or "
+             "$GENERIDE_HOME/runs)",
+    )
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.output is None:
@@ -255,6 +282,11 @@ def main():
             sys.exit(1)
         if args.oracle_log is None:
             args.oracle_log = args.output.with_suffix(".oracle-log.jsonl")
+
+    for flag, value in (("--run-id", args.run_id), ("--parent-run", args.parent_run)):
+        if value is not None and not runrecord.RUN_ID_PATTERN.fullmatch(value):
+            print(f"Error: {flag} is not a run id: {value!r}", file=sys.stderr)
+            sys.exit(1)
 
     # Setup RNG with seed
     if args.rng_seed is None:
@@ -329,10 +361,42 @@ def main():
     else:
         fitness_fn = ProxyFitness(max_width=request.max_width, max_depth=request.max_depth)
 
+    # Every run is saved to the library unless asked not to, so the web UI
+    # can show terminal runs alongside its own.
+    run_id = None
+    if not args.no_record:
+        record_request = settings.request_from_args(args)
+        record_request["seed"] = rng_seed
+        try:
+            run_id = runrecord.create_run(
+                run_id=args.run_id,
+                seed=rng_seed,
+                request=record_request,
+                settings=sys.argv[1:],
+                generations=args.generations,
+                parent=args.parent_run,
+            )
+        except FileExistsError:
+            print(f"Error: a saved run already has the id {args.run_id}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Run record: {runrecord.run_dir(run_id)}")
+
+    best_logged = []
+
+    def log_improvement(gen, individual):
+        best_logged[:] = [individual.fitness]
+        runrecord.append_improvement(run_id, {
+            "generation": gen,
+            "time": time.time(),
+            "fitness": individual.fitness,
+            "segments": list(individual.segments),
+            "parts": individual.parts,
+        })
+
     # Progress callback
     def progress(gen, pop):
+        best = pop.best()
         if args.verbose:
-            best = pop.best()
             valid = pop.valid_count()
             total = len(pop.individuals)
             if best:
@@ -341,6 +405,17 @@ def main():
                     f"avg={pop.average_fitness():7.1f}, "
                     f"valid={valid}/{total}"
                 )
+        if run_id is None or best is None:
+            return
+        runrecord.append_progress(run_id, {
+            "generation": gen,
+            "time": time.time(),
+            "best_fitness": best.fitness,
+            "avg_fitness": pop.average_fitness(),
+            "population": len(pop.individuals),
+        })
+        if not best_logged or best.fitness > best_logged[0]:
+            log_improvement(gen, best)
 
     print(f"Evolving for {args.generations} generations with population {args.population}")
     print(f"Mutation rate: {args.mutation_rate}")
@@ -363,7 +438,7 @@ def main():
         population_size=args.population,
         generations=args.generations,
         mutation_rate=args.mutation_rate,
-        progress_callback=progress if args.verbose else None,
+        progress_callback=progress if (args.verbose or run_id) else None,
     )
     if args.oracle_calibrate:
         from rct2.calibration_log import append_record
@@ -374,14 +449,45 @@ def main():
             oracle_rng_seed=rng_seed,
             oracle_log_writer=lambda record: append_record(args.oracle_log, record),
         )
-    stats = run(**run_kwargs)
+
+    # Ctrl-C in a terminal and Stop on the page (SIGTERM) both end the run at
+    # the next generation with its best ride so far. A second Ctrl-C quits
+    # at once.
+    stop_requested = []
+
+    def request_stop(signum, frame):
+        if stop_requested:
+            raise KeyboardInterrupt
+        stop_requested.append(signum)
+        print("\nStopping after this generation (Ctrl-C again to quit now)...",
+              file=sys.stderr)
+
+    previous_handlers = {
+        sig: signal.signal(sig, request_stop) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        stats = run(**run_kwargs, stop_check=lambda: bool(stop_requested))
+    except BaseException as exc:
+        if run_id is not None:
+            status = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
+            runrecord.finish_run(
+                run_id, status, result={"error": str(exc) or type(exc).__name__},
+            )
+        raise
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
     print()
-    print("Evolution complete!")
+    print("Stopped early." if stop_requested else "Evolution complete!")
     print(f"  Final best fitness: {stats.best_fitness:.1f}")
     print(f"  Generations run: {stats.generations}")
 
     best = stats.best_individual
+    if run_id is not None and (not best_logged or best.fitness > best_logged[0]):
+        # The progress callback runs before each generation breeds, so a new
+        # best from the final generation's offspring only shows up here.
+        log_improvement(stats.generations, best)
     print(f"  Best track length: {len(best.segments)} segments")
     print(f"  Best track valid: {best.is_valid()}")
 
@@ -410,13 +516,35 @@ def main():
         for issue in result.issues:
             print(f"    - {issue.code}: {issue.message}")
 
+    summary = None
+    if run_id is not None:
+        summary = runrecord.ride_summary(best.segments, args.max_width, args.max_depth)
+        summary.update(
+            fitness=best.fitness,
+            stopped_early=bool(stop_requested),
+            exported=result.valid,
+        )
+
     if not result.valid:
+        if run_id is not None:
+            runrecord.finish_run(
+                run_id, "failed", generations_run=stats.generations, result=summary,
+            )
         print("\nNo construction-valid track was found; nothing was exported.", file=sys.stderr)
         sys.exit(1)
 
     ride = create_ride_from_segments(best.segments, template_path)
     td6.save(ride, args.output)
     print(f"\nSaved evolved track to: {args.output}")
+
+    if run_id is not None:
+        td6.save(ride, runrecord.run_dir(run_id) / runrecord.BEST_TD6)
+        runrecord.finish_run(
+            run_id,
+            "stopped" if stop_requested else "completed",
+            generations_run=stats.generations,
+            result=summary,
+        )
 
     if args.oracle_calibrate:
         print(f"Saved oracle calibration log to: {args.oracle_log}")

@@ -318,3 +318,74 @@ def test_gforce_is_linear_in_speed_not_quadratic():
 
     assert slow_dynamic > 0
     assert fast_dynamic == pytest.approx(slow_dynamic * 2, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# simulate() must not move when it is rebuilt on top of trace(). The reference
+# was captured from simulate() before that refactor, for the sample ride and a
+# spread of generated tracks (completed and stalled), with each track's
+# segments stored alongside so the reference does not depend on generators.
+# ---------------------------------------------------------------------------
+
+REFERENCE = Path(__file__).parent / "data" / "simulate_reference.json"
+
+
+def _reference_cases():
+    import json
+
+    return json.loads(REFERENCE.read_text())
+
+
+def _lifts(case):
+    return None if case["lift_indices"] is None else set(case["lift_indices"])
+
+
+@pytest.mark.parametrize("case", _reference_cases(), ids=lambda c: c["name"])
+def test_simulate_matches_recorded_reference_exactly(case):
+    from dataclasses import asdict
+
+    assert asdict(simulate(case["segments"], _lifts(case))) == case["stats"]
+
+
+@pytest.mark.parametrize("case", _reference_cases(), ids=lambda c: c["name"])
+def test_trace_agrees_with_simulate(case):
+    stats = simulate(case["segments"], _lifts(case))
+    ride = physics.trace(case["segments"], _lifts(case))
+
+    assert ride.completed == stats.completed
+    assert ride.stall_index == stats.stall_index
+    if stats.completed:
+        # One point per piece, and the last one ends where the ride does.
+        assert len(ride.points) == len(case["segments"])
+        assert ride.points[-1].distance_m == stats.ride_length
+    else:
+        # The trace ends on the piece where the train stops.
+        assert len(ride.points) == stats.stall_index + 1
+        assert ride.points[-1].index == stats.stall_index
+        assert ride.points[-1].stalled
+        assert ride.points[-1].speed_out == 0.0
+
+    drops = {p.drop for p in ride.points if p.drop is not None}
+    assert len(drops) == stats.drop_count
+
+
+def test_trace_points_chain_distance_height_and_speed():
+    track = make_hill(4, 4) + [FLAT]
+    ride = physics.trace(track, lift_indices=set(range(6)))
+
+    for before, after in zip(ride.points, ride.points[1:]):
+        assert after.distance_start_m == before.distance_m
+        assert after.height_in == before.height_out
+        assert after.speed_in == before.speed_out
+    assert all(p.on_lift for p in ride.points[:6])
+    assert not any(p.on_lift for p in ride.points[6:])
+    # The hill's way down is one counted drop, and only those pieces carry it.
+    assert [p.drop for p in ride.points[6:12]] == [1] * 6
+    assert ride.points[0].height_in == 0
+    assert ride.points[5].height_out == max(p.height_out for p in ride.points)
+
+
+def test_trace_of_empty_track_is_empty_and_complete():
+    ride = physics.trace([])
+    assert ride.points == []
+    assert ride.completed

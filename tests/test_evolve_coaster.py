@@ -133,3 +133,197 @@ class TestOracleCalibrateFlag:
         out = capsys.readouterr().out
         assert "Oracle calibration enabled: up to 10 calls" in out
         assert "900s" in out
+
+
+# ---------------------------------------------------------------------------
+# Run records (U4). These run the real evolution, kept tiny, because what is
+# under test is what the CLI writes from a real run.
+# ---------------------------------------------------------------------------
+
+import hashlib
+import os
+import signal
+
+from rct2 import runrecord, td6
+
+
+def _real_cli(monkeypatch, tmp_path, *extra):
+    output_path = tmp_path / "out.td6"
+    monkeypatch.setattr(sys, "argv", [
+        "evolve_coaster.py", "--output", str(output_path), *extra,
+    ])
+    evolve_coaster.main()
+    return output_path
+
+
+def _only_run():
+    (record,) = runrecord.list_runs()
+    return runrecord.load_run(record["id"])
+
+
+class TestRunRecord:
+    def test_a_cli_run_writes_a_complete_record(self, monkeypatch, tmp_path, capsys):
+        """Covers AE8: a terminal run lands in the library like any other."""
+        _real_cli(monkeypatch, tmp_path, "-g", "6", "-p", "8", "--rng-seed", "3",
+                  "--fitness", "physics", "--target-intensity", "2:6")
+
+        run = _only_run()
+        rec = run.record
+        assert rec["status"] == "completed"
+        assert rec["seed"] == 3
+        assert rec["generations_planned"] == 6
+        assert rec["generations_run"] == 6
+        assert rec["pid"] == os.getpid()
+        assert rec["request"]["fitness"] == "physics"
+        assert rec["request"]["target_intensity"] == [2.0, 6.0]
+        assert rec["request"]["seed"] == 3
+        assert "--target-intensity" in rec["settings"]
+        assert [p["generation"] for p in run.progress] == list(range(6))
+        assert {"time", "best_fitness", "avg_fitness", "population"} <= set(run.progress[0])
+        assert run.improvements
+        assert (run.directory / "best.td6").exists()
+        result = rec["result"]
+        assert result["valid"] is True
+        assert set(result["estimated"]) == {"excitement", "intensity", "nausea"}
+        assert result["footprint"]["max_width"] == 30
+        assert result["stats"]["ride_length"] > 0
+        assert str(run.directory) in capsys.readouterr().out
+
+    def test_a_blank_seed_is_recorded_as_the_one_used(self, monkeypatch, tmp_path, capsys):
+        _real_cli(monkeypatch, tmp_path, "-g", "2", "-p", "4")
+        out = capsys.readouterr().out
+        rec = _only_run().record
+        assert f"RNG seed: {rec['seed']}" in out
+        assert rec["request"]["seed"] == rec["seed"]
+
+    @pytest.mark.parametrize("args,digest", [
+        (["-g", "10", "-p", "12", "--rng-seed", "21", "--fitness", "physics"],
+         "dcca17515b2780c02f22006b08ef6c37a731dcc7c7a843918486f0a9a43fb986"),
+        (["-g", "10", "-p", "12", "--rng-seed", "8", "--fitness", "proxy"],
+         "d48f9f35d8f5e58c1d124687610266ae30016a3ce8af84dd6a5983458788c978"),
+    ])
+    def test_output_bytes_are_unchanged_for_a_fixed_seed(self, monkeypatch, tmp_path, args, digest):
+        """Digests recorded from the CLI before run records existed."""
+        output = _real_cli(monkeypatch, tmp_path, *args)
+        assert hashlib.sha256(output.read_bytes()).hexdigest() == digest
+        run = _only_run()
+        assert (run.directory / "best.td6").read_bytes() == output.read_bytes()
+
+    def test_no_record_writes_nothing_under_generide_home(
+        self, monkeypatch, tmp_path, isolated_generide_home, capsys,
+    ):
+        output = _real_cli(monkeypatch, tmp_path, "-g", "2", "-p", "4", "--no-record")
+        assert output.exists()
+        assert not isolated_generide_home.exists()
+        assert "Run record" not in capsys.readouterr().out
+
+    def test_last_improvement_is_the_exported_track(self, monkeypatch, tmp_path):
+        output = _real_cli(monkeypatch, tmp_path, "-g", "8", "-p", "10", "--rng-seed", "21",
+                           "--fitness", "physics")
+        run = _only_run()
+        exported = [e.segment_type for e in td6.load(output).elements]
+        assert run.improvements[-1]["segments"] == exported
+        fitnesses = [i["fitness"] for i in run.improvements]
+        assert fitnesses == sorted(fitnesses)
+        assert run.improvements[-1]["fitness"] == pytest.approx(run.record["result"]["fitness"])
+
+    def test_final_generation_best_is_logged_even_though_no_callback_saw_it(
+        self, monkeypatch, tmp_path,
+    ):
+        """The progress callback runs before each generation breeds, so a new
+        best from the last generation's offspring only exists in the result."""
+        better = create_hill_circuit()
+
+        def run(**kwargs):
+            population = type("P", (), {})()
+            seed_ind = Individual(segments=create_hill_circuit(), fitness=1.0)
+            population.individuals = [seed_ind]
+            population.best = lambda: seed_ind
+            population.average_fitness = lambda: 1.0
+            population.valid_count = lambda: 1
+            kwargs["progress_callback"](0, population)
+            return EvolutionStats(
+                generations=1, best_fitness=5.0,
+                best_individual=Individual(segments=better, fitness=5.0),
+                fitness_history=[1.0], valid_ratio_history=[1.0],
+            )
+
+        monkeypatch.setattr(evolve_coaster, "evolve_parts", run)
+        _real_cli(monkeypatch, tmp_path, "-g", "1", "-p", "4")
+        improvements = _only_run().improvements
+        assert [i["fitness"] for i in improvements] == [1.0, 5.0]
+        assert improvements[-1]["segments"] == better
+
+    def test_parent_run_is_stored(self, monkeypatch, tmp_path):
+        _real_cli(monkeypatch, tmp_path, "-g", "2", "-p", "4",
+                  "--parent-run", "20260926T100000Z-s1")
+        assert _only_run().record["parent"] == "20260926T100000Z-s1"
+
+    def test_run_id_from_the_caller_is_used(self, monkeypatch, tmp_path):
+        _real_cli(monkeypatch, tmp_path, "-g", "2", "-p", "4",
+                  "--run-id", "20260927T120000Z-s77")
+        assert _only_run().record["id"] == "20260927T120000Z-s77"
+
+    @pytest.mark.parametrize("flag", ["--run-id", "--parent-run"])
+    def test_malformed_ids_are_refused(self, monkeypatch, tmp_path, flag):
+        monkeypatch.setattr(sys, "argv", [
+            "evolve_coaster.py", "--output", str(tmp_path / "o.td6"), flag, "../escape",
+        ])
+        with pytest.raises(SystemExit):
+            evolve_coaster.main()
+        assert runrecord.list_runs() == []
+
+    def test_a_stop_mid_run_finishes_as_stopped(self, monkeypatch, tmp_path):
+        """Covers AE3: SIGTERM (what the page's Stop sends) ends the run at
+        the next generation with its best ride exported and recorded."""
+        real_evolve_parts = evolve_coaster.evolve_parts
+
+        def run(**kwargs):
+            callback = kwargs["progress_callback"]
+
+            def stop_at_three(gen, population):
+                callback(gen, population)
+                if gen == 3:
+                    os.kill(os.getpid(), signal.SIGTERM)
+
+            kwargs["progress_callback"] = stop_at_three
+            return real_evolve_parts(**kwargs)
+
+        monkeypatch.setattr(evolve_coaster, "evolve_parts", run)
+        output = _real_cli(monkeypatch, tmp_path, "-g", "40", "-p", "8", "--rng-seed", "21",
+                           "--fitness", "physics")
+        run_ = _only_run()
+        assert run_.record["status"] == "stopped"
+        assert run_.record["generations_run"] == 3
+        assert run_.record["generations_planned"] == 40
+        assert output.exists()
+        assert (run_.directory / "best.td6").exists()
+        # The handler is removed again once the run is over.
+        assert signal.getsignal(signal.SIGTERM) in (signal.SIG_DFL, None)
+
+    def test_no_valid_ride_finishes_as_failed_and_exits_1(self, monkeypatch, tmp_path):
+        broken = [0x00, 0x00, 0x00]
+
+        def run(**kwargs):
+            population = type("P", (), {})()
+            ind = Individual(segments=broken, fitness=-100.0)
+            population.individuals = [ind]
+            population.best = lambda: ind
+            population.average_fitness = lambda: -100.0
+            population.valid_count = lambda: 0
+            kwargs["progress_callback"](0, population)
+            return EvolutionStats(
+                generations=1, best_fitness=-100.0, best_individual=ind,
+                fitness_history=[-100.0], valid_ratio_history=[0.0],
+            )
+
+        monkeypatch.setattr(evolve_coaster, "evolve_parts", run)
+        with pytest.raises(SystemExit) as exc:
+            _real_cli(monkeypatch, tmp_path, "-g", "1", "-p", "4")
+        assert exc.value.code == 1
+        run_ = _only_run()
+        assert run_.record["status"] == "failed"
+        assert run_.record["result"]["valid"] is False
+        assert run_.improvements
+        assert not (run_.directory / "best.td6").exists()
+        assert not (tmp_path / "out.td6").exists()

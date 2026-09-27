@@ -195,6 +195,7 @@ def evolve(
     elitism: int = 2,
     tournament_size: int = 3,
     progress_callback: Optional[Callable[[int, Population], None]] = None,
+    stop_check: Optional[Callable[[], bool]] = None,
 ) -> EvolutionStats:
     """Run genetic algorithm to evolve optimal tracks.
 
@@ -208,6 +209,10 @@ def evolve(
         elitism: Number of best individuals to preserve each generation
         tournament_size: Number of candidates for tournament selection
         progress_callback: Optional callback(generation, population) for progress
+        stop_check: Optional callable consulted once per generation, right
+            after the progress callback. When it returns True the run ends
+            there and returns the best of the current population, with
+            `generations` set to the number of generations actually bred.
 
     Returns:
         EvolutionStats with best individual and history
@@ -223,6 +228,7 @@ def evolve(
 
     fitness_history = []
     valid_ratio_history = []
+    generations_run = generations
 
     for gen in range(generations):
         # Record statistics
@@ -237,6 +243,10 @@ def evolve(
         # Progress callback
         if progress_callback:
             progress_callback(gen, population)
+
+        if stop_check is not None and stop_check():
+            generations_run = gen
+            break
 
         # Sort by fitness (descending)
         population.individuals.sort(key=lambda ind: ind.fitness, reverse=True)
@@ -263,7 +273,7 @@ def evolve(
     # Final statistics
     best = population.best()
     return EvolutionStats(
-        generations=generations,
+        generations=generations_run,
         best_fitness=best.fitness if best else 0.0,
         best_individual=best if best else Individual(segments=seed),
         fitness_history=fitness_history,
@@ -518,6 +528,7 @@ def evolve_parts(
     oracle_rng_seed: Optional[int] = None,
     oracle_scorer: Optional[Callable[[list[int]], Any]] = None,
     oracle_log_writer: Optional[Callable[[Any], None]] = None,
+    stop_check: Optional[Callable[[], bool]] = None,
 ) -> EvolutionStats:
     """Part-based counterpart to `evolve`.
 
@@ -560,6 +571,10 @@ def evolve_parts(
         oracle_log_writer: Callable(CalibrationRecord) -> None. Required
             when `oracle_interval` is set -- the log path is the caller's
             decision, not something this function invents.
+        stop_check: Optional callable consulted once per generation, right
+            after the progress callback. When it returns True the run ends
+            there and returns the best of the current population, with
+            `generations` set to the number of generations actually bred.
 
     Returns:
         EvolutionStats with best individual and history
@@ -582,6 +597,7 @@ def evolve_parts(
     fitness_history = []
     valid_ratio_history = []
     oracle_calls_made = 0
+    generations_run = generations
 
     for gen in range(generations):
         best = population.best()
@@ -595,6 +611,10 @@ def evolve_parts(
 
         if progress_callback:
             progress_callback(gen, population)
+
+        if stop_check is not None and stop_check():
+            generations_run = gen
+            break
 
         if oracle_interval:
             scorer = oracle_scorer or _default_oracle_scorer
@@ -621,7 +641,7 @@ def evolve_parts(
 
     best = population.best()
     return EvolutionStats(
-        generations=generations,
+        generations=generations_run,
         best_fitness=best.fitness if best else 0.0,
         best_individual=best if best else Individual(segments=seed, parts=seed_parts),
         fitness_history=fitness_history,

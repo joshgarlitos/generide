@@ -648,3 +648,59 @@ class TestEdgeCases:
         rng = random.Random(42)
         stats = evolve(seed, rng, generations=1, population_size=10)
         assert len(stats.fitness_history) == 1
+
+
+class TestStopCheck:
+    """Cooperative stop: a caller can end a run at a generation boundary."""
+
+    @pytest.mark.parametrize("engine,seed_fn", [
+        (evolve, create_simple_circuit),
+        (evolve_parts, create_hill_circuit),
+    ])
+    def test_stop_at_generation_five_reports_generations_actually_run(self, engine, seed_fn):
+        seen = []
+
+        def spy(gen, population):
+            seen.append((gen, population.best()))
+
+        stats = engine(
+            seed_fn(), random.Random(3), population_size=10, generations=50,
+            progress_callback=spy, stop_check=lambda: len(seen) > 5,
+        )
+
+        assert stats.generations == 5
+        # The best comes from the population the run held when it stopped.
+        assert stats.best_individual is seen[-1][1]
+        assert stats.best_fitness == seen[-1][1].fitness
+
+    @pytest.mark.parametrize("engine,seed_fn", [
+        (evolve, create_simple_circuit),
+        (evolve_parts, create_hill_circuit),
+    ])
+    def test_stop_check_that_never_fires_changes_nothing(self, engine, seed_fn):
+        plain = engine(seed_fn(), random.Random(9), population_size=8, generations=6)
+        checked = engine(
+            seed_fn(), random.Random(9), population_size=8, generations=6,
+            stop_check=lambda: False,
+        )
+
+        assert checked.generations == plain.generations == 6
+        assert checked.best_individual.segments == plain.best_individual.segments
+        assert checked.fitness_history == plain.fitness_history
+        assert checked.valid_ratio_history == plain.valid_ratio_history
+
+    @pytest.mark.parametrize("engine,seed_fn", [
+        (evolve, create_simple_circuit),
+        (evolve_parts, create_hill_circuit),
+    ])
+    def test_stop_before_first_generation_returns_seed_population_best(self, engine, seed_fn):
+        first = []
+        stats = engine(
+            seed_fn(), random.Random(4), population_size=6, generations=20,
+            progress_callback=lambda gen, pop: first.append(pop.best()),
+            stop_check=lambda: True,
+        )
+
+        assert stats.generations == 0
+        assert len(first) == 1
+        assert stats.best_individual is first[0]
