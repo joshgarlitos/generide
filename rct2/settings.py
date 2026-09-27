@@ -377,7 +377,9 @@ def request_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         if s.kind == "window":
             value = _parse_window(value)
         elif s.kind == "path" and value is not None:
-            value = str(value)
+            # "simple" is the CLI's name for the generated loop, which is
+            # what the page means by no seed track.
+            value = None if value == "simple" else str(value)
         request[s.key] = value
     return request
 

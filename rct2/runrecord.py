@@ -27,7 +27,7 @@ import os
 import re
 import shutil
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -374,6 +374,44 @@ def display_name(record: Dict[str, Any]) -> str:
     except ValueError:
         stamp = record.get("id", "")
     return f"{stamp}, seed {record.get('seed')}"
+
+
+def ride_summary(
+    segments: List[int],
+    max_width: Optional[int] = None,
+    max_depth: Optional[int] = None,
+) -> Dict[str, Any]:
+    """What the result view shows for a track: validity, stats, estimates.
+
+    Everything here is generide's own model, which is not calibrated against
+    the game, so every rating lands under "estimated" and never beside a
+    game-checked number without that label.
+    """
+    from rct2 import construction, physics, render
+
+    validation = construction.validate_construction(
+        segments, max_width=max_width, max_depth=max_depth,
+    )
+    lifts = set(validation.lift_indices)
+    stats = physics.simulate(segments, lift_indices=lifts)
+    ratings = physics.rate(stats)
+    plan = render.plan_track(segments)
+    return {
+        "segments": len(segments),
+        "valid": validation.valid,
+        "issues": [{"code": i.code, "message": i.message} for i in validation.issues],
+        "completed": stats.completed,
+        "stall_index": stats.stall_index,
+        "lift_indices": sorted(lifts),
+        "stats": asdict(stats),
+        "estimated": asdict(ratings),
+        "footprint": {
+            "width": plan.width_tiles if plan.tiles else 0,
+            "depth": plan.depth_tiles if plan.tiles else 0,
+            "max_width": max_width,
+            "max_depth": max_depth,
+        },
+    }
 
 
 def time_remaining(progress: List[Dict[str, Any]], generations_planned: int) -> Optional[float]:

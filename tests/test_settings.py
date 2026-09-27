@@ -174,3 +174,8 @@ class TestRerun:
         assert values["generations"] == 12
         assert values["fitness"] == "physics"
         assert values["max_width"] == 30
+
+    def test_the_cli_simple_seed_means_no_seed_track(self):
+        stored = request_from_args(_parser().parse_args(["--seed", "simple"]))
+        assert stored["seed_track"] is None
+        assert validate(form_values(stored)).ok
