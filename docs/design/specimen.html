@@ -1,0 +1,327 @@
+<title>generide Window Kit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Specimen layout only. Every colour and component comes from tokens.css. */
+  html, body { min-height: 100%; }
+  body { margin: 0; background: var(--desktop); }
+  .page { display: flex; flex-direction: column; gap: var(--space-4); padding-block: 0 var(--space-6); }
+  .top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+  .brand {
+    display: inline-flex; align-items: center; gap: var(--space-2);
+    padding: 0 var(--space-3); font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700;
+    color: var(--ink-light); text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
+  }
+  .grid {
+    display: grid; gap: var(--space-4); padding-inline: var(--space-4);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    align-items: start;
+  }
+  .span-2 { grid-column: span 2; }
+  @media (max-width: 760px) { .span-2 { grid-column: auto; } }
+  .intro { max-width: 68ch; font-size: var(--text-read); line-height: 1.6; }
+  .intro p { margin: 0 0 var(--space-2); }
+  .intro code, .well code { font-family: var(--font-code); font-size: 0.92em; }
+  .form-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+  .two { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+  .graph svg { display: block; width: 100%; height: auto; }
+  .graph text { font-family: var(--font-ui); font-size: 10px; }
+  .graph svg { max-width: 760px; }
+  .legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--text-sm); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+  .legend i { display: inline-block; width: 14px; height: 4px; margin-right: var(--space-1); vertical-align: middle; }
+  .ramps { display: grid; gap: var(--space-2); }
+  .ramp { display: grid; grid-template-columns: 88px repeat(12, minmax(0, 1fr)); align-items: center; gap: 0; font-size: var(--text-xs); }
+  .ramp span:first-child { padding-right: var(--space-2); }
+  .ramp b { display: block; height: 22px; }
+  .ramp b.use { outline: 2px solid #000; outline-offset: -2px; box-shadow: inset 0 0 0 4px #fff; }
+  .type-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: var(--space-1) 0; border-bottom: 1px solid var(--well-lo); }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row small { font-size: var(--text-xs); color: var(--well-quiet); }
+  .ticker-wrap { padding-inline: var(--space-4); }
+  .foot { position: sticky; bottom: 0; z-index: 5; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .sprite-dot { width: 12px; height: 12px; background: var(--yellow-8); box-shadow: inset 2px 2px 0 var(--yellow-10), inset -2px -2px 0 var(--yellow-4); flex: none; }
+  .example { font-size: var(--text-xs); font-style: italic; }
+</style>
+
+<div class="desktop page">
+
+  <header class="top c-grey outset">
+    <nav class="toolbar" aria-label="Main">
+      <span class="brand">generide</span>
+      <div class="toolgroup c-brown">
+        <a class="btn" href="#new" aria-current="page">New run</a>
+      </div>
+      <div class="toolgroup c-bordeaux">
+        <a class="btn" href="#library">Library</a>
+        <a class="btn" href="#compare">Compare</a>
+      </div>
+      <div class="toolgroup c-lightblue">
+        <a class="btn" href="#kit">Palette</a>
+      </div>
+    </nav>
+  </header>
+
+  <div class="grid">
+
+    <section class="win c-lightblue span-2" id="kit" aria-labelledby="kit-title">
+      <h1 class="win-caption" id="kit-title">generide window kit</h1>
+      <div class="win-body intro">
+        <p>This page shows every component in <code>docs/design/tokens.css</code>, dressed as generide's own screens. The look follows RollerCoaster Tycoon 2: bevelled windows on a park backdrop, one colour per kind of window, and square corners throughout.</p>
+        <p>All ride numbers on this page are example data. The window colours come from the game's 256-colour palette as published in OpenRCT2's source.</p>
+      </div>
+    </section>
+
+    <!-- Construction window: brown, like the game's ride construction window. -->
+    <section class="win c-brown" id="new" aria-labelledby="new-title">
+      <h2 class="win-caption" id="new-title">New run</h2>
+      <button class="btn btn-icon win-close" type="button" aria-label="Close New run">&#x2715;</button>
+      <form class="win-body" onsubmit="event.preventDefault()">
+        <fieldset class="groupbox">
+          <legend>Footprint</legend>
+          <div class="form-grid">
+            <div class="field">
+              <label class="label" for="fw">Footprint width</label>
+              <div class="spinner">
+                <input class="input" id="fw" type="text" inputmode="numeric" value="30">
+                <button class="btn" type="button" aria-label="Decrease footprint width">&#x25BC;</button>
+                <button class="btn" type="button" aria-label="Increase footprint width">&#x25B2;</button>
+              </div>
+              <p class="hint">Tiles, 10 to 60.</p>
+            </div>
+            <div class="field">
+              <label class="label" for="fd">Footprint depth</label>
+              <div class="spinner">
+                <input class="input" id="fd" type="text" inputmode="numeric" value="30">
+                <button class="btn" type="button" aria-label="Decrease footprint depth">&#x25BC;</button>
+                <button class="btn" type="button" aria-label="Increase footprint depth">&#x25B2;</button>
+              </div>
+              <p class="hint">Tiles, 10 to 60.</p>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset class="groupbox">
+          <legend>Search</legend>
+          <div class="form-grid">
+            <div class="field">
+              <label class="label" for="gens">Generations</label>
+              <input class="input" id="gens" type="text" inputmode="numeric" value="100">
+            </div>
+            <div class="field">
+              <label class="label" for="scoring">Scoring</label>
+              <div class="select-wrap">
+                <select class="select" id="scoring">
+                  <option>Game ratings (transcribed)</option>
+                  <option>Fitted weights</option>
+                  <option>Geometry only</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <label class="check" for="cal"><input type="checkbox" id="cal" checked> Calibrate against the game</label>
+        </fieldset>
+        <div class="actions">
+          <button class="btn c-green" type="submit">Start run</button>
+          <button class="btn" type="button">Reset to defaults</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Ride window: grey frame, bordeaux page, green main action. -->
+    <section class="win c-grey" aria-labelledby="ride-title">
+      <h2 class="win-caption" id="ride-title">Mine Train 1, seed 4812</h2>
+      <button class="btn btn-icon win-close" type="button" aria-label="Close Mine Train 1">&#x2715;</button>
+      <div class="tabs" role="tablist" aria-label="Ride">
+        <button class="tab" role="tab" aria-selected="false" type="button">Plan</button>
+        <button class="tab" role="tab" aria-selected="true" type="button">Ratings</button>
+        <button class="tab" role="tab" aria-selected="false" type="button">Graphs</button>
+      </div>
+      <div class="win-body win-page c-bordeaux" role="tabpanel" aria-label="Ratings">
+        <dl class="stats">
+          <div class="stat"><dt>Excitement rating</dt><dd><b>5.27</b> <span class="estimate">estimate</span></dd></div>
+          <div class="stat"><dt>Intensity rating</dt><dd><b>4.61</b> <span class="estimate">estimate</span></dd></div>
+          <div class="stat"><dt>Nausea rating</dt><dd><b>3.02</b> <span class="estimate">estimate</span></dd></div>
+          <div class="stat"><dt>Excitement rating</dt><dd><b>5.19</b> <span class="from-game">GAME</span></dd></div>
+        </dl>
+        <dl class="stats">
+          <div class="stat"><dt>Max. speed</dt><dd><b>46</b> mph</dd></div>
+          <div class="stat"><dt>Highest drop</dt><dd><b>22.0</b> m</dd></div>
+          <div class="stat"><dt>Max. vertical g</dt><dd><b>3.41</b> g</dd></div>
+          <div class="stat"><dt>Pieces</dt><dd><b>98</b></dd></div>
+        </dl>
+        <div class="actions">
+          <button class="btn c-green" type="button">Check in game</button>
+          <button class="btn" type="button">Install</button>
+          <button class="btn" type="button">Rerun with a change</button>
+        </div>
+        <p class="example">Example data.</p>
+      </div>
+    </section>
+
+    <!-- Graph well: dark in both schemes, like the game's ride graphs. -->
+    <section class="win c-grey span-2" aria-labelledby="graph-title">
+      <h2 class="win-caption" id="graph-title">Side profile</h2>
+      <div class="win-body">
+        <figure class="well well-graph graph" style="margin:0">
+          <svg viewBox="0 0 600 200" role="img" aria-labelledby="graph-desc">
+            <desc id="graph-desc">Example side profile. Height climbs on the lift hill to 28 m, then drops to 6 m. Speed peaks at 46 mph at the bottom of the first drop.</desc>
+            <rect x="0" y="0" width="600" height="200" fill="var(--graph-bg)"/>
+            <g stroke="var(--graph-grid)" stroke-width="1" shape-rendering="crispEdges">
+              <line x1="40" y1="16" x2="520" y2="16"/><line x1="40" y1="53.5" x2="520" y2="53.5"/>
+              <line x1="40" y1="91" x2="520" y2="91"/><line x1="40" y1="128.5" x2="520" y2="128.5"/>
+              <line x1="40" y1="166" x2="520" y2="166"/>
+              <line x1="136" y1="16" x2="136" y2="166"/><line x1="232" y1="16" x2="232" y2="166"/>
+              <line x1="328" y1="16" x2="328" y2="166"/><line x1="424" y1="16" x2="424" y2="166"/>
+            </g>
+            <rect x="78.4" y="16" width="105.6" height="150" fill="var(--trace-lift)" opacity="0.14"/>
+            <polyline fill="none" stroke="var(--trace-height)" stroke-width="2" stroke-linejoin="miter" points="40.0,156.0 78.4,156.0 83.2,150.1 184.0,26.0 188.8,44.3 212.8,136.0 222.4,119.8 236.8,99.2 251.2,87.5 260.8,86.2 275.2,94.1 289.6,112.2 304.0,136.0 318.4,111.7 328.0,106.0 342.4,118.4 352.0,136.0 366.4,111.7 376.0,106.0 390.4,118.4 400.0,136.0 424.0,132.3 448.0,137.3 472.0,151.0 520.0,156.0"/>
+            <polyline fill="none" stroke="var(--trace-speed)" stroke-width="2" stroke-linejoin="miter" points="40.0,143.6 73.6,143.6 78.4,138.0 179.2,138.0 184.0,141.2 188.8,112.7 198.4,81.2 212.8,50.1 227.2,64.0 241.6,75.8 260.8,82.2 280.0,75.7 304.0,58.7 318.4,71.9 328.0,75.6 342.4,70.5 352.0,63.0 366.4,75.6 376.0,79.3 390.4,74.3 400.0,67.1 424.0,70.7 448.0,70.5 472.0,90.0 496.0,120.0 520.0,143.6"/>
+            <g fill="var(--graph-axis)">
+              <text x="34" y="20" text-anchor="end">30 m</text>
+              <text x="34" y="170" text-anchor="end">0</text>
+              <text x="526" y="20">60 mph</text>
+              <text x="526" y="170">0</text>
+              <text x="40" y="188">Station</text>
+              <text x="131" y="188" text-anchor="middle">Lift hill</text>
+              <text x="520" y="188" text-anchor="end">Station</text>
+            </g>
+          </svg>
+          <ul class="legend">
+            <li><i style="background:var(--trace-height)"></i>Height (m)</li>
+            <li><i style="background:var(--trace-speed)"></i>Speed (mph)</li>
+            <li><i style="background:var(--trace-lift)"></i>Chain lift</li>
+          </ul>
+        </figure>
+        <p class="example">Example data.</p>
+      </div>
+    </section>
+
+    <!-- Ride list: grey frame, bordeaux page, list in a well. -->
+    <section class="win c-grey span-2" id="library" aria-labelledby="lib-title">
+      <h2 class="win-caption" id="lib-title">Run library</h2>
+      <div class="win-body win-page c-bordeaux">
+        <div class="well well-scroll">
+          <table class="table">
+            <thead>
+              <tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col" class="num">Footprint</th><th scope="col" class="num">Pieces</th><th scope="col" class="num">Excitement</th><th scope="col" class="num">Game</th></tr>
+            </thead>
+            <tbody>
+              <tr aria-selected="true"><td>Mine Train 1, seed 4812</td><td>Completed</td><td class="num">30 &times; 30</td><td class="num">98</td><td class="num">5.27</td><td class="num">5.19</td></tr>
+              <tr><td>Tight box, seed 4812</td><td>Completed</td><td class="num">10 &times; 20</td><td class="num">56</td><td class="num">2.37</td><td class="num">n/a</td></tr>
+              <tr><td>Long lift test, seed 77</td><td>Stopped early</td><td class="num">40 &times; 24</td><td class="num">112</td><td class="num">4.88</td><td class="num">n/a</td></tr>
+              <tr><td>Steep drops, seed 9</td><td>Failed</td><td class="num">20 &times; 20</td><td class="num">n/a</td><td class="num">n/a</td><td class="num">n/a</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="actions">
+          <button class="btn" type="button" id="compare">Compare 2 runs</button>
+          <button class="btn" type="button">Delete</button>
+        </div>
+        <p class="example">Example data.</p>
+      </div>
+    </section>
+
+    <!-- Live progress: dark green, like the status bar and park panels. -->
+    <section class="win c-darkgreen" aria-labelledby="live-title">
+      <h2 class="win-caption" id="live-title">Running: generation 64 of 100</h2>
+      <div class="win-body">
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="64" aria-label="Generations done"><span style="width:64%"></span></div>
+        <dl class="stats">
+          <div class="stat"><dt>Best score</dt><dd><b>0.812</b> <span class="qual">(held for 6 generations)</span></dd></div>
+          <div class="stat"><dt>Time left</dt><dd><b>1m 12s</b></dd></div>
+        </dl>
+        <div class="actions"><button class="btn" type="button">Stop and keep best ride</button></div>
+      </div>
+    </section>
+
+    <!-- Game-confirmed result: yellow, the colour for numbers the game gave us. -->
+    <section class="win c-yellow" aria-labelledby="game-title">
+      <h2 class="win-caption" id="game-title">Checked in OpenRCT2</h2>
+      <div class="win-body">
+        <dl class="stats">
+          <div class="stat"><dt>Excitement rating</dt><dd><b>5.19</b></dd></div>
+          <div class="stat"><dt>Intensity rating</dt><dd><b>4.70</b></dd></div>
+          <div class="stat"><dt>Nausea rating</dt><dd><b>3.11</b></dd></div>
+        </dl>
+        <p class="hint">The headless game built the track piece by piece and rated it. Estimate was 0.08 higher.</p>
+      </div>
+    </section>
+
+    <!-- Prompt: bordeaux, centred, like the game's error and demolish prompts. -->
+    <section class="win c-bordeaux prompt" role="alertdialog" aria-labelledby="del-title" aria-describedby="del-desc">
+      <h2 class="win-caption" id="del-title">Delete run</h2>
+      <div class="win-body">
+        <p id="del-desc" style="margin:0">Delete "Steep drops, seed 9" and its saved tracks? You can't undo this.</p>
+        <div class="actions">
+          <button class="btn" type="button">Delete run</button>
+          <button class="btn" type="button">Keep it</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="win c-lightblue span-2" aria-labelledby="pal-title">
+      <h2 class="win-caption" id="pal-title">Palette ramps</h2>
+      <div class="win-body">
+        <div class="well">
+          <div class="ramps" id="ramps"></div>
+        </div>
+        <p class="hint">Outlined steps are the ones windows use: caption (3), shadow (5), fill (7), highlight (8), well (10). Bordeaux and light blue use step 11 for wells; yellow and green shift their fill darker so black text stays readable.</p>
+      </div>
+    </section>
+
+    <section class="win c-grey" aria-labelledby="type-title">
+      <h2 class="win-caption" id="type-title">Type</h2>
+      <div class="win-body">
+        <div class="well">
+          <div class="type-row"><span style="font-family:var(--font-display);font-size:var(--text-xl);font-weight:700">Window title</span><small>Display, 20 px</small></div>
+          <div class="type-row"><span style="font-size:var(--text-lg)">Section heading</span><small>UI, 16 px</small></div>
+          <div class="type-row"><span>Excitement rating: 5.27</span><small>UI, 13 px</small></div>
+          <div class="type-row"><span style="font-size:var(--text-sm)">Tiles, 10 to 60.</span><small>Hint, 12 px</small></div>
+          <div class="type-row"><code style="font-family:var(--font-code)">python generide_web.py</code><small>Code, 13 px</small></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="foot">
+    <div class="ticker" role="status">
+      <span class="sprite-dot" aria-hidden="true"></span>
+      <span class="when">14:02</span>
+      <span>New best ride in <b>Mine Train 1</b>: excitement 5.27, 98 pieces.</span>
+    </div>
+    <div class="statusbar c-darkgreen outset">
+      <span>1 run active</span>
+      <span>Generation 64 of 100</span>
+      <span>Library: 4 runs</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Draw the ramp swatches from the CSS variables, so the page can't drift
+  // from tokens.css.
+  (function () {
+    const ramps = ["grey", "bordeaux", "brown", "darkgreen", "lightblue", "yellow", "green"];
+    const used = { default: [3, 5, 7, 8, 10], bordeaux: [3, 5, 7, 8, 11], lightblue: [3, 5, 7, 8, 11], yellow: [3, 4, 6, 8, 11], green: [1, 3, 5, 7, 11] };
+    const box = document.getElementById("ramps");
+    for (const name of ramps) {
+      const row = document.createElement("div");
+      row.className = "ramp";
+      const label = document.createElement("span");
+      label.textContent = name;
+      row.append(label);
+      const marks = used[name] || used.default;
+      for (let i = 0; i < 12; i++) {
+        const sw = document.createElement("b");
+        sw.style.background = `var(--${name}-${i})`;
+        sw.title = `--${name}-${i}`;
+        if (marks.includes(i)) sw.className = "use";
+        row.append(sw);
+      }
+      box.append(row);
+    }
+  })();
+</script>

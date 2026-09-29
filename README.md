@@ -199,6 +199,8 @@ data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
 
 For a deeper look, see the [architecture guide](docs/architecture.md), [roadmap](docs/roadmap.md), and [development log](docs/devlog.md).
 
+The [design system](docs/design/README.md) sets how generide's web UI and pictures look, based on RollerCoaster Tycoon 2's interface. The [writing style guide](docs/writing-style.md) sets how its documentation, devlog, and UI text read.
+
 ## Roadmap
 
 | Phase | Goal | Status |
