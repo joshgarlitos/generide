@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from rct2 import runrecord
+from spike_mine_corpus import describe_part
 
 TOP_N = 10
 
@@ -54,8 +55,8 @@ def diff_parts(before: list[list[int]], after: list[list[int]]) -> str:
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
         if op == "equal":
             continue
-        removed = before_shapes[i1:i2]
-        added = after_shapes[j1:j2]
+        removed = [describe_part(shape) for shape in before_shapes[i1:i2]]
+        added = [describe_part(shape) for shape in after_shapes[j1:j2]]
         if op == "replace":
             lines.append(f"    replaced parts {removed} -> {added}")
         elif op == "delete":

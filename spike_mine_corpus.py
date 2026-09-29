@@ -28,13 +28,20 @@ import argparse
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
 from rct2 import td6
 from rct2.mutations import segments_to_parts
+from rct2.segments import SEGMENTS
 
 MINE_TRAIN_RIDE_TYPE = 0x11
 WINDOW_SIZES = (2, 3)
 TOP_N = 15
+
+# Every coaster needs a station and brakes, so a window containing these says
+# nothing about design. Station pieces can appear outside part 0 in shipped
+# designs, so skipping part 0 alone doesn't keep them out.
+STATION_AND_BRAKE_SEGMENTS = {0x01, 0x02, 0x03, 0x63, 0xD8}
 
 
 def part_shape(part: list[int]) -> tuple[int, ...]:
@@ -42,14 +49,32 @@ def part_shape(part: list[int]) -> tuple[int, ...]:
     return tuple(part)
 
 
+def describe_part(shape: tuple[int, ...]) -> str:
+    """A part's segments by name, with consecutive repeats collapsed (e.g. 25_deg_up x10)."""
+    names = [SEGMENTS[t].name if t in SEGMENTS else f"segment_{t}" for t in shape]
+    runs: list[list] = []
+    for name in names:
+        if runs and runs[-1][0] == name:
+            runs[-1][1] += 1
+        else:
+            runs.append([name, 1])
+    return " ".join(name if n == 1 else f"{name} x{n}" for name, n in runs)
+
+
+def describe_window(window: tuple[tuple[int, ...], ...]) -> str:
+    return " | ".join(describe_part(shape) for shape in window)
+
+
 def windows(parts: list[list[int]], size: int):
-    """Every consecutive run of `size` parts, skipping the station (part 0)."""
+    """Every consecutive run of `size` parts that has no station or brake segment."""
     body = parts[1:]  # part 0 is always the station; never part of a pattern
     for i in range(len(body) - size + 1):
-        yield tuple(part_shape(p) for p in body[i : i + size])
+        window = tuple(part_shape(p) for p in body[i : i + size])
+        if not any(t in STATION_AND_BRAKE_SEGMENTS for shape in window for t in shape):
+            yield window
 
 
-def mine_design(path: Path) -> list[list[int]] | None:
+def mine_design(path: Path) -> Optional[list[list[int]]]:
     """Load one .td6 and return its parts, or None if it isn't a Mine Train."""
     ride = td6.load(path)
     if ride.ride_type != MINE_TRAIN_RIDE_TYPE:
@@ -99,7 +124,7 @@ def main() -> None:
         print(f"\n=== {size}-part windows: {len(counts)} distinct, {len(repeated)} seen more than once ===")
         for window, count in counts.most_common(TOP_N):
             names = sorted(design_counts[window])
-            print(f"  x{count} across {len(names)} design(s) {names[:5]}{'...' if len(names) > 5 else ''}: {window}")
+            print(f"  x{count} across {len(names)} design(s) {names[:5]}{'...' if len(names) > 5 else ''}: {describe_window(window)}")
 
 
 if __name__ == "__main__":
