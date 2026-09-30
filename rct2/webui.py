@@ -12,7 +12,11 @@ Runs are not executed in this process. Starting one launches
 `evolve_coaster.py` as a child in its own session, with a run id picked here,
 and the page follows it through the run record the child writes, exactly as
 it would a run started from a terminal. Stop is SIGTERM to that child, which
-the CLI turns into a clean stop at the next generation.
+the CLI turns into a clean stop at the next generation. A run this server did
+not start (a terminal run, or one left over from a previous server) can
+still be stopped the same way, but only once `rct2.runrecord.can_signal`
+positively confirms the recorded pid is still that run's own process --
+see its docstring for why an alive pid alone is not proof of that.
 
 Security, for a server that only ever talks to one person's own browser:
 it binds 127.0.0.1 only; it refuses any Host header other than its own
@@ -658,13 +662,16 @@ class App:
     def _running(self) -> List[Dict[str, Any]]:
         return [r for r in runrecord.list_runs() if r.get("status") == "running"]
 
+    def _stoppable(self, run_id: str, record: Dict[str, Any]) -> bool:
+        return self.supervisor.owns(run_id) or runrecord.can_signal(record)
+
     def get_active(self) -> Response:
         running = self._running()
         if not running:
             return _json_response(200, {"active": None})
         run = runrecord.load_run(running[0]["id"])
         detail = run_detail(run)
-        detail["stoppable"] = self.supervisor.owns(run.id)
+        detail["stoppable"] = self._stoppable(run.id, run.record)
         return _json_response(200, {"active": detail})
 
     def list_runs(self) -> Response:
@@ -673,7 +680,7 @@ class App:
     def get_run(self, run_id: str) -> Response:
         run = runrecord.load_run(run_id)
         detail = run_detail(run)
-        detail["stoppable"] = self.supervisor.owns(run_id)
+        detail["stoppable"] = self._stoppable(run_id, run.record)
         detail["availability"] = openrct2_paths.availability().to_dict()
         return _json_response(200, {"run": detail})
 
@@ -729,10 +736,27 @@ class App:
         return run_id
 
     def stop_run(self, run_id: str) -> Response:
-        record = runrecord.load_record(run_id)
-        if record.get("status") != "running":
+        if self.supervisor.owns(run_id):
+            record = runrecord.load_record(run_id)
+            if record.get("status") != "running":
+                raise ApiError(409, "This run is not running.")
+            self.supervisor.stop(run_id)
+            return _json_response(202, {"stopping": run_id})
+        # Not started by this server: only signal it directly when generide
+        # can positively confirm the recorded pid is still the process that
+        # started this run -- see runrecord.can_signal.
+        try:
+            runrecord.signal_stop(run_id)
+        except runrecord.RunNotRunning:
             raise ApiError(409, "This run is not running.")
-        self.supervisor.stop(run_id)
+        except runrecord.CannotVerifyProcess:
+            raise ApiError(
+                409,
+                "This run was not started from this page, and generide "
+                "cannot confirm its process is still the one that started "
+                "it. Stop it from the terminal it is running in, with "
+                "Ctrl-C.",
+            )
         return _json_response(202, {"stopping": run_id})
 
     def delete_run(self, run_id: str) -> Response:

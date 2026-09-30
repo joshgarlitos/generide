@@ -170,6 +170,106 @@ class TestStatusRepair:
         assert load_run(run_id).record["status"] == "completed"
 
 
+class TestPidReuseDetection:
+    """A pid alone can't tell generide's own run apart from an unrelated
+    process that later reused the same number, especially right after a
+    reboot when low pids are handed out again quickly. A start-time
+    fingerprint, captured when the run is created, closes that gap."""
+
+    def test_fingerprint_is_stable_for_a_live_process(self):
+        first = runrecord._pid_fingerprint(os.getpid())
+        second = runrecord._pid_fingerprint(os.getpid())
+        assert first
+        assert first == second
+
+    def test_fingerprint_is_none_for_a_dead_or_bad_pid(self):
+        assert runrecord._pid_fingerprint(_dead_pid()) is None
+        assert runrecord._pid_fingerprint(0) is None
+        assert runrecord._pid_fingerprint(-1) is None
+        assert runrecord._pid_fingerprint("not a pid") is None
+
+    def test_create_run_records_the_pid_fingerprint(self):
+        run_id = _make()
+        assert load_run(run_id).record["pid_started"]
+
+    def test_a_reused_pid_is_detected_and_repaired_to_interrupted(self, monkeypatch):
+        # Simulates a reboot: the process this run recorded has exited and
+        # an unrelated one, still alive, was handed the same pid.
+        run_id = _make()
+        monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: "a-different-process")
+        assert load_run(run_id).record["status"] == "interrupted"
+        saved = json.loads((library_root() / run_id / "run.json").read_text())
+        assert saved["status"] == "interrupted"
+
+    def test_an_unverifiable_alive_pid_still_reads_as_running(self, monkeypatch):
+        # No fingerprint captured, or `ps` unavailable now: falls back to
+        # the plain liveness check, exactly as before fingerprinting existed.
+        run_id = _make()
+        monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: None)
+        assert load_run(run_id).record["status"] == "running"
+
+    def test_can_signal_requires_a_verified_match(self, monkeypatch):
+        run_id = _make()
+        assert runrecord.can_signal(load_run(run_id).record)
+
+        run_id2 = _make()
+        monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: None)
+        assert not runrecord.can_signal(load_run(run_id2).record)
+
+    def test_can_signal_is_false_for_a_finished_run(self):
+        run_id = _make()
+        finish_run(run_id, "completed", generations_run=1)
+        assert not runrecord.can_signal(load_run(run_id).record)
+
+    def test_signal_stop_sends_sigterm_to_a_verified_pid(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            run_id = _make(pid=child.pid)
+            runrecord.signal_stop(run_id)
+            assert child.wait(timeout=5) != 0
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+
+    def test_signal_stop_refuses_an_unverifiable_pid(self, monkeypatch):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            run_id = _make(pid=child.pid)
+            monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: None)
+            with pytest.raises(runrecord.CannotVerifyProcess):
+                runrecord.signal_stop(run_id)
+            assert child.poll() is None  # left alone, not signaled
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_signal_stop_refuses_a_run_that_is_not_running(self):
+        run_id = _make()
+        finish_run(run_id, "completed", generations_run=1)
+        with pytest.raises(runrecord.RunNotRunning):
+            runrecord.signal_stop(run_id)
+
+    def test_a_record_from_before_fingerprinting_still_repairs_by_liveness_alone(self):
+        # A run.json saved by generide before this existed has no
+        # "pid_started" key at all, not just an empty one.
+        run_id = _make(pid=os.getpid())
+        path = library_root() / run_id / "run.json"
+        record = json.loads(path.read_text())
+        del record["pid_started"]
+        path.write_text(json.dumps(record))
+
+        assert load_run(run_id).record["status"] == "running"
+        assert not runrecord.can_signal(load_run(run_id).record)
+
+        dead_run = _make(pid=_dead_pid())
+        path = library_root() / dead_run / "run.json"
+        record = json.loads(path.read_text())
+        del record["pid_started"]
+        path.write_text(json.dumps(record))
+        assert load_run(dead_run).record["status"] == "interrupted"
+
+
 class TestDelete:
     def test_delete_removes_the_run_and_nothing_in_the_track_folder(self, tmp_path):
         track_dir = tmp_path / "tracks"

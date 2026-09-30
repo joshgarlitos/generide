@@ -26,6 +26,8 @@ import json
 import os
 import re
 import shutil
+import signal
+import subprocess
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -67,6 +69,16 @@ class UnsupportedSchema(ValueError):
 
 class RunIsActive(RuntimeError):
     """The run is still going, so it cannot be deleted."""
+
+
+class RunNotRunning(RuntimeError):
+    """The run is not running, so there is nothing to stop."""
+
+
+class CannotVerifyProcess(RuntimeError):
+    """The recorded pid cannot be positively confirmed as the same process
+    that started this run, so signaling it would risk hitting an unrelated
+    process that happens to have reused the pid since."""
 
 
 @dataclass
@@ -202,6 +214,7 @@ def create_run(
     if parent is not None:
         validate_run_id(parent)
 
+    resolved_pid = pid if pid is not None else os.getpid()
     record = {
         "schema_version": SCHEMA_VERSION,
         "id": run_id,
@@ -211,7 +224,13 @@ def create_run(
         "settings": list(settings),
         "parent": parent,
         "status": "running",
-        "pid": pid if pid is not None else os.getpid(),
+        "pid": resolved_pid,
+        # Lets a later reader tell this run's own process apart from an
+        # unrelated one that reuses the same pid after it exits -- see
+        # _pid_fingerprint(). None when it could not be captured (`ps`
+        # missing or failing), which callers treat as unverifiable rather
+        # than as a fingerprint that could ever match or mismatch another.
+        "pid_started": _pid_fingerprint(resolved_pid),
         "generations_planned": generations,
         "generations_run": None,
         "finished": None,
@@ -297,12 +316,100 @@ def _pid_alive(pid: Any) -> bool:
     return True
 
 
+def _pid_fingerprint(pid: Any) -> Optional[str]:
+    """A cheap, best-effort fingerprint of when a pid's process started.
+
+    A pid alone cannot tell generide's own run apart from an unrelated
+    process that later reused the same number -- pids get reused quickly,
+    especially low ones right after a reboot. This shells out to the
+    platform's own `ps` (present on both macOS and Linux; generide already
+    shells out the same way to launch OpenRCT2 and the CLI itself) rather
+    than adding a dependency for it.
+
+    Returns None when the pid cannot be fingerprinted (a bad pid, or `ps`
+    missing or failing), never an empty or synthetic value -- callers must
+    treat None as unverifiable, not as a fingerprint that could match or
+    mismatch another.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    fingerprint = result.stdout.strip()
+    return fingerprint or None
+
+
+def _running_matches(record: Dict[str, Any]) -> bool:
+    """Whether a "running" record's pid still looks like generide's own.
+
+    Requires the pid to be alive. Beyond that, this only ever adds
+    detection on top of the plain liveness check, never removes it: an
+    alive pid with no captured fingerprint, or one `ps` cannot currently
+    read, still counts as matching, so a system where fingerprinting never
+    works behaves exactly as it did before this existed. It downgrades only
+    on a positive mismatch -- proof the pid was reused.
+    """
+    if not _pid_alive(record.get("pid")):
+        return False
+    stored = record.get("pid_started")
+    if not stored:
+        return True
+    current = _pid_fingerprint(record.get("pid"))
+    if not current:
+        return True
+    return current == stored
+
+
+def can_signal(record: Dict[str, Any]) -> bool:
+    """Whether generide can positively confirm the recorded pid is still
+    the process that started this run, and so may be sent a stop signal
+    directly.
+
+    Unlike `_running_matches`, this requires proof: without a captured
+    fingerprint that still matches the pid's current one, signaling it
+    risks hitting an unrelated process that happens to have reused the pid.
+    """
+    if record.get("status") != "running":
+        return False
+    stored = record.get("pid_started")
+    if not stored or not _pid_alive(record.get("pid")):
+        return False
+    return _pid_fingerprint(record.get("pid")) == stored
+
+
+def signal_stop(run_id: str) -> None:
+    """Send SIGTERM directly to a run's recorded pid.
+
+    Only when `can_signal` finds a verified match -- an alive pid alone is
+    not enough. Used for a run the web server did not itself start (a
+    terminal run, or one from a previous server process), where there is no
+    child handle to signal through.
+    """
+    record = load_record(run_id)
+    if record.get("status") != "running":
+        raise RunNotRunning(f"run {run_id} is not running")
+    if not can_signal(record):
+        raise CannotVerifyProcess(
+            f"cannot confirm pid {record.get('pid')} is still the process "
+            f"that started run {run_id}"
+        )
+    os.kill(record["pid"], signal.SIGTERM)
+
+
 def _repair(directory: Path, record: Dict[str, Any]) -> Dict[str, Any]:
-    """A run still marked running whose process is gone was interrupted."""
-    if record.get("status") == "running" and not _pid_alive(record.get("pid")):
+    """A run still marked running whose process is gone, or whose pid was
+    reused by an unrelated process, was interrupted."""
+    if record.get("status") == "running" and not _running_matches(record):
         with _write_lock:
             record = _read_record(directory)
-            if record.get("status") == "running" and not _pid_alive(record.get("pid")):
+            if record.get("status") == "running" and not _running_matches(record):
                 record["status"] = "interrupted"
                 record["finished"] = record.get("finished") or _utc_now()
                 _write_record(directory, record)
