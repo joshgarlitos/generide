@@ -13,6 +13,7 @@ from rct2 import td6
 from rct2.geometry import Position, track_bounds
 from rct2.render import (
     ELEVATION_BANDS,
+    GRAPH,
     _elevation_band,
     plan_track,
     render_fitness_history,
@@ -56,9 +57,21 @@ def test_fills_are_literal_colours_rather_than_css_variables():
     assert 'fill="#' in svg
 
 
-def test_dark_overrides_ride_along_for_where_css_survives():
-    svg = render_track(manic_miner_segments())
-    assert "prefers-color-scheme: dark" in svg
+@pytest.mark.parametrize("render", [
+    lambda: render_track(manic_miner_segments()),
+    lambda: render_profile(manic_miner_segments(), _manic_miner_lifts()),
+    lambda: render_fitness_history([1.0, 2.0, 2.5], [0.5, 0.7, 0.9]),
+], ids=["plan", "profile", "fitness"])
+def test_pictures_look_the_same_in_any_theme(render):
+    # Charts sit on their own dark background, like the game's ride graphs
+    # (docs/design/README.md), so nothing may depend on a stylesheet that
+    # GitHub strips or on the viewer's colour scheme.
+    svg = render()
+    root = ET.fromstring(svg)
+    ns = "{http://www.w3.org/2000/svg}"
+    assert root.find(ns + "style") is None
+    assert "prefers-color-scheme" not in svg
+    assert root.find(f"{ns}rect[@class='bg']").get("fill") == GRAPH["bg"]
 
 
 def test_a_crossing_draws_the_bridge_not_the_tunnel():
@@ -175,9 +188,9 @@ def test_profile_of_empty_track_uses_empty_state():
     render_fitness_history([1.0, 2.0, 2.5]),
     render_track([]),
 ], ids=["plan", "profile", "fitness", "empty"])
-def test_every_picture_paints_a_background_the_dark_theme_can_recolor(svg):
-    # Without it the root's light background shows through in dark mode
-    # while the text turns light, and the title vanishes.
+def test_every_picture_paints_its_own_background(svg):
+    # The light text is only readable on the dark background the picture
+    # paints for itself; without it, a light page shows through.
     root = ET.fromstring(svg)
     backgrounds = root.findall("{http://www.w3.org/2000/svg}rect[@class='bg']")
     assert backgrounds

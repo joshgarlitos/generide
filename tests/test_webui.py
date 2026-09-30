@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -340,6 +341,18 @@ class TestRequestGuards:
         response = call(app, "GET", "/")
         assert response.headers["X-Frame-Options"] == "DENY"
         assert "script-src 'self'" in response.headers["Content-Security-Policy"]
+
+    def test_serves_every_file_the_page_links(self, app):
+        # The page links tokens.css (the design system) and then style.css.
+        # A file the server doesn't serve fails silently in the browser and
+        # leaves the page unstyled, so check each link resolves.
+        page = call(app, "GET", "/").body.decode()
+        linked = re.findall(r'(?:href|src)="(/[^"#]+\.(?:css|js))"', page)
+        assert "/tokens.css" in linked and "/style.css" in linked
+        for path in linked:
+            response = call(app, "GET", path)
+            assert response.status == 200, path
+            assert response.body, path
 
 
 class TestPicturesAndDownload:

@@ -190,7 +190,7 @@ rct2/
   settings.py       The web UI's settings table and validation
   openrct2_paths.py Game locations, the one-at-a-time game check, and install
   webui.py          The web UI's server and JSON API
-  webui_static/     The page: one HTML file, one stylesheet, one script
+  webui_static/     The page: one HTML file, the design tokens, one stylesheet, one script
 generide_web.py      Starts the web UI
 evolve_coaster.py    Command-line evolution
 tests/               Unit and fixture-based regression tests

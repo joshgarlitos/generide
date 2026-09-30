@@ -5,8 +5,8 @@ This document defines how generide looks: the web UI, a future devlog or wiki si
 The design system has three files:
 
 - `docs/design/README.md` (this file) is the specification. When the other two files disagree with it, this file wins.
-- [`docs/design/tokens.css`](tokens.css) is the reference implementation: colour tokens, spacing, type, and every component as CSS.
-- [`docs/design/specimen.html`](specimen.html) shows each component dressed as a generide screen. Open it in a browser next to `tokens.css`.
+- [`rct2/webui_static/tokens.css`](../../rct2/webui_static/tokens.css) is the implementation: colour tokens, spacing, type, and every component as CSS. The web UI serves it as `/tokens.css`, and it is the only copy.
+- [`docs/design/specimen.html`](specimen.html) shows each component dressed as a generide screen, using `tokens.css`. Open it in a browser from a checkout of the repository.
 
 generide is not affiliated with Atari, Chris Sawyer, or the OpenRCT2 project. The design borrows RCT2's visual rules, not its assets. See [Evoke the game, don't copy it](#evoke-the-game-dont-copy-it).
 
@@ -116,6 +116,7 @@ Each window colour class in `tokens.css` sets local variables that every compone
 | Run library, compare view | `c-grey` frame, `c-bordeaux` page | Ride list | It lists rides. |
 | Live run progress, status bar | `c-darkgreen` | Status bar, park panels | It reports what's happening now. |
 | Numbers from the headless game | `c-yellow` | Finances, research | It shows figures that came from the game's own calculation. |
+| Install or download a ride | `c-brown` | Track design place | You are putting a design into the game. |
 | Settings, help, reference pages | `c-lightblue` page in a `c-grey` frame | Options | It configures or explains generide. |
 | Error and confirmation prompts | `c-bordeaux` | Error, demolish ride | It needs a decision before you continue. |
 | The one main action in a window | `c-green` on the button | Ride window's third colour | It marks the button to press next. |
@@ -215,6 +216,7 @@ Every component is in `tokens.css` and shown in `specimen.html`.
 | Status bar | `.statusbar.c-darkgreen` | Bottom bar with live counts. |
 | News ticker | `.ticker` | Black strip, one message, an icon on the left, names in yellow. |
 | Prompt | `.win.c-bordeaux.prompt` | Centred text and buttons. |
+| Notice | `.notice` + a colour class | A small raised box with a glyph (`!`, a cross, or a tick) and text, for a warning, problem, or success inside a window. |
 | Game badge | `.from-game` | Yellow badge for numbers from the headless game. |
 | Estimate badge | `.estimate` | Dashed outline for numbers generide calculated. |
 
@@ -238,8 +240,9 @@ generide's pictures (the plan, the side profile, the fitness curve, and the diag
   | Height | `--trace-height` | `#afdbc3` |
   | Chain lift section | `--trace-lift` | `#77bbef` |
   | Stall point | `--trace-stall` | `#eb9f9f` |
+  | Best score (fitness curve) | `--trace-score` | `#8bdf73` |
 
-- Shade the plan view by height with one ramp, from dark to light as the track climbs.
+- Shade the plan view by height with the brown ramp, steps 4 to 11, from dark to light as the track climbs. Mark the station tile with a `--trace-speed` yellow outline.
 - Label every axis with its unit, and give every chart a text description (`<desc>` in SVG, `alt` on an image).
 - Paint the background into the SVG. A chart with its own dark background reads the same on GitHub's light and dark themes, so it doesn't need CSS classes to recolour it.
 
@@ -253,32 +256,20 @@ generide's pictures (the plan, the side profile, the fitness curve, and the diag
 
 ### The web UI
 
-The web UI (`rct2/webui_static/`) uses a flat, rounded style today. To move it to this system, copy `tokens.css` into `rct2/webui_static/`, wrap each view in windows, and map the current classes as follows:
+The web UI (`rct2/webui_static/`) loads `tokens.css` and then `style.css`. `style.css` lays out the page and dresses the plain elements that `app.js` builds (`button`, `input`, `select`, `table`) as the components above, so `app.js` rarely names a design class itself. Its `win()` helper builds a window, `banner()` builds a notice, and `askFirst()` builds a bordeaux prompt.
 
-| Current class | New component |
+Each view uses these windows:
+
+| View | Windows |
 |---|---|
-| `.topbar`, `nav a` | `header.c-grey` with `.toolbar`, `.toolgroup`, and `.btn[aria-current]` |
-| `.brand` | `.brand` in the toolbar |
-| `.active-chip`, `.pulse` | `.statusbar.c-darkgreen` item and a `.ticker` message |
-| `.panel` | `.win` with a colour class and a `.win-caption` |
-| `.banner.warn` | `.win.c-yellow` |
-| `.banner.bad` | `.win.c-bordeaux.prompt` |
-| `.banner.good` | `.ticker` message |
-| `button`, `.button` | `.btn` |
-| `button.primary` | `.btn.c-green` |
-| `button.danger` | `.btn` that opens a bordeaux prompt |
-| `.field input`, `.field select` | `.input`, `.spinner`, `.select-wrap > .select` |
-| `details.advanced` | A second tab, or a `fieldset.groupbox` |
-| `.metric`, `.live` | `dl.stats` in a `.win.c-darkgreen` |
-| `.progressbar` | `.progress` |
-| `.pictures img`, `img.chart` | `.well.well-graph` |
-| `table`, `tr.changed` | `.table` in a `.well`, with `aria-selected` on changed rows |
-| `.tag.game` | `.from-game` |
-| `.tag.estimate` | `.estimate` |
-| `.run-card` | A row in the run library `.table` |
-| `.compare-bar` | `.statusbar` with the compare button |
+| New run | One brown window. Settings sit in a group box, and advanced settings in a second group box behind a toggle. |
+| A run | A grey title window; a dark green progress window while it runs; a bordeaux window listing problems to check before installing; a grey window with the plan and side profile in graph wells; a ride window (grey frame, bordeaux page) with the stats; a yellow game-check window; a grey score window; a brown install window; and a grey window for rerun, compare, and delete. |
+| Library | A ride-list window (grey frame, bordeaux page) with one row per run in a well. |
+| Compare | Ride-list windows for the runs, their inputs, and their stats. Each run is a grey window with its pictures. |
 
-Then update `rct2/render.py` to draw with the chart colours above.
+The toolbar holds **New run** (brown) and **Library** (bordeaux). The status bar at the bottom shows the active run. Deleting a run opens a bordeaux prompt in the page instead of a browser dialog.
+
+`rct2/render.py` draws the plan, side profile, and score curve in the chart colours above, on their own dark background.
 
 ### A devlog or wiki site
 

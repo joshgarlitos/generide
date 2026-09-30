@@ -1,7 +1,9 @@
 /* generide design tokens and components, in the style of RollerCoaster Tycoon 2.
  *
  * The rules behind every value here are in docs/design/README.md. Read that
- * first; this file is the reference implementation, not the spec.
+ * first; this file is the reference implementation, not the spec. The web UI
+ * serves it as /tokens.css, and docs/design/specimen.html links to it here,
+ * so there is one copy.
  *
  * Colour ramps are taken from the 256-colour palette that OpenRCT2 ships in
  * src/openrct2/drawing/ImageImporter.h (StandardPalette). Each ramp has 12
@@ -57,6 +59,7 @@
   --trace-height: var(--darkgreen-10);
   --trace-lift: var(--lightblue-8);
   --trace-stall: var(--bordeaux-10);
+  --trace-score: var(--green-9);
 
   /* One game pixel. RCT2 draws 1px bevels at 640x480; on a modern screen we
      draw them at 2px, the same as OpenRCT2's 2x window scale. */
@@ -456,6 +459,30 @@
 }
 .ticker .when { color: var(--grey-9); font-variant-numeric: tabular-nums; }
 .ticker b { color: var(--yellow-8); font-weight: 400; }
+
+/* A notice inside a window: a small raised box in its own colour, with a
+   glyph so the meaning never rests on colour alone. */
+.notice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2) var(--space-3);
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+.notice-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  background: var(--deep);
+  color: var(--ink-light);
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+.notice-body { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.notice-body p, .notice-body ul { margin: 0; }
+.notice-body ul { padding-left: 20px; }
 
 /* Error and confirm prompts: centred white text on bordeaux, as in the game. */
 .prompt .win-body { text-align: center; align-items: center; }
