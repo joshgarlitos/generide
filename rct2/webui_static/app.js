@@ -250,31 +250,35 @@ async function showNewRun(rerunId) {
   if (token !== state.viewToken) return;
 
   const fields = {};
+  // Each field shows its label, its control, and one short hint (the unit
+  // and range). The full explanation sits behind a "?" button, so the form
+  // stays short until someone asks.
   const makeField = (setting) => {
     const id = `f-${setting.key}`;
     const value = setting.key in values ? values[setting.key] : setting.default;
     const error = h("p", { class: "error", id: `${id}-error`, "aria-live": "polite" });
-    const help = h("p", { class: "help", id: `${id}-help` }, setting.help);
-    const described = `${id}-help ${id}-error`;
+    const described = `${id}-hint ${id}-error`;
+    const unit = setting.unit ? ` ${setting.unit}` : "";
+    const hasRange = setting.minimum !== null && setting.maximum !== null;
     let control;
     let read;
-    let limits = null;
-    const range = (setting.minimum !== null && setting.maximum !== null)
-      ? `Allowed: ${setting.minimum} to ${setting.maximum}${setting.unit ? " " + setting.unit : ""}.` : "";
+    let hint = null;
+    let defaultText = null;
 
     if (setting.kind === "window") {
       const low = h("input", { type: "number", step: "any", id, "aria-label": `${setting.label} lowest`,
-        "aria-describedby": described, value: value ? value.min ?? value[0] : "" });
+        "aria-describedby": described, placeholder: "lowest", value: value ? value.min ?? value[0] : "" });
       const high = h("input", { type: "number", step: "any", "aria-label": `${setting.label} highest`,
-        "aria-describedby": described, value: value ? value.max ?? value[1] : "" });
-      control = h("div", { class: "pair" }, low, h("span", { class: "muted" }, "to"), high);
+        "aria-describedby": described, placeholder: "highest", value: value ? value.max ?? value[1] : "" });
+      control = h("div", { class: "pair" }, low, h("span", {}, "to"), high);
       read = () => ({ min: low.value, max: high.value });
-      limits = `Default: not set. ${range} ${setting.note}`;
+      hint = `${setting.minimum} to ${setting.maximum}. Leave empty for any.`;
+      defaultText = "Default: not set.";
     } else if (setting.kind === "choice") {
       control = h("select", { id, "aria-describedby": described },
         setting.choices.map((c) => h("option", { value: c, selected: c === value }, c)));
       read = () => control.value;
-      limits = `Default: ${setting.default}.`;
+      defaultText = `Default: ${setting.default}.`;
     } else if (setting.kind === "bool") {
       control = h("input", { type: "checkbox", id, "aria-describedby": described, checked: !!value });
       read = () => control.checked;
@@ -282,7 +286,7 @@ async function showNewRun(rerunId) {
       control = h("input", { type: "text", id, "aria-describedby": described, value: value || "",
         placeholder: "/path/to/design.td6", autocomplete: "off", spellcheck: "false" });
       read = () => control.value;
-      limits = "Default: a generated loop with a lift hill.";
+      hint = "Leave empty for a generated loop.";
     } else {
       const isSeed = setting.key === "seed";
       control = h("input", { type: "number", id, "aria-describedby": described,
@@ -291,14 +295,34 @@ async function showNewRun(rerunId) {
         value: value === null || value === undefined ? "" : value,
         placeholder: isSeed ? "random" : null });
       read = () => control.value;
-      limits = isSeed ? `Default: a new random seed. ${range}` : `Default: ${setting.default}. ${range}`;
+      if (isSeed) {
+        hint = "Leave empty for a random seed.";
+      } else {
+        hint = hasRange ? `${setting.minimum} to ${setting.maximum}${unit}.` : null;
+        defaultText = `Default: ${setting.default}${unit}.`;
+      }
     }
 
+    const more = h("div", { class: "more-info", id: `${id}-more`, hidden: true },
+      h("p", {}, setting.help),
+      setting.note ? h("p", {}, setting.note) : null,
+      defaultText ? h("p", {}, defaultText) : null);
+    const info = h("button", { type: "button", class: "info", "aria-expanded": "false",
+      "aria-controls": `${id}-more`, "aria-label": `About ${setting.label}` }, "?");
+    info.addEventListener("click", () => {
+      const open = more.hidden;
+      more.hidden = !open;
+      info.setAttribute("aria-expanded", String(open));
+    });
+    const hintEl = h("p", { class: "hint", id: `${id}-hint` }, hint);
+
     const box = setting.kind === "bool"
-      ? h("div", { class: "field check" }, control, h("label", { for: id }, setting.label), help, error)
+      ? h("div", { class: "field check" },
+        h("div", { class: "field-head" }, h("span", { class: "check-label" }, control, h("label", { for: id }, setting.label)), info),
+        more, error)
       : h("div", { class: "field" },
-        h("label", { for: id, class: "label" }, setting.label),
-        control, help, limits && h("p", { class: "limits" }, limits), error);
+        h("div", { class: "field-head" }, h("label", { for: id, class: "label" }, setting.label), info),
+        control, hint ? hintEl : null, more, error);
     fields[setting.key] = { box, read, error };
     return box;
   };
@@ -375,12 +399,10 @@ async function showNewRun(rerunId) {
       }
     },
   },
-  h("fieldset", { class: "groupbox" }, h("legend", {}, "Ride and search"),
-    h("div", { class: "form-grid" }, basic.map(makeField))),
+  h("div", { class: "form-grid" }, basic.map(makeField)),
   h("details", { class: "advanced", open: advanced.some((s) => s.key in values && values[s.key] !== s.default) || null },
     h("summary", {}, "Advanced settings"),
-    h("fieldset", { class: "groupbox" }, h("legend", {}, "Advanced settings"),
-      h("div", { class: "form-grid" }, advanced.map(makeField)))),
+    h("div", { class: "groupbox" }, h("div", { class: "form-grid" }, advanced.map(makeField)))),
   formMessage,
   h("div", { class: "actions" }, startButton, activeNote));
 
@@ -392,8 +414,7 @@ async function showNewRun(rerunId) {
       ? banner("good", h("p", {}, "Starting from ",
         h("a", { href: `#/run/${source.id}` }, source.name),
         ". Every setting, including the seed, matches it, so whatever you change is the only difference between the two."))
-      : h("p", {}, "Set up a Mine Train request. Every setting is explained below; the defaults make a reasonable first ride."),
-    banner("warn", h("p", {}, config.estimate_note)),
+      : h("p", {}, "Set up a Mine Train request. The defaults make a reasonable first ride. Click ? next to a setting to read what it does."),
     form,
   ));
 }

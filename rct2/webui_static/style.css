@@ -165,8 +165,33 @@ input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.5; }
 .field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .field label, .field .label { font-weight: 700; }
 .field .pair { display: flex; align-items: center; gap: var(--space-2); }
-.field .help, .field .limits { font-size: var(--text-sm); margin: 0; }
-.field .limits { font-style: italic; }
+.field-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.field .hint { font-size: var(--text-sm); margin: 0; }
+/* The "?" that opens a field's full explanation: a small square button. */
+button.info {
+  flex: none;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+button.info[aria-expanded="true"] {
+  background: var(--hover);
+  box-shadow: inset var(--u) var(--u) 0 var(--deep), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+.more-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  font-size: var(--text-sm);
+  background: var(--well);
+  color: var(--ink-dark);
+  box-shadow: inset var(--u) var(--u) 0 var(--well-lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+.more-info p { margin: 0; }
 .field .error { margin: 0; font-size: var(--text-sm); font-weight: 700; }
 .field .error:not(:empty) {
   align-self: flex-start;
@@ -175,8 +200,7 @@ input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.5; }
   color: var(--ink-light);
 }
 .field.has-error input, .field.has-error select { outline: var(--u) solid var(--bordeaux-4); outline-offset: 0; }
-.field.check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
-.field.check .help, .field.check .error { flex-basis: 100%; }
+.field.check .check-label { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 700; }
 
 /* Advanced settings: a group box behind a raised toggle. */
 details.advanced > summary, details.more > summary {
@@ -194,7 +218,7 @@ details.advanced > summary::-webkit-details-marker, details.more > summary::-web
 details.advanced > summary::before, details.more > summary::before { content: "\25B6"; font-size: 9px; }
 details[open].advanced > summary::before, details[open].more > summary::before { content: "\25BC"; }
 details.advanced > summary { font-weight: 700; }
-details[open].advanced > .groupbox, details[open].more > .more-body { margin-top: var(--space-4); }
+details[open].advanced > .groupbox, details[open].more > .more-body { margin-top: var(--space-3); }
 details.more > .more-body { display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* ---- Live run ------------------------------------------------------------ */

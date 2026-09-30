@@ -364,10 +364,13 @@
   flex-direction: column;
   gap: var(--space-3);
 }
+/* The label sits on the frame's top edge and hides the line behind it, as
+   the game's group boxes do; without the fill the line strikes through it. */
 .groupbox > legend {
   padding: 0 var(--space-1);
   font-size: var(--text-md);
   color: var(--ink);
+  background: var(--fill);
 }
 
 /* ---- Stat read-outs: "Excitement rating: 6.52 (High)" -------------------- */
