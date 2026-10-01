@@ -262,12 +262,14 @@ Each view uses these windows:
 
 | View | Windows |
 |---|---|
-| New run | One brown window. Settings sit in a group box, and advanced settings in a second group box behind a toggle. |
-| A run | A grey title window; a dark green progress window while it runs; a bordeaux window listing problems to check before installing; a grey window with the plan and side profile in graph wells; a ride window (grey frame, bordeaux page) with the stats; a yellow game-check window; a grey score window; a brown install window; and a grey window for rerun, compare, and delete. |
-| Library | A ride-list window (grey frame, bordeaux page) with one row per run in a well. |
+| New run | One brown window. Each setting shows its label, its control, and a one-line hint with its unit and range. A "?" button next to the label opens the full explanation in a well under the field. Advanced settings sit in an etched frame behind a toggle. |
+| A run | One ride window, as in the game: the run's name and status in the title bar, its facts and actions (**Rename**, **Rerun with changes**, **Delete**) under that, and four tabs on a bordeaux page. **Overview** has the live progress (a dark green window while the run is going) and the ratings and stats. **Graphs** has the plan, side profile, and score curve. **Game check** and **Install** hold those two actions. The selected tab is kept in the address, such as `#/run/RUN_ID?tab=graphs`. |
+| Library | A ride-list window (grey frame, bordeaux page) holding one table. Each row is a run; click a column header to sort by it, and a row to open it. Tick rows to open, compare, rerun, or delete them from the toolbar above the table. |
 | Compare | Ride-list windows for the runs, their inputs, and their stats. Each run is a grey window with its pictures. |
 
-The toolbar holds **New run** (brown) and **Library** (bordeaux). The status bar at the bottom shows the active run. Deleting a run opens a bordeaux prompt in the page instead of a browser dialog.
+Runs are named the way the game names a new ride: "Mine Train" and the lowest number not in use, such as "Mine Train 3". The name is saved in `name.txt` in the run's folder, so renaming never rewrites `run.json` while a run is writing to it. A run installed before names existed keeps the name it was installed under.
+
+The toolbar holds **New run** (brown) and **Library** (bordeaux). The status bar at the bottom shows the active run. Deleting runs opens a bordeaux prompt in the page instead of a browser dialog.
 
 `rct2/render.py` draws the plan, side profile, and score curve in the chart colours above, on their own dark background.
 

@@ -56,9 +56,7 @@ main:focus { outline: none; }
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
   align-items: start;
 }
-.windows > .wide, .windows > .slot > .wide { grid-column: 1 / -1; }
-/* Slots hold windows that re-render on their own; they take no space. */
-.slot { display: contents; }
+.windows > .wide { grid-column: 1 / -1; }
 
 .win-caption { overflow-wrap: anywhere; }
 .win-caption .tag { text-shadow: none; margin-left: var(--space-2); }
@@ -243,7 +241,7 @@ details.more > .more-body { display: flex; flex-direction: column; gap: var(--sp
 /* ---- Pictures: server-drawn charts sit in dark graph wells --------------- */
 .pictures { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
 .pictures figure, figure.graph { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-.pictures img, .compare-grid img, img.chart {
+.pictures img, .compare-grid img, .score-chart img {
   display: block;
   width: 100%;
   height: auto;
@@ -251,7 +249,8 @@ details.more > .more-body { display: flex; flex-direction: column; gap: var(--sp
 }
 /* A long, narrow ride makes a tall plan; keep it to a readable size. */
 .pictures img, .compare-grid img { max-height: 440px; object-fit: contain; }
-img.chart { max-width: 760px; }
+/* The score chart is drawn at the same size as the profile beside it. */
+.score-chart { max-width: 640px; }
 .pictures figcaption, figure.graph figcaption { font-size: var(--text-sm); color: var(--graph-axis); }
 
 /* ---- Tables in wells ----------------------------------------------------- */
@@ -298,26 +297,58 @@ tr.changed:hover > * { background: var(--deep); }
 .tag.failed, .tag.interrupted, .tag.unreadable { background: var(--bordeaux-5); color: var(--ink-light); box-shadow: inset 1px 1px 0 var(--bordeaux-8), inset -1px -1px 0 var(--bordeaux-2); }
 .tag.estimate { background: transparent; color: inherit; box-shadow: none; outline: 1px dashed currentColor; outline-offset: -1px; font-weight: 400; }
 
-/* ---- Library: the run list is a well of rows, like the ride list ---------- */
-.runs { display: flex; flex-direction: column; padding: 0; }
-.run-card {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-1) var(--space-3);
-  padding: var(--space-3) var(--space-3);
-  border-bottom: 1px solid var(--well-lo);
+/* ---- Library: the ride list ----------------------------------------------- */
+.toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+table.library { min-width: 860px; }
+table.library thead th { padding: 0; }
+/* Column headers are the buttons that sort, as in the game's ride list. */
+button.sort {
+  width: 100%;
+  min-height: 26px;
+  justify-content: space-between;
+  padding: 0 var(--space-2);
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
-.run-card:last-child { border-bottom: 0; }
-.run-card:hover { background: var(--row-hover); }
-.run-card.selected, .run-card.selected:hover { background: var(--deep); color: var(--ink-light); }
-.run-card.selected a:not(.button) { color: var(--ink-light); }
-.run-card input[type="checkbox"] { margin-top: 1px; }
-.run-card .title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; }
-.run-card .title a { font-weight: 700; overflow-wrap: anywhere; }
-.run-card .facts { grid-column: 2; display: flex; flex-wrap: wrap; gap: 2px var(--space-4); font-size: var(--text-sm); }
-.run-card .actions { grid-column: 2; margin-top: var(--space-1); }
-.run-card .slot-inline:not(:empty) { grid-column: 2; }
-.compare-bar { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; justify-content: space-between; }
+button.sort:hover:not(:disabled) { background: var(--hover); }
+button.sort:active:not(:disabled) { padding-top: 0; box-shadow: none; }
+th.num button.sort { flex-direction: row-reverse; }
+th[aria-sort] button.sort { font-weight: 700; }
+.sort-mark { font-size: 9px; min-width: 9px; }
+table.library .pick { width: 28px; text-align: center; }
+table.library thead .pick { padding: 0 var(--space-1); }
+table.library tbody th, table.library tbody td { vertical-align: middle; }
+table.library tbody th { font-weight: 700; }
+table.library tbody th .tag { margin-left: var(--space-1); }
+.run-row { cursor: pointer; }
+.run-row[aria-selected="true"] > * { background: var(--deep); color: var(--ink-light); }
+.run-row[aria-selected="true"]:hover > * { background: var(--deep); }
+.run-row[aria-selected="true"] a { color: var(--ink-light); }
+.nowrap { white-space: nowrap; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---- A run: one ride window with tabs ------------------------------------- */
+.panel-stack { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.panel-stack:empty { display: none; }
+.panel-stack > * { margin: 0; }
+.win-page h2 { font-size: var(--text-md); font-weight: 700; margin: 0; }
+.rename { display: flex; flex-direction: column; gap: var(--space-1); }
+.rename input { flex: 1 1 16em; width: auto; max-width: 28em; }
+.rename .error:not(:empty) {
+  align-self: flex-start;
+  padding: 2px var(--space-2);
+  background: var(--bordeaux-5);
+  color: var(--ink-light);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  margin: 0;
+}
+.rename .error:empty { display: none; }
 
 /* ---- Compare ------------------------------------------------------------- */
 .compare-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }

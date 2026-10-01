@@ -174,6 +174,7 @@ function parseHash() {
 
 async function route() {
   state.viewToken += 1;
+  document.title = "generide";
   state.refresh = null;
   const { parts, params } = parseHash();
   const page = parts[0] || "";
@@ -184,7 +185,7 @@ async function route() {
   try {
     if (page === "new") await showNewRun(params.get("rerun"));
     else if (page === "library") await showLibrary();
-    else if (page === "run" && parts[1]) await showRun(parts[1]);
+    else if (page === "run" && parts[1]) await showRun(parts[1], params.get("tab"));
     else if (page === "compare") await showCompare((params.get("ids") || "").split(",").filter(Boolean));
     else {
       const { runs } = await api("GET", "/api/runs");
@@ -422,55 +423,162 @@ async function showNewRun(rerunId) {
 // ---------------------------------------------------------------------------
 // One run: live view while running, result view after
 
-async function showRun(runId) {
+// One run, as the game's ride window: the name and status in the title bar,
+// what was asked for and what you can do with it under that, then tabs for
+// the rest. The tab is kept in the address, so a reload or a shared link
+// comes back to it.
+const RUN_TABS = [
+  ["overview", "Overview"],
+  ["graphs", "Graphs"],
+  ["check", "Game check"],
+  ["install", "Install"],
+];
+
+async function showRun(runId, tabParam) {
   const token = state.viewToken;
   const path = `/api/runs/${encodeURIComponent(runId)}`;
   let { run } = await api("GET", path);
   if (token !== state.viewToken) return;
   const config = await loadSettings();
 
-  // Each slot holds one window (or none) and re-renders on its own; slots
-  // take no space, so the windows tile in the page grid.
-  const slot = () => h("div", { class: "slot" });
-  const header = slot();
-  const liveBox = slot();
-  const warnings = slot();
+  const caption = h("h1", { class: "win-caption" });
+  const meta = h("div", { class: "meta" });
+  const actions = h("div", { class: "actions" });
+  const headSlot = h("div", { class: "panel-stack" });
+  const liveBox = h("div", { class: "panel-stack" });
+  const warnings = [h("div", { class: "panel-stack" }), h("div", { class: "panel-stack" })]; // on Overview and Install
   const pictures = h("div", { class: "pictures" });
-  const picturesWin = win({ title: "Plan and side profile", wide: true }, pictures);
-  const fitness = slot();
-  const stats = slot();
-  const checkBox = slot();
-  const installBox = slot();
-  const footer = slot();
+  const fitness = h("div", { class: "score-chart" });
+  const stats = h("div", { class: "panel-stack" });
+  const checkBox = h("div", { class: "panel-stack" });
+  const installBox = h("div", { class: "panel-stack" });
   let pictureVersion = null;
   let installBuilt = false;
 
+  // ---- tabs ----
+  let current = RUN_TABS.some(([key]) => key === tabParam) ? tabParam : "overview";
+  const panelContent = {
+    overview: [liveBox, warnings[0], stats],
+    graphs: [pictures, fitness],
+    check: [checkBox],
+    install: [warnings[1], installBox],
+  };
+  const tabButtons = {};
+  const panels = {};
+  for (const [key, label] of RUN_TABS) {
+    tabButtons[key] = h("button", { type: "button", class: "tab", role: "tab", id: `tab-${key}`,
+      "aria-controls": `panel-${key}` }, label);
+    panels[key] = h("div", { class: "panel-stack", role: "tabpanel", id: `panel-${key}`,
+      "aria-labelledby": `tab-${key}` }, panelContent[key]);
+  }
+  const selectTab = (key, focus) => {
+    current = key;
+    for (const [k] of RUN_TABS) {
+      const on = k === key;
+      tabButtons[k].setAttribute("aria-selected", String(on));
+      tabButtons[k].tabIndex = on ? 0 : -1;
+      panels[k].hidden = !on;
+    }
+    if (focus) tabButtons[key].focus();
+    history.replaceState(null, "", `#/run/${run.id}${key === "overview" ? "" : `?tab=${key}`}`);
+  };
+  const tablist = h("div", { class: "tabs", role: "tablist", "aria-label": "Run" },
+    RUN_TABS.map(([key]) => tabButtons[key]));
+  tablist.addEventListener("click", (event) => {
+    const button = event.target.closest("[role=tab]");
+    if (button) selectTab(button.id.slice(4), false);
+  });
+  tablist.addEventListener("keydown", (event) => {
+    const keys = RUN_TABS.map(([k]) => k);
+    const i = keys.indexOf(current);
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: keys.length - 1 }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    selectTab(keys[(next + keys.length) % keys.length], true);
+  });
+
+  // ---- title bar, facts, and actions ----
   const renderHeader = () => {
-    const meta = h("div", { class: "meta" },
+    put(caption, run.name, statusTag(run.status));
+    document.title = `${run.name} - generide`;
+    renderLibraryFacts();
+  };
+
+  const renderLibraryFacts = () => {
+    const installed = run.installs.length ? run.installs[run.installs.length - 1].name : null;
+    put(meta,
       h("span", {}, `Started ${when(run.created)}`),
       h("span", {}, `Seed ${run.seed}`),
       run.status !== "running" && run.generations_run !== null
-        ? h("span", {}, `${run.generations_run} generations`) : null);
-    const parentLine = run.parent ? h("p", { class: "small" }, "Rerun of ",
-      h("a", { href: `#/run/${run.parent}` }, run.parent), ". ",
-      h("a", { href: `#/compare?ids=${run.parent},${run.id}` }, "Compare with the source run")) : null;
-    put(header, win({ title: [run.name, statusTag(run.status)], level: 1, wide: true }, meta, parentLine));
+        ? h("span", {}, `${run.generations_run} generations`) : null,
+      installed ? h("span", {}, "Installed as ", h("b", {}, installed)) : null,
+      run.parent ? h("span", {}, "Rerun of ", h("a", { href: `#/run/${run.parent}` }, "its source run")) : null);
   };
 
+  const renameForm = () => {
+    const input = h("input", { type: "text", id: "rename", value: run.name, maxlength: "60",
+      autocomplete: "off", "aria-describedby": "rename-error" });
+    const error = h("p", { class: "error", id: "rename-error", "aria-live": "polite" });
+    const form = h("form", { class: "rename", novalidate: true },
+      h("label", { for: "rename", class: "label" }, "Name"),
+      h("div", { class: "actions" }, input,
+        h("button", { type: "submit", class: "primary" }, "Save"),
+        h("button", { type: "button", onclick: () => { put(headSlot); renameButton.focus(); } }, "Cancel")),
+      error);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const out = await api("POST", `${path}/rename`, { name: input.value });
+        run.name = out.name;
+        put(headSlot);
+        renderHeader();
+        renameButton.focus();
+      } catch (err) {
+        error.textContent = err.message;
+        input.focus();
+      }
+    });
+    put(headSlot, form);
+    input.focus();
+    input.select();
+  };
+  const renameButton = h("button", { type: "button", onclick: renameForm }, "Rename");
+
+  const renderActions = () => {
+    const deleteButton = h("button", {
+      type: "button",
+      class: "danger",
+      disabled: run.status === "running",
+      onclick: () => askFirst(headSlot, "Delete run",
+        `Delete “${run.name}” from the library? You can't undo this. A design already installed in OpenRCT2 stays installed.`,
+        "Delete run", async () => {
+          try {
+            await api("DELETE", path);
+            location.hash = "#/library";
+          } catch (err) {
+            put(headSlot, errorBanner(err));
+          }
+        }),
+    }, "Delete");
+    put(actions, renameButton,
+      h("a", { class: "button", href: `#/new?rerun=${run.id}` }, "Rerun with changes"),
+      run.parent ? h("a", { class: "button", href: `#/compare?ids=${run.parent},${run.id}` }, "Compare with source") : null,
+      deleteButton);
+  };
+
+  // ---- Overview ----
   const renderLive = () => {
     put(liveBox);
     if (run.status !== "running") {
-      const notes = [];
       if (run.stopped_early) {
-        notes.push(banner("warn", h("p", {},
+        add(liveBox, banner("warn", h("p", {},
           `Stopped early after ${run.generations_run} of ${run.live.generations_planned} generations. The result is the best ride found by then.`)));
       }
       if (run.status === "interrupted") {
-        notes.push(banner("bad", h("p", {},
+        add(liveBox, banner("bad", h("p", {},
           "This run ended without finishing: its process is gone, for example after a crash or a closed laptop. The best ride it logged is shown, but nothing was exported.")));
       }
-      if (run.error) notes.push(banner("bad", h("p", {}, `The run ended with an error: ${run.error}`)));
-      if (notes.length) add(liveBox, win({ title: "How this run ended", wide: true }, notes));
+      if (run.error) add(liveBox, banner("bad", h("p", {}, `The run ended with an error: ${run.error}`)));
       return;
     }
     const live = run.live;
@@ -489,7 +597,7 @@ async function showRun(runId) {
         try { await api("POST", `${path}/stop`); } catch (err) { add(liveBox, errorBanner(err)); }
       },
     }, "Stop and keep the best ride");
-    add(liveBox, win({ colour: "darkgreen", title: "Run progress", wide: true },
+    add(liveBox, win({ colour: "darkgreen", title: "Run progress" },
       h("div", { class: "live" },
         metric("Generation", `${done} of ${planned}`),
         metric("Elapsed", duration(live.elapsed)),
@@ -509,44 +617,27 @@ async function showRun(runId) {
   };
 
   const renderWarnings = () => {
-    put(warnings);
-    if (run.warnings.length) {
-      add(warnings, win({ colour: "bordeaux", title: "Check this before installing", wide: true },
-        h("ul", {}, run.warnings.map((w) => h("li", {}, w)))));
+    for (const box of warnings) {
+      put(box);
+      if (run.warnings.length) {
+        add(box, banner("warn", h("p", {}, h("strong", {}, "Check this before installing:")),
+          h("ul", {}, run.warnings.map((w) => h("li", {}, w)))));
+      }
     }
-  };
-
-  const renderPictures = () => {
-    const version = `${run.improvements}-${run.status}`;
-    if (version === pictureVersion) return;
-    pictureVersion = version;
-    if (!run.improvements) {
-      put(pictures, h("p", { class: "muted" }, "The first ride appears after the first generation."));
-      return;
-    }
-    const label = run.status === "running" ? "Best ride so far" : "Result";
-    put(pictures, 
-      picture(`${path}/plan.svg?v=${version}`, `${label}: top-down plan, lighter is higher.`, "Top-down plan of the ride"),
-      picture(`${path}/profile.svg?v=${version}`, `${label}: side profile. Solid line is height, dashed is speed, drops are numbered.`, "Side profile of the ride"));
-  };
-
-  const renderFitness = () => {
-    const version = run.live.generation;
-    put(fitness, win({ title: "Best score by generation" },
-      h("figure", { class: "well well-graph graph" },
-        h("img", { class: "chart", src: `${path}/fitness.svg?v=${version}-${run.status}`,
-          alt: "Best score by generation" }))));
   };
 
   const renderStats = () => {
     const view = run.stats_view;
     put(stats);
-    if (!view.simulated.length) return;
+    if (!view.simulated.length) {
+      add(stats, h("p", {}, "The first ride appears after the first generation."));
+      return;
+    }
     const ratingsTable = h("table", {},
       h("thead", {}, h("tr", {},
         h("th", {}, "Rating"),
-        h("th", { class: "num" }, "Our estimate ", h("span", { class: "tag estimate" }, "estimate")),
-        h("th", { class: "num" }, "In the game ", h("span", { class: "tag game" }, "game-checked")))),
+        h("th", { class: "num" }, "Estimate"),
+        h("th", { class: "num" }, "In the game"))),
       h("tbody", {}, view.ratings.map((r) => h("tr", {},
         h("td", {}, r.label),
         h("td", { class: "num" }, r.estimate || "–"),
@@ -555,23 +646,47 @@ async function showRun(runId) {
       view.simulated.map((r) => h("tr", {},
         h("th", { scope: "row" }, r.label),
         h("td", {}, r.value)))));
-    // Grey frame, bordeaux page: the game's ride window.
-    add(stats, win({ page: "bordeaux", title: run.status === "running" ? "Best ride so far" : "Ride stats", wide: true },
+    add(stats,
       h("div", { class: "two-col" },
         h("div", {},
-          h("h3", {}, "Ratings"),
-          h("div", { class: "well table-wrap" }, ratingsTable),
-          h("p", { class: "small" }, config.estimate_note)),
+          h("h2", {}, run.status === "running" ? "Ratings of the best ride so far" : "Ratings"),
+          h("div", { class: "well table-wrap" }, ratingsTable)),
         h("div", {},
-          h("h3", {}, "From generide's simulation ", h("span", { class: "tag estimate" }, "estimates")),
-          h("div", { class: "well table-wrap" }, simulatedTable)))));
+          h("h2", {}, "From generide's simulation ", h("span", { class: "tag estimate" }, "estimates")),
+          h("div", { class: "well table-wrap" }, simulatedTable))));
   };
 
+  // ---- Graphs ----
+  const renderPictures = () => {
+    const version = `${run.improvements}-${run.status}`;
+    if (version === pictureVersion) return;
+    pictureVersion = version;
+    if (!run.improvements) {
+      put(pictures, h("p", {}, "The first ride appears after the first generation."));
+      return;
+    }
+    const label = run.status === "running" ? "Best ride so far" : "Result";
+    put(pictures,
+      picture(`${path}/plan.svg?v=${version}`, `${label}: top-down plan, lighter is higher.`, "Top-down plan of the ride"),
+      picture(`${path}/profile.svg?v=${version}`, `${label}: side profile. Solid line is height, dashed is speed, drops are numbered.`, "Side profile of the ride"));
+  };
+
+  const renderFitness = () => {
+    const version = run.live.generation;
+    put(fitness, picture(`${path}/fitness.svg?v=${version}-${run.status}`,
+      "Best score by generation.", "Best score by generation"));
+  };
+
+  // ---- Game check ----
   const renderCheck = () => {
     put(checkBox);
-    if (run.status === "running") return;
+    if (run.status === "running") {
+      add(checkBox, h("p", {}, "You can check the ride in the game once the run finishes."));
+      return;
+    }
     const available = run.availability;
     const button = h("button", {
+      class: "primary",
       disabled: !run.has_ride || !available.check || run.checking,
       onclick: async () => {
         button.disabled = true;
@@ -584,11 +699,10 @@ async function showRun(runId) {
           button.disabled = false;
         }
       },
-    }, run.checking ? "Checking in the game…" : "Check in the real game");
+    }, run.checking ? "Checking in the game…" : "Check in the game");
     const latest = run.checks[run.checks.length - 1];
-    // Yellow marks numbers that came from the game itself.
-    add(checkBox, win({ colour: "yellow", title: "Check in the real game" },
-      h("p", { class: "small" },
+    add(checkBox,
+      h("p", {},
         "Builds the ride in OpenRCT2 running in the background, runs a test lap, and reads back the game's own ratings. Takes a few seconds."),
       h("div", { class: "actions" }, button,
         !available.check ? h("span", { class: "muted small" }, available.check_reason) : null,
@@ -596,17 +710,21 @@ async function showRun(runId) {
       latest ? banner(latest.status === "rated" ? "good" : "warn",
         h("p", {}, h("strong", {}, latest.status === "rated" ? "Game check: " : "Game check failed: "), latest.message),
         latest.detail && latest.status !== "rated" ? h("p", { class: "small" }, latest.detail) : null,
-        h("p", { class: "small" }, `Checked ${when(latest.time)}.`)) : null));
+        h("p", { class: "small" }, `Checked ${when(latest.time)}.`)) : null);
   };
 
+  // ---- Install ----
   const renderInstall = () => {
-    if (run.status === "running") { put(installBox); return; }
+    if (run.status === "running") {
+      put(installBox, h("p", {}, "You can install or download the ride once the run finishes."));
+      return;
+    }
     if (installBuilt) return;
     installBuilt = true;
     const available = run.availability;
     const templates = config.ui.name_templates || [];
     const nameInput = h("input", { type: "text", id: "install-name", maxlength: "200",
-      value: run.installs.length ? run.installs[run.installs.length - 1].name : "", autocomplete: "off" });
+      value: run.installs.length ? run.installs[run.installs.length - 1].name : run.name, autocomplete: "off" });
     const templateSelect = h("select", { id: "install-template" },
       h("option", { value: "" }, "Just the name"),
       templates.map((t) => h("option", { value: t }, t)));
@@ -644,7 +762,7 @@ async function showRun(runId) {
           h("p", {}, out.restart_note)));
         const fresh = await api("GET", path);
         run = fresh.run;
-        renderHeader();
+        renderLibraryFacts();
         refreshPreview();
       } catch (err) {
         const body = err.body || {};
@@ -687,8 +805,7 @@ async function showRun(runId) {
       },
     }, "Save template");
 
-    // Brown, like the game's track design placement window.
-    put(installBox, win({ colour: "brown", title: "Install or download" },
+    put(installBox,
       h("div", { class: "install" },
         h("div", { class: "field" }, h("label", { for: "install-name", class: "label" }, "Ride name"), nameInput),
         h("div", { class: "field" }, h("label", { for: "install-template", class: "label" }, "Naming template"), templateSelect),
@@ -702,33 +819,13 @@ async function showRun(runId) {
         h("div", { class: "more-body" },
           h("p", { class: "small" }, `Use ${config.template_fields.map((f) => `{${f}}`).join(", ")}. Times are written with a dash, like 14-05.`),
           h("div", { class: "actions" }, customTemplate, saveTemplate))),
-      result));
+      result);
     refreshPreview();
-  };
-
-  const renderFooter = () => {
-    const prompt = h("div");
-    put(footer, win({ title: "More" }, h("div", { class: "actions" },
-      h("a", { class: "button", href: `#/new?rerun=${run.id}` }, "Rerun with changes"),
-      run.parent ? h("a", { class: "button", href: `#/compare?ids=${run.parent},${run.id}` }, "Compare with the source run") : null,
-      h("button", {
-        class: "danger",
-        disabled: run.status === "running",
-        onclick: () => askFirst(prompt, "Delete run",
-          `Delete “${run.name}” from the library? You can't undo this. A design already installed in OpenRCT2 stays installed.`,
-          "Delete run", async () => {
-            try {
-              await api("DELETE", path);
-              location.hash = "#/library";
-            } catch (err) {
-              put(prompt, errorBanner(err));
-            }
-          }),
-      }, "Delete run")), prompt));
   };
 
   const renderAll = () => {
     renderHeader();
+    renderActions();
     renderLive();
     renderWarnings();
     renderPictures();
@@ -736,12 +833,16 @@ async function showRun(runId) {
     renderStats();
     renderCheck();
     renderInstall();
-    renderFooter();
   };
 
   renderAll();
-  setView(h("div", { class: "windows" },
-    header, liveBox, warnings, picturesWin, stats, checkBox, fitness, installBox, footer));
+  // Grey frame, bordeaux page: the game's ride window.
+  setView(h("section", { class: "win c-grey" },
+    caption,
+    h("div", { class: "win-body" }, meta, actions, headSlot),
+    tablist,
+    h("div", { class: "win-body win-page c-bordeaux" }, RUN_TABS.map(([key]) => panels[key]))));
+  selectTab(current, false);
 
   state.refresh = async () => {
     if (run.status !== "running" && !run.checking) return;
@@ -767,6 +868,28 @@ async function showRun(runId) {
 // ---------------------------------------------------------------------------
 // Library
 
+// The library is the game's ride list: one row per run, columns you can sort
+// by clicking their headers, and actions that work on the ticked rows.
+const LIBRARY_COLUMNS = [
+  { key: "name", label: "Name", value: (r) => r.name.toLowerCase() },
+  { key: "status", label: "Status", value: (r) => r.status },
+  { key: "excitement", label: "Excitement", num: true, value: (r) => r.headline && r.headline.excitement },
+  { key: "intensity", label: "Intensity", num: true, value: (r) => r.headline && r.headline.intensity },
+  { key: "nausea", label: "Nausea", num: true, value: (r) => r.headline && r.headline.nausea },
+  { key: "speed", label: "Top speed", num: true, value: (r) => r.headline && r.headline.max_speed_mph },
+  { key: "drops", label: "Drops", num: true, value: (r) => r.headline && r.headline.drop_count },
+  { key: "game", label: "Game check", value: (r) => (r.check ? r.check.status : "") },
+  { key: "created", label: "Started", value: (r) => r.created || "" },
+];
+
+function librarySort() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("generide.librarySort"));
+    if (saved && LIBRARY_COLUMNS.some((c) => c.key === saved.key)) return saved;
+  } catch (_) { /* fall back to newest first */ }
+  return { key: "created", dir: "desc" };
+}
+
 async function showLibrary() {
   const token = state.viewToken;
   const { runs } = await api("GET", "/api/runs");
@@ -778,89 +901,125 @@ async function showLibrary() {
     return;
   }
 
+  let sort = librarySort();
   const selected = new Set();
-  const compareButton = h("a", { class: "button", "aria-disabled": "true" }, "Compare");
-  const hint = h("span", { class: "small muted" });
-  const syncCompare = () => {
-    const ok = selected.size >= 2 && selected.size <= 3;
-    hint.textContent = ok ? `${selected.size} runs selected.` : "Tick two or three runs to compare them.";
-    if (ok) {
-      compareButton.href = `#/compare?ids=${[...selected].join(",")}`;
-      compareButton.removeAttribute("aria-disabled");
-      compareButton.classList.add("primary");
-    } else {
-      compareButton.removeAttribute("href");
-      compareButton.setAttribute("aria-disabled", "true");
-      compareButton.classList.remove("primary");
-    }
+  const byId = new Map(runs.map((r) => [r.id, r]));
+  const tbody = h("tbody");
+  const headRow = h("tr");
+  const prompt = h("div");
+  const count = h("span", { class: "small", "aria-live": "polite" });
+  const openButton = h("a", { class: "button" }, "Open");
+  const compareButton = h("a", { class: "button primary" }, "Compare");
+  const rerunButton = h("a", { class: "button" }, "Rerun");
+  const deleteButton = h("button", { type: "button", class: "danger" }, "Delete");
+
+  const setLink = (link, href) => {
+    if (href) { link.href = href; link.removeAttribute("aria-disabled"); }
+    else { link.removeAttribute("href"); link.setAttribute("aria-disabled", "true"); }
+  };
+  const syncToolbar = () => {
+    const ids = [...selected];
+    const one = ids.length === 1 ? byId.get(ids[0]) : null;
+    count.textContent = ids.length
+      ? `${ids.length} selected.` : "Tick runs to compare, rerun, or delete them.";
+    setLink(openButton, one ? `#/run/${one.id}` : null);
+    setLink(rerunButton, one && one.status !== "unreadable" ? `#/new?rerun=${one.id}` : null);
+    setLink(compareButton, ids.length >= 2 && ids.length <= 3 ? `#/compare?ids=${ids.join(",")}` : null);
+    deleteButton.disabled = !ids.length || ids.some((id) => byId.get(id).status === "running");
   };
 
-  const windowText = (w) => (w ? `${w[0]}–${w[1]}` : "any");
-  const cards = runs.map((r) => {
-    const box = h("input", { type: "checkbox", "aria-label": `Select ${r.name} to compare`,
-      disabled: r.status === "unreadable" });
-    const card = h("article", { class: "run-card" });
-    const prompt = h("div", { class: "slot-inline" });
+  const ratings = (r, key, digits) => (r.headline && r.headline[key] !== null && r.headline[key] !== undefined
+    ? num(r.headline[key], digits) : "–");
+  const gameCell = (r) => {
+    if (r.checking) return "checking…";
+    if (!r.check) return "not checked";
+    const hl = r.headline;
+    return r.check.status === "rated"
+      ? h("span", { class: "tag game" }, `${num(hl.game_excitement, 2)} / ${num(hl.game_intensity, 2)} / ${num(hl.game_nausea, 2)}`)
+      : `failed`;
+  };
+
+  const row = (r) => {
+    const box = h("input", { type: "checkbox", "aria-label": `Select ${r.name}`, checked: selected.has(r.id) });
+    const tr = h("tr", { "aria-selected": selected.has(r.id) ? "true" : null, class: "run-row" },
+      h("td", { class: "pick" }, box),
+      h("th", { scope: "row" },
+        h("a", { href: `#/run/${r.id}` }, r.name), " ",
+        r.installed && r.installed.length ? h("span", { class: "tag game" }, "installed") : null,
+        r.warnings && r.warnings.length ? h("span", { class: "tag failed" }, "has problems") : null),
+      h("td", {}, statusTag(r.status)),
+      h("td", { class: "num" }, ratings(r, "excitement", 2)),
+      h("td", { class: "num" }, ratings(r, "intensity", 2)),
+      h("td", { class: "num" }, ratings(r, "nausea", 2)),
+      h("td", { class: "num" }, r.headline && r.headline.max_speed_mph !== null && r.headline.max_speed_mph !== undefined
+        ? `${num(r.headline.max_speed_mph, 0)} mph` : "–"),
+      h("td", { class: "num" }, r.headline && r.headline.drop_count !== null && r.headline.drop_count !== undefined
+        ? String(r.headline.drop_count) : "–"),
+      h("td", {}, r.status === "unreadable" ? r.error || "" : gameCell(r)),
+      h("td", { class: "nowrap" }, when(r.created)));
     box.addEventListener("change", () => {
       if (box.checked) selected.add(r.id); else selected.delete(r.id);
-      card.classList.toggle("selected", box.checked);
-      syncCompare();
+      tr.setAttribute("aria-selected", String(box.checked));
+      syncToolbar();
     });
-    if (r.status === "unreadable") {
-      add(card, box, h("div", { class: "title" }, h("strong", {}, r.id), statusTag(r.status)),
-        h("div", { class: "facts" }, r.error || ""));
-    } else {
-      const hl = r.headline;
-      const inputs = r.inputs;
-      const checkText = r.checking ? "checking…" : r.check
-        ? (r.check.status === "rated" ? `game ${num(hl.game_excitement, 2)} / ${num(hl.game_intensity, 2)} / ${num(hl.game_nausea, 2)}` : `check: ${r.check.status}`)
-        : "not checked";
-      add(card, box,
-        h("div", { class: "title" }, h("a", { href: `#/run/${r.id}` }, r.name), statusTag(r.status),
-          r.installed.length ? h("span", { class: "tag game" }, "installed") : null,
-          r.warnings.length ? h("span", { class: "tag failed" }, "has problems") : null),
-        h("div", { class: "facts" },
-          h("span", {}, when(r.created)),
-          h("span", {}, "Seed ", h("b", {}, r.seed)),
-          h("span", {}, "Footprint ", h("b", {}, `${inputs.max_width ?? "?"} x ${inputs.max_depth ?? "?"}`)),
-          h("span", {}, "E/I/N windows ", h("b", {}, `${windowText(inputs.target_excitement)}, ${windowText(inputs.target_intensity)}, ${windowText(inputs.target_nausea)}`)),
-          h("span", {}, `${inputs.generations ?? "?"} gen x ${inputs.population ?? "?"}, ${inputs.fitness ?? "?"} scoring`)),
-        h("div", { class: "facts" },
-          h("span", {}, "Estimated E/I/N ", h("b", {}, hl.excitement === null ? "–" : `${num(hl.excitement, 2)} / ${num(hl.intensity, 2)} / ${num(hl.nausea, 2)}`)),
-          h("span", {}, "Top speed ", h("b", {}, hl.max_speed_mph === null ? "–" : `${num(hl.max_speed_mph, 0)} mph`)),
-          h("span", {}, "Drops ", h("b", {}, hl.drop_count ?? "–")),
-          h("span", {}, checkText),
-          r.installed.length ? h("span", {}, `installed as ${r.installed[r.installed.length - 1]}`) : null),
-        h("div", { class: "actions" },
-          h("a", { class: "button", href: `#/run/${r.id}` }, "Open"),
-          h("a", { class: "button", href: `#/new?rerun=${r.id}` }, "Rerun"),
-          h("button", {
-            class: "danger",
-            disabled: r.status === "running",
-            onclick: () => askFirst(prompt, "Delete run",
-              `Delete “${r.name}” from the library? You can't undo this. A design already installed in OpenRCT2 stays installed.`,
-              "Delete run", async () => {
-                try {
-                  await api("DELETE", `/api/runs/${encodeURIComponent(r.id)}`);
-                  await showLibrary();
-                } catch (err) {
-                  put(prompt, errorBanner(err));
-                }
-              }),
-          }, "Delete")),
-        prompt);
-    }
-    return card;
+    // Clicking anywhere on a row opens the run, except on its own controls.
+    tr.addEventListener("click", (event) => {
+      if (event.target.closest("a, input, button, label")) return;
+      location.hash = `#/run/${r.id}`;
+    });
+    return tr;
+  };
+
+  const render = () => {
+    const column = LIBRARY_COLUMNS.find((c) => c.key === sort.key);
+    const sign = sort.dir === "asc" ? 1 : -1;
+    const sorted = [...runs].sort((a, b) => {
+      const x = column.value(a);
+      const y = column.value(b);
+      const missingX = x === null || x === undefined || x === "";
+      const missingY = y === null || y === undefined || y === "";
+      if (missingX || missingY) return missingX === missingY ? 0 : missingX ? 1 : -1; // blanks last
+      return (x < y ? -1 : x > y ? 1 : 0) * sign;
+    });
+    put(headRow, h("th", { class: "pick" }, h("span", { class: "visually-hidden" }, "Select")),
+      LIBRARY_COLUMNS.map((c) => {
+        const active = c.key === sort.key;
+        return h("th", { class: c.num ? "num" : null, "aria-sort": active ? (sort.dir === "asc" ? "ascending" : "descending") : null },
+          h("button", { type: "button", class: "sort", onclick: () => {
+            sort = { key: c.key, dir: active && sort.dir === "desc" ? "asc" : active ? "desc" : c.num || c.key === "created" ? "desc" : "asc" };
+            try { localStorage.setItem("generide.librarySort", JSON.stringify(sort)); } catch (_) { /* fine */ }
+            render();
+            headRow.querySelector(`[aria-sort] button`).focus();
+          } }, c.label, h("span", { class: "sort-mark", "aria-hidden": "true" }, active ? (sort.dir === "asc" ? "\u25B2" : "\u25BC") : "")));
+      }));
+    put(tbody, sorted.map(row));
+  };
+
+  deleteButton.addEventListener("click", () => {
+    const ids = [...selected];
+    const what = ids.length === 1 ? `“${byId.get(ids[0]).name}”` : `these ${ids.length} runs`;
+    askFirst(prompt, ids.length === 1 ? "Delete run" : "Delete runs",
+      `Delete ${what} from the library? You can't undo this. Designs already installed in OpenRCT2 stay installed.`,
+      ids.length === 1 ? "Delete run" : `Delete ${ids.length} runs`, async () => {
+        try {
+          for (const id of ids) await api("DELETE", `/api/runs/${encodeURIComponent(id)}`);
+          await showLibrary();
+        } catch (err) {
+          put(prompt, errorBanner(err));
+        }
+      });
   });
 
-  syncCompare();
+  render();
+  syncToolbar();
   // Grey frame, bordeaux page: the game's ride list.
   setView(win({ page: "bordeaux", title: "Run library", level: 1 },
-    h("div", { class: "header-row" },
-      h("p", {}, "Every run, newest first, whether it was started here or from the terminal. Clearing this library never touches rides installed in OpenRCT2."),
+    h("div", { class: "toolbar-row" },
+      h("div", { class: "actions" }, openButton, compareButton, rerunButton, deleteButton, count),
       h("a", { class: "button", href: "#/new" }, "New run")),
-    h("div", { class: "well runs" }, cards),
-    h("div", { class: "compare-bar" }, hint, compareButton)));
+    prompt,
+    h("div", { class: "well table-wrap" }, h("table", { class: "library" }, h("thead", {}, headRow), tbody)),
+    h("p", { class: "small" }, "Ratings are generide's estimates. Click a column header to sort, and a row to open it. Deleting a run never touches rides installed in OpenRCT2.")));
 }
 
 // ---------------------------------------------------------------------------

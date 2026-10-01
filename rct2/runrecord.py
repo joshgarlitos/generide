@@ -8,6 +8,7 @@ the library root holding:
     progress.jsonl      one line per generation, appended as the run goes
     improvements.jsonl  the full track every time the best ride improves
     best.td6            the exported ride, when there is one
+    name.txt            the run's name, written only by the web UI
 
 The two logs are append-only JSON lines, following `rct2.calibration_log`,
 so a crash or a closed laptop loses nothing already written. The improvements
@@ -38,6 +39,13 @@ RUN_FILE = "run.json"
 PROGRESS_FILE = "progress.jsonl"
 IMPROVEMENTS_FILE = "improvements.jsonl"
 BEST_TD6 = "best.td6"
+NAME_FILE = "name.txt"
+
+# Runs are named the way the game names a new ride: the ride type and the
+# lowest number not already taken. generide only builds Mine Trains.
+RIDE_TYPE_NAME = "Mine Train"
+NAME_MAX_LENGTH = 60
+_DEFAULT_NAME = re.compile(r"^" + re.escape(RIDE_TYPE_NAME) + r" ([0-9]{1,6})$")
 
 # UTC date-time, then the seed (which can be negative), then an optional
 # numeric suffix when two runs would otherwise share an id.
@@ -55,6 +63,10 @@ TERMINAL_STATUSES = ("completed", "stopped", "failed", "interrupted")
 # Read-modify-write of run.json from more than one thread in the web server
 # (a background check finishing while an install lands) must not interleave.
 _write_lock = threading.RLock()
+
+# Names live in their own file, so naming a run never rewrites run.json and
+# cannot race a running CLI process that is rewriting it.
+_name_lock = threading.RLock()
 
 
 class InvalidRunId(ValueError):
@@ -366,6 +378,93 @@ def delete_run(run_id: str) -> None:
     if record.get("status") == "running":
         raise RunIsActive(f"run {run_id} is still running; stop it first")
     shutil.rmtree(directory)
+
+
+class InvalidRunName(ValueError):
+    """A run name that is empty, too long, or has control characters."""
+
+
+def clean_run_name(name: Any) -> str:
+    """A run name with its whitespace tidied, or InvalidRunName."""
+    if not isinstance(name, str):
+        raise InvalidRunName("Enter a name.")
+    cleaned = " ".join(name.split())
+    if not cleaned:
+        raise InvalidRunName("Enter a name.")
+    if len(cleaned) > NAME_MAX_LENGTH:
+        raise InvalidRunName(f"Use {NAME_MAX_LENGTH} characters or fewer.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in cleaned):
+        raise InvalidRunName("Use letters, numbers, spaces, and punctuation only.")
+    return cleaned
+
+
+def saved_name(run_id: str) -> Optional[str]:
+    """The name saved for a run, or None if it has not been named yet."""
+    try:
+        name = (run_dir(run_id) / NAME_FILE).read_text().strip()
+    except OSError:
+        return None
+    return name or None
+
+
+def set_run_name(run_id: str, name: Any) -> str:
+    """Save a run's name and return it as saved."""
+    cleaned = clean_run_name(name)
+    directory = run_dir(run_id)
+    if not directory.is_dir():
+        raise FileNotFoundError(run_id)
+    with _name_lock:
+        tmp = directory / (NAME_FILE + ".tmp")
+        tmp.write_text(cleaned + "\n")
+        os.replace(tmp, directory / NAME_FILE)
+    return cleaned
+
+
+def _next_default_name(taken: List[str]) -> str:
+    numbers = set()
+    for name in taken:
+        match = _DEFAULT_NAME.fullmatch(name)
+        if match:
+            numbers.add(int(match.group(1)))
+    n = 1
+    while n in numbers:
+        n += 1
+    return f"{RIDE_TYPE_NAME} {n}"
+
+
+def name_unnamed_runs(records: Optional[List[Dict[str, Any]]] = None) -> Dict[str, str]:
+    """Give every run without a name one, oldest first, and return all names.
+
+    A run installed before names existed keeps the name it was installed
+    under. Every other run gets the next free "Mine Train N", the way the
+    game numbers a new ride, and keeps it from then on.
+    """
+    if records is None:
+        records = list_runs()
+    readable = [r for r in records if r.get("status") != "unreadable"]
+    with _name_lock:
+        names = {r["id"]: saved_name(r["id"]) for r in readable}
+        oldest_first = sorted(readable, key=lambda r: (r.get("created") or "", r["id"]))
+        for record in oldest_first:
+            if names[record["id"]]:
+                continue
+            installs = record.get("installs") or []
+            installed = installs[-1].get("name") if installs else None
+            try:
+                name = clean_run_name(installed) if installed else None
+            except InvalidRunName:
+                name = None
+            name = name or _next_default_name([n for n in names.values() if n])
+            try:
+                names[record["id"]] = set_run_name(record["id"], name)
+            except OSError:
+                names[record["id"]] = name
+    return {run_id: name for run_id, name in names.items() if name}
+
+
+def run_name(record: Dict[str, Any]) -> str:
+    """The run's saved name, or its date and seed if it has none yet."""
+    return saved_name(record["id"]) or display_name(record)
 
 
 def display_name(record: Dict[str, Any]) -> str:

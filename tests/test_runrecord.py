@@ -228,6 +228,52 @@ class TestDisplayName:
         assert display_name(rec) == "2026-09-27 09:36, seed 4"
 
 
+class TestRunNames:
+    def _at(self, minute, seed):
+        return _make(seed=seed, pid=_dead_pid(), now=CLOCK.replace(minute=minute))
+
+    def test_unnamed_runs_are_numbered_oldest_first(self):
+        newest = self._at(30, 2)
+        oldest = self._at(10, 1)
+        names = runrecord.name_unnamed_runs()
+        assert names[oldest] == "Mine Train 1"
+        assert names[newest] == "Mine Train 2"
+
+    def test_a_new_run_takes_the_lowest_free_number_and_names_stay_put(self):
+        # The game does the same: delete Mine Train 1 and the next new ride
+        # is Mine Train 1 again, while Mine Train 2 keeps its name.
+        first, second = self._at(10, 1), self._at(20, 2)
+        runrecord.name_unnamed_runs()
+        delete_run(first)
+        third = self._at(30, 3)
+        names = runrecord.name_unnamed_runs()
+        assert names[second] == "Mine Train 2"
+        assert names[third] == "Mine Train 1"
+
+    def test_a_run_installed_before_names_existed_keeps_its_install_name(self):
+        run_id = self._at(10, 1)
+        record_install(run_id, {"name": "Gold  Rush", "path": "/x.td6"})
+        assert runrecord.name_unnamed_runs()[run_id] == "Gold Rush"
+
+    def test_renaming_is_saved_beside_the_record_not_in_it(self):
+        run_id = self._at(10, 1)
+        load_run(run_id)  # marks the dead run interrupted, a write of its own
+        before = (runrecord.run_dir(run_id) / runrecord.RUN_FILE).read_text()
+        assert runrecord.set_run_name(run_id, "  Big   Thunder ") == "Big Thunder"
+        assert runrecord.run_name(load_run(run_id).record) == "Big Thunder"
+        assert (runrecord.run_dir(run_id) / runrecord.RUN_FILE).read_text() == before
+
+    @pytest.mark.parametrize("bad", ["", "   ", None, 5, "x" * 61, "bell\x07"])
+    def test_bad_names_are_refused(self, bad):
+        run_id = self._at(10, 1)
+        with pytest.raises(runrecord.InvalidRunName):
+            runrecord.set_run_name(run_id, bad)
+
+    def test_an_unnamed_run_falls_back_to_its_date_and_seed(self):
+        run_id = self._at(10, 4)
+        assert runrecord.run_name(load_run(run_id).record) == "2026-09-27 09:10, seed 4"
+
+
 def _progress(durations, best=None):
     t = 0.0
     out = [{"generation": 0, "time": t, "best_fitness": (best or [0.0])[0]}]

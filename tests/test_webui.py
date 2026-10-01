@@ -487,6 +487,29 @@ class TestInstall:
                     {"name_templates": ["{nope}"]}).status == 400
 
 
+class TestNames:
+    def test_the_library_names_every_run(self, app):
+        first, second = saved_run(seed=1), saved_run(seed=2)
+        runs = {r["id"]: r["name"] for r in call(app, "GET", "/api/runs").json()["runs"]}
+        assert sorted(runs.values()) == ["Mine Train 1", "Mine Train 2"]
+        assert call(app, "GET", f"/api/runs/{first}").json()["run"]["name"] == runs[first]
+
+    def test_opening_a_run_directly_names_it(self, app):
+        run_id = saved_run()
+        assert call(app, "GET", f"/api/runs/{run_id}").json()["run"]["name"] == "Mine Train 1"
+
+    def test_rename(self, app):
+        run_id = saved_run()
+        response = call(app, "POST", f"/api/runs/{run_id}/rename", {"name": "Big Thunder"})
+        assert response.status == 200 and response.json()["name"] == "Big Thunder"
+        assert call(app, "GET", f"/api/runs/{run_id}").json()["run"]["name"] == "Big Thunder"
+
+    def test_rename_refuses_an_empty_name(self, app):
+        run_id = saved_run()
+        response = call(app, "POST", f"/api/runs/{run_id}/rename", {"name": " "})
+        assert response.status == 400 and response.json()["field"] == "name"
+
+
 class TestDelete:
     def test_delete_removes_the_run_but_not_the_installed_design(self, app, game):
         """Covers AE9."""
