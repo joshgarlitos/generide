@@ -151,3 +151,19 @@ def test_out_of_range_messages_name_the_pages_range_not_the_local_one():
     check = demo.validate({"station_length": 99})
     maximum = demo.MAXIMUMS["station_length"]
     assert check["errors"]["station_length"] == f"Station length must be from 2 to {maximum} tiles on this page."
+
+
+def test_every_best_ride_carries_the_command_that_reproduces_it(tmp_path):
+    # Stopping a run keeps its last "best" ride, so that payload's command
+    # must make exactly that ride: the same request run for as many
+    # generations as had bred when it was found (elitism keeps the best).
+    _, events = _collect({"seed": 123}, **SMALL)
+    best = [p for kind, p in events if kind == "best"]
+    for payload in (best[0], best[-1]):
+        assert payload["td6"] is not None
+        out = tmp_path / f"gen{payload['generation']}.td6"
+        subprocess.run(
+            [sys.executable, str(REPO / "evolve_coaster.py"), *payload["cli_args"], "--no-record", "--output", str(out)],
+            cwd=REPO, check=True, capture_output=True,
+        )
+        assert out.read_bytes() == payload["td6"], payload["generation"]

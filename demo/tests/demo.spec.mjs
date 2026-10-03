@@ -46,6 +46,7 @@ test("stop waits for the first ride, keeps it, and the next run keeps the settin
 
   await expect(page.getByRole("heading", { name: "Your ride (stopped early)" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Top-down plan of the ride" })).toBeVisible();
+  await expect(page.locator(".code-line")).toContainText("python evolve_coaster.py");
 
   await page.getByRole("button", { name: "New run" }).click();
   await expect(page.getByRole("spinbutton", { name: "Station length" })).toHaveValue("8");
@@ -80,4 +81,23 @@ test("an engine that fails to download offers a retry and the repository link", 
   await page.unroute("**/engine-*.zip");
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("heading", { name: "Evolve a Mine Train" })).toBeVisible({ timeout: 60_000 });
+});
+
+test("a failed engine reload after stop keeps the stopped ride on screen", async ({ page }) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Go" }).click();
+  const stop = page.getByRole("button", { name: "Stop and keep the best ride" });
+  await expect(stop).toBeEnabled({ timeout: 60_000 });
+  // The replacement engine that starts on Stop cannot download.
+  await page.route("**/engine.json", (route) => route.abort());
+  await stop.click();
+
+  await expect(page.getByRole("heading", { name: "Your ride (stopped early)" })).toBeVisible();
+  await page.waitForTimeout(5_000);
+  await expect(page.getByRole("heading", { name: "Your ride (stopped early)" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Download the .td6" })).toBeVisible();
+
+  // The failure shows when the visitor asks for another run.
+  await page.getByRole("button", { name: "New run" }).click();
+  await expect(page.getByRole("heading", { name: "Something went wrong" })).toBeVisible();
 });

@@ -24,7 +24,7 @@ The numbers that decided the run size, all with default settings unless noted:
   Loading Pyodide and importing the engine took 2.7 s on top.
 - **Ride bar** (the default ride builds, finishes the circuit, and has at least one drop): 10 of 10 seeds at 20 x 20, 30 x 30, and 40 x 30, and 20 of 20 at 25 x 25.
 
-Every size passed the ride bar, so time decided it. 25 generations of 25 is the largest size where even the slowest settings the page allows finish under 30 seconds, so the footprint and station maximums (60, 60, and 12, tighter than the local web UI's 250 and 20) could stay where they were. The default seed is 2, the most exciting of the 20 at that size (5.37 estimated excitement, 3 drops); the median was 5.04. In headless Chromium the page's own timed runs took 17.9 s for the defaults and 26.0 s for the slowest settings.
+Every size passed the ride bar, so time decided it. 25 generations of 25 is the largest size where even the slowest settings the page allows finish under 30 seconds, so the footprint and station maximums (60, 60, and 12, tighter than the local web UI's 250 and 20) could stay where they were. The default seed is 2, the most exciting of the 20 at that size (5.37 estimated excitement, 3 drops); the median was 5.04. In headless Chromium the page's own timed runs took 17.9 s for the defaults and 26.0 s for the slowest settings here, and 19.9 s and 27.0 s on a GitHub Actions `ubuntu-latest` runner. The publish workflow fails, and so does not deploy, when either run takes more than 41 s, the runner's slower time plus 50%.
 
 Two things worth remembering:
 

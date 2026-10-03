@@ -186,7 +186,13 @@ def run(
 
     def send_best(generation: int, individual) -> None:
         payload = ride_result(individual.segments, values["max_width"], values["max_depth"])
-        payload.update(generation=generation, fitness=individual.fitness)
+        payload.update(
+            generation=generation,
+            fitness=individual.fitness,
+            # Run for as many generations as had bred when this ride was
+            # found, and elitism carries it to the end: the same ride.
+            cli_args=settings.cli_args(dict(values, generations=generation)),
+        )
         best_sent.update(fitness=individual.fitness, segments=list(individual.segments), payload=payload)
         emit("best", payload)
 
@@ -221,11 +227,17 @@ def run(
     best = stats.best_individual
     if best_sent and best_sent["segments"] == list(best.segments):
         # The ride the page already has; no need to simulate and render it again.
-        result = {k: v for k, v in best_sent["payload"].items() if k not in ("generation", "fitness")}
+        result = {
+            k: v for k, v in best_sent["payload"].items()
+            if k not in ("generation", "fitness", "cli_args")
+        }
     else:
         # A best bred in the last generation only shows up here, as in the CLI.
         result = ride_result(best.segments, values["max_width"], values["max_depth"])
-        emit("best", dict(result, generation=stats.generations, fitness=best.fitness))
+        emit("best", dict(
+            result, generation=stats.generations, fitness=best.fitness,
+            cli_args=settings.cli_args(values),
+        ))
     result.update(
         seed=seed,
         values=values,

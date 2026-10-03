@@ -19,6 +19,7 @@ const state = {
   values: null, // the last values the visitor ran with, kept for the next run
   onReady: null, // the settings form's hook for enabling go
   showErrors: null, // the settings form's hook for showing field errors
+  loadError: null, // a background engine load that failed while a result showed
   run: null, // the run in progress
   validateId: 0,
   urls: {}, // object URL per picture slot, revoked on replace
@@ -159,7 +160,10 @@ function onMessage(worker, message) {
       if (state.run) showResult(Object.assign({}, message.payload, { stopped_early: false }));
       break;
     case "error":
-      showError(message);
+      // A replacement engine loading behind a result (after Stop) must not
+      // wipe the ride the visitor is reading; the failure shows on New run.
+      if (message.where === "load" && state.screen === "result") state.loadError = message;
+      else showError(message);
       break;
     default:
       break;
@@ -425,7 +429,15 @@ function showResult(result) {
     : null;
 
   const again = h("button", { type: "button" }, "New run");
-  again.addEventListener("click", () => showSettings());
+  again.addEventListener("click", () => {
+    if (state.loadError) {
+      const failed = state.loadError;
+      state.loadError = null;
+      showError(failed);
+    } else {
+      showSettings();
+    }
+  });
 
   const command = result.cli_args
     ? h("div", { class: "well" }, h("p", { class: "code-line" },
@@ -449,9 +461,7 @@ function showResult(result) {
     win({ colour: "brown", title: "Take it further" },
       h("p", {}, "To put the ride in RollerCoaster Tycoon 2, copy the .td6 into OpenRCT2's track folder and pick it from the Mine Train track designs. Checking a ride in the real game and installing it from generide need the local tool and OpenRCT2: ",
         h("a", { href: LOCAL_SETUP }, "see how to run generide on your machine"), "."),
-      command ? h("p", {}, result.stopped_early
-        ? "This command runs the same request locally; a stopped run ends earlier than it does."
-        : "This command makes the same ride locally:") : null,
+      command ? h("p", {}, "This command makes the same ride locally:") : null,
       command,
       h("p", {}, "The code, the design notes, and the devlog are on ", repoLink("GitHub"), "."))));
 }

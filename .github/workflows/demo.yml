@@ -21,9 +21,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      # Runner time for the slower smoke case plus 50%, calibrated on this
-      # runner (docs/devlog.md, 2026-10-03).
-      DEMO_TIME_LIMIT: "90"
+      # The slower smoke case's time on this runner (27.0 s) plus 50%
+      # (docs/devlog.md, 2026-10-03).
+      DEMO_TIME_LIMIT: "41"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
