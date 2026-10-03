@@ -32,11 +32,8 @@ def test_run_matches_the_cli_byte_for_byte(tmp_path):
     assert final["td6"] is not None
 
     out = tmp_path / "cli.td6"
-    args = final["cli_args"] + [
-        "--generations", str(SMALL["generations"]),
-        "--population", str(SMALL["population"]),
-        "--no-record", "--output", str(out),
-    ]
+    # The page's own command, unchanged apart from where to write the file.
+    args = final["cli_args"] + ["--no-record", "--output", str(out)]
     subprocess.run(
         [sys.executable, str(REPO / "evolve_coaster.py"), *args],
         cwd=REPO, check=True, capture_output=True,
@@ -50,6 +47,9 @@ def test_cli_args_carry_the_hidden_fixed_settings():
     assert args[args.index("--fitness") + 1] == "physics"
     assert args[args.index("--genome") + 1] == "parts"
     assert args[args.index("--rng-seed") + 1] == "7"
+    assert args.count("--generations") == 1
+    assert args[args.index("--generations") + 1] == str(SMALL["generations"])
+    assert args[args.index("--population") + 1] == str(SMALL["population"])
 
 
 def test_progress_comes_once_per_generation_and_improvements_carry_a_ride():
@@ -80,7 +80,8 @@ def test_blank_seed_picks_one_and_reports_it_so_it_can_be_rerun():
 def test_invalid_input_is_reported_and_no_run_starts():
     events = []
     result = demo.run({"station_length": 1}, lambda kind, payload: events.append(kind), **SMALL)
-    assert result["errors"]["station_length"] == "Station length must be from 2 to 20 tiles."
+    maximum = demo.MAXIMUMS["station_length"]
+    assert result["errors"]["station_length"] == f"Station length must be from 2 to {maximum} tiles on this page."
     assert events == []
 
 
@@ -129,3 +130,24 @@ def test_ride_bar_matches_r16():
     assert demo.meets_ride_bar(demo.ride_result(create_hill_circuit(station_length=6), 30, 30)["summary"])
     flat = demo.ride_result(create_simple_circuit(station_length=6), 30, 30)
     assert not demo.meets_ride_bar(flat["summary"])
+
+
+def test_results_carry_the_web_uis_stats_table_and_warnings():
+    flat = demo.ride_result(create_simple_circuit(station_length=6), 30, 30)
+    labels = [row["label"] for row in flat["stats_view"]["simulated"]]
+    assert "Top speed" in labels and "Completes the circuit" in labels
+    assert any("does not complete the circuit" in w for w in flat["warnings"])
+
+    broken = demo.ride_result(create_simple_circuit(station_length=6)[:-3], 30, 30)
+    assert any("fails construction checks" in w for w in broken["warnings"])
+
+    hill = demo.ride_result(create_hill_circuit(station_length=6), 30, 30)
+    assert hill["warnings"] == []
+
+
+def test_out_of_range_messages_name_the_pages_range_not_the_local_one():
+    # 99 is past both the local web UI's limit and this page's; the message
+    # should name the range the page's form shows.
+    check = demo.validate({"station_length": 99})
+    maximum = demo.MAXIMUMS["station_length"]
+    assert check["errors"]["station_length"] == f"Station length must be from 2 to {maximum} tiles on this page."

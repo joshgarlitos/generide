@@ -27,3 +27,9 @@ AGENTS.md
 /benchmark_results/
 
 .compound-engineering/
+
+# In-browser page: the built site and its build/test tooling
+_site/
+demo/node_modules/
+demo/test-results/
+demo/playwright-report/

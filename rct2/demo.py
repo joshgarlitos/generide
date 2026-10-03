@@ -25,7 +25,7 @@ import random
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from rct2 import checksum, render, runrecord, settings, td6
+from rct2 import checksum, render, runrecord, settings, td6, webui
 from rct2.evolution import evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness
 from rct2.generate import create_hill_circuit
@@ -97,12 +97,15 @@ def validate(raw_values: Dict[str, Any]) -> Dict[str, Any]:
     values = dict(check.values)
     values.update(FIXED)
     for key, maximum in MAXIMUMS.items():
-        if key in errors:
-            continue
-        if values.get(key) is not None and values[key] > maximum:
-            s = settings.BY_KEY[key]
-            unit = f" {s.unit}" if s.unit else ""
-            errors[key] = f"{s.label} must be from {s.minimum:g} to {maximum}{unit} on this page."
+        s = settings.BY_KEY[key]
+        unit = f" {s.unit}" if s.unit else ""
+        page_range = f"{s.label} must be from {s.minimum:g} to {maximum}{unit} on this page."
+        out_of_range = values.get(key) is not None and values[key] > maximum
+        # The shared validator names the local web UI's wider range; on this
+        # page the form shows the narrower one, so say that instead.
+        shared_range = errors.get(key, "").startswith(f"{s.label} must be from ")
+        if out_of_range or shared_range:
+            errors[key] = page_range
     return {"values": values, "errors": errors}
 
 
@@ -125,6 +128,9 @@ def ride_result(segments: List[int], max_width: Optional[int], max_depth: Option
         data = checksum.append(td6.encode(ride))
     return {
         "summary": summary,
+        # The local web UI's own wording for the numbers and the flags.
+        "stats_view": webui._stats_view(summary, {}),
+        "warnings": webui._warnings(summary, {}),
         "plan_svg": render.render_track(segments, title="Top-down plan"),
         "profile_svg": render.render_profile(
             segments, lift_indices=set(summary["lift_indices"]), title="Side profile",
@@ -151,6 +157,10 @@ def run(
     values = check["values"]
     generations = GENERATIONS if generations is None else generations
     population = POPULATION if population is None else population
+
+    # Recorded in the values so cli_args() names the size this run used.
+    values["generations"] = generations
+    values["population"] = population
 
     seed = values["seed"]
     if seed is None:
@@ -186,6 +196,7 @@ def run(
             if population_now.individuals else 0.0
         )
         emit("progress", {
+            "seed": seed,
             "generation": generation,
             "generations": generations,
             "best_fitness": best.fitness if best else None,

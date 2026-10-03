@@ -1,0 +1,16 @@
+{
+  "name": "generide-demo",
+  "private": true,
+  "description": "Build and test tooling for generide's in-browser page. The page itself is static files; see tools/build_demo.py.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "measure": "node tools/measure.mjs"
+  },
+  "dependencies": {
+    "pyodide": "314.0.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}
