@@ -164,9 +164,9 @@ Changed: R9 and AE3. generide never exports a construction-invalid track (`evolv
 - KTD1. **Vendor Pyodide into the site from a pinned npm package at build time, not a CDN.** The page then has no third-party runtime dependency, the build is reproducible, and CI and sandboxed environments that block CDNs can still build and test it. The cost is about 14 MB of static files on Pages, loaded once per visit (R14 covers the wait). Governs R2, R14.
 - KTD2. **The engine runs in a dedicated Web Worker.** The page stays responsive while Python runs, and the worker reports through `postMessage` from the engine's existing progress callback. Governs R8.
 - KTD3. **Stop terminates the worker; every improvement already carries a complete best-so-far result.** Each time the best ride improves, the worker sends its plan, profile, summary, and `.td6` bytes, so stopping loses nothing, and a fresh worker starts loading in the background for the next run. Rejected: a shared-memory interrupt flag, which needs cross-origin isolation headers that GitHub Pages cannot set. Governs R8, AE2.
-- KTD4. **Run size is fixed and not a visitor setting.** Generations and population are constants measured in U4. The visible settings are seed, station length, footprint width and depth, and the excitement, intensity, and nausea windows. Hidden fixed values are physics scoring, the parts genome, and mutation rate 0.1. Governs R4, R6, R16.
+- KTD4. **Run size is fixed and not a visitor setting.** Generations and population are constants measured in U4. The visible settings are seed, station length, footprint width and depth, and the excitement, intensity, and nausea windows. Hidden fixed values are physics scoring, the parts genome, and mutation rate 0.1. The seed field starts filled with a fixed default seed chosen in U4 from seeds that meet R16, so the one-click run is the measured run; the visitor can change or clear it. The demo narrows the footprint and station-length maximums from `rct2/settings.py` wherever U4 shows the worst case would exceed R6. Governs R4, R5, R6, R16.
 - KTD5. **A browser-run module mirrors the CLI's run construction instead of refactoring `evolve_coaster.main`.** It builds the seed, fitness function, and `evolve_parts` call the same way, and imports `create_ride_from_segments` from `evolve_coaster.py`. An equivalence test pins its `.td6` output to the CLI's for the same seed and full settings. Rejected: extracting a shared runner from `main()`, which would touch the CLI's signal handling and run-record flow for no user-visible gain. Governs the CLI-match success criterion.
-- KTD6. **The settings form comes from `rct2/settings.py`.** Labels, explanations, defaults, ranges, and validation messages are the same ones the local web UI uses, filtered to KTD4's visible set. Governs R4, R7.
+- KTD6. **The settings form comes from `rct2/settings.py`.** Labels, explanations, defaults, ranges, and validation messages are the same ones the local web UI uses, filtered to KTD4's visible set, with KTD4's narrowed maximums where they apply. Governs R4, R7.
 - KTD7. **The page has its own small front end; it reuses `tokens.css` and `style.css` but not `app.js`.** The local `app.js` is built around the HTTP API in `rct2/webui.py` and its run library. Governs R3, R8, R9.
 - KTD8. **Publish through a GitHub Actions workflow that tests before it deploys to Pages.** A failed check skips the deploy, and Pages keeps serving the last successful deployment, which is how R12 keeps the last good page live. Governs R12.
 - KTD9. **Browser tests use Node Playwright under `demo/`, against the built site served locally.** Python tests stay in `pytest`. Governs R12, R13, R15.
@@ -194,11 +194,11 @@ stateDiagram-v2
   Loading --> Unsupported: no WebAssembly or Worker
   Loading --> Error: engine failed to load
   Loading --> Settings: engine ready
-  Settings --> Running: go
+  Settings --> Running: go, once the engine is ready
   Running --> Result: run finished
   Running --> Result: stop after first generation
   Running --> Error: run errored
-  Result --> Settings: new run, last settings kept
+  Result --> Settings: new run, last settings kept; go waits for the replacement engine
   Error --> Loading: retry
 ```
 
@@ -232,12 +232,13 @@ The built site goes to `_site/`, which is ignored by git.
 
 ### Assumptions
 
-- Pyodide 314.0.7 runs the engine without changes to engine code. Its Python is newer than CI's 3.9, and the engine already targets 3.9 and later.
+- Pyodide 314.0.7 (Python 3.14) runs the engine without changes to engine code; a review-time check ran a default-settings 30-generation, population-30 physics run in it under Node in about 27.6 seconds plus about 2.2 seconds to load, against about 15 seconds in native Python. The largest settings ran up to about 2x slower than the defaults in native Python. Its Python is newer than CI's 3.9, and the engine already targets 3.9 and later.
 - Rendering and summarizing a best-so-far ride on each improvement is cheap next to a generation of physics scoring, because improvements are much rarer than evaluations.
-- A browser run and a CPython run with the same seed and settings produce the same ride. If the WebAssembly math library differs in the last bit, the equivalence test still pins the browser module to the CLI under CPython, and a browser mismatch is reported in the devlog as a known difference, not fixed in this work.
+- A browser run and a CPython run with the same seed and settings produce the same ride. U1's equivalence test pins the module to the CLI under CPython, and U4 compares one Pyodide run's bytes to CPython's. A mismatch from the WebAssembly math library is recorded in the devlog as a known difference, not fixed in this work.
 
 ### Risks
 
+- **Other browsers run slower.** U4 and U5 measure in V8 only; Firefox and Safari may run the same size slower than R6 allows. The devlog notes this, and a manual check in one non-Chromium browser before merge is part of U3's verification.
 - **Run size too small for an interesting ride.** U4 measures this first; R6 and R16 say the time limit rises if needed, and the Goal Capsule's stop condition covers the case where nothing works.
 - **First load is heavy.** About 14 MB on first visit. R14's progress display keeps it from looking broken; the Success Criteria's one-minute target may not hold on slow connections.
 - **Engine changes on main break the page.** U5's publish check runs both the default and the largest allowed settings before any deploy.
@@ -259,7 +260,7 @@ The built site goes to `_site/`, which is ignored by git.
 - Create `tests/test_demo.py`
 
 **Approach:**
-1. Expose the curated settings (KTD4) as a filtered view of `settings.table()`, with the fixed run size and hidden values as module constants, and validate input through `settings.validate`.
+1. Expose the curated settings (KTD4) as a filtered view of `settings.table()`, with the fixed run size, hidden values, default seed, and narrowed maximums as module constants. Validate input through `settings.validate`, then against the narrowed maximums with the same message shape.
 2. Build the run exactly as `evolve_coaster.main` does for `--genome parts --fitness physics`: `create_hill_circuit(station_length)`, `CoasterRequest`, `PhysicsFitness.from_request`, `random.Random(seed)`, then `evolve_parts`. Pick a random seed when none is given and report it.
 3. From the progress callback, emit a progress payload (generation, best and average fitness, fitness-curve SVG). When the best improves, emit a best-so-far payload: plan SVG, profile SVG, `runrecord.ride_summary`, and `.td6` bytes from `create_ride_from_segments` plus `td6.encode`, or no bytes when construction validation fails (R9, AE3).
 4. After `evolve_parts` returns, emit the final result the same way, including a best found by the last generation's offspring, as the CLI does.
@@ -274,6 +275,8 @@ The built site goes to `_site/`, which is ignored by git.
 - A best ride that passes construction but does not complete the circuit produces `.td6` bytes and a summary with `completed` false.
 - Invalid input, such as station length 1, returns the same validation message `settings.validate` gives, and no run starts.
 - Leaving seed blank picks a seed and reports it, and running again with that seed gives the same ride.
+- The settings view reports the fixed default seed as the seed field's starting value.
+- A footprint or station length above the demo's narrowed maximum is rejected with a message naming the allowed range.
 
 **Verification:** `pytest tests/test_demo.py` passes, and the CLI-equivalence test proves the module and the CLI produce identical `.td6` files.
 
@@ -321,7 +324,7 @@ The built site goes to `_site/`, which is ignored by git.
 
 **Approach:**
 1. `worker.js` loads Pyodide, unpacks the engine archive, imports `rct2.demo`, reports load progress, and forwards each payload from U1 as a message.
-2. `app.js` follows the state diagram above. It renders the form from the curated settings table the worker sends, shows validation beside fields, and disables stop until the first progress message arrives.
+2. `app.js` follows the state diagram above. It renders the form from the curated settings table the worker sends, shows validation beside fields, and disables stop until the first progress message arrives. When the form shows while a replacement worker is still loading, go stays disabled beside a short "getting the engine ready" line and enables when the worker reports ready; a failed load goes to the error state.
 3. Stop terminates the worker, shows the last best-so-far result as the result, and starts a fresh worker (KTD3).
 4. The result view shows plan, profile, stats with estimates labeled, flags, the download (built from the bytes with a Blob), the note that game checks and installs need the local tool with a link to the README section, a link to the repository, and a new-run control that keeps the last settings.
 5. Detect missing WebAssembly or Worker support before loading and show the desktop-browser message with the repository link (R13). Show a retry and the repository link on any load or run error (R15).
@@ -333,13 +336,14 @@ The built site goes to `_site/`, which is ignored by git.
 - Covers AE1. Pressing go with defaults shows a generation counter within a few seconds, then a result with plan, profile, stats, and a download.
 - Covers AE2. Stop is disabled before the first progress message; pressing it after shows the best ride so far as a result.
 - The new-run control returns to the form with the last values filled in.
+- Right after stop, go is disabled until the replacement worker reports ready, then enabled.
 - Covers AE4. The result view shows the local-tool note and a link to the README's setup section.
 - Covers AE5. With `WebAssembly` removed from the page context, the page shows the desktop-browser message and the repository link.
 - Covers AE7. With the engine archive request failing, the page shows the could-not-start message, a retry, and the repository link.
 - Covers AE6. After a refresh, no previous result is shown.
 - Covers AE3. A result marked invalid shows the no-buildable-ride message and no download link.
 
-**Verification:** The Playwright suite passes against `_site/` served locally, and a manual run in a desktop browser shows each state.
+**Verification:** The Playwright suite passes against `_site/` served locally, and a manual run in a desktop browser shows each state, with one default run also timed in a non-Chromium browser and the time noted in the devlog.
 
 ### U4. Measure and set the run size
 
@@ -355,15 +359,18 @@ The built site goes to `_site/`, which is ignored by git.
 - Modify `docs/devlog.md`
 
 **Approach:**
-1. Run the engine through Pyodide in Node, with the same archive the site uses, for a grid of generations and population across at least 10 seeds with default settings.
-2. For each size, record median and worst wall-clock time and the share of runs whose ride passes R16 (valid, completes the circuit, at least one drop).
-3. Pick the smallest size where every measured seed meets R16; if that takes more than 30 seconds, take it anyway, per R6. Record the table and the choice in the devlog.
+1. Run the engine through Pyodide in Node, with the same archive the site uses, for a grid of generations and population across at least 10 seeds, at three settings corners: the defaults, the largest footprint with the longest station, and the smallest footprint.
+2. For each size and corner, record median and worst wall-clock time, and for the defaults the share of seeds whose ride meets R16 (valid, completes the circuit, at least one drop).
+3. Pick the run size by two rules: the default settings meet R16 for every measured seed, and the worst corner's worst time fits R6. If the worst corner does not fit, narrow the footprint and station-length maximums in `rct2/demo.py` (KTD4) before growing the time limit. If the defaults need more than 30 seconds to meet R16, take the longer time, per R6.
+4. Choose the fixed default seed from the measured seeds that meet R16 at the chosen size.
+5. Compare the `.td6` bytes from one Pyodide run (seed 123, station length 6, small run size) with CPython's output for the same arguments, and record match or mismatch.
+6. Record the grid, the chosen size, the narrowed maximums, the default seed, the byte comparison, and the blank-seed R16 pass rate in the devlog.
 
 **Execution note:** Measure before tuning anything else; the numbers decide the constants, and U5's time limit uses them.
 
 **Test expectation:** none -- this unit sets constants from measurement; U1's tests and U5's publish check cover behavior.
 
-**Verification:** The devlog entry shows the measured grid and the chosen size, and a default run with the chosen size in Node meets R16 for every measured seed.
+**Verification:** The devlog entry shows the measured grid, the chosen size, the narrowed maximums, the default seed, and the Pyodide-to-CPython byte comparison, and a default run with the chosen size in Node meets R16 for every measured seed.
 
 ### U5. Publish workflow
 
@@ -377,9 +384,10 @@ The built site goes to `_site/`, which is ignored by git.
 - Create `.github/workflows/demo.yml`
 
 **Approach:**
-1. On pull requests and pushes to main: set up Python and Node, install `demo/` dependencies, run `pytest`, build the site, and run the Playwright suite plus a timed smoke run of the default and the largest allowed settings.
-2. The smoke fails if either run errors, takes more than the measured limit plus a margin, or the default ride misses R16.
-3. Only on pushes to main, and only when every step passed, upload `_site/` and deploy with the GitHub Pages actions.
+1. On pull requests and pushes to main: set up Python and Node, install `demo/` dependencies, run `pytest`, build the site, and run the Playwright suite plus a timed smoke run of two cases in headless Chromium: the defaults with the fixed default seed, and the slow corner U4 measured (largest footprint and longest station within the demo's maximums).
+2. The time limit is calibrated on the CI runner itself: the PR's first workflow run records both cases' times in headless Chromium, those times go in the devlog next to U4's local numbers, and the limit is those runner times plus 50%.
+3. The smoke fails if either run errors, exceeds that limit, or the default ride misses R16.
+4. Only on pushes to main, and only when every step passed, upload `_site/` and deploy with the GitHub Pages actions.
 
 **Patterns to follow:** `.github/workflows/tests.yml` for the Python job shape.
 
