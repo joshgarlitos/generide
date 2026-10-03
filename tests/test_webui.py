@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -341,6 +342,18 @@ class TestRequestGuards:
         assert response.headers["X-Frame-Options"] == "DENY"
         assert "script-src 'self'" in response.headers["Content-Security-Policy"]
 
+    def test_serves_every_file_the_page_links(self, app):
+        # The page links tokens.css (the design system) and then style.css.
+        # A file the server doesn't serve fails silently in the browser and
+        # leaves the page unstyled, so check each link resolves.
+        page = call(app, "GET", "/").body.decode()
+        linked = re.findall(r'(?:href|src)="(/[^"#]+\.(?:css|js))"', page)
+        assert "/tokens.css" in linked and "/style.css" in linked
+        for path in linked:
+            response = call(app, "GET", path)
+            assert response.status == 200, path
+            assert response.body, path
+
 
 class TestPicturesAndDownload:
     @pytest.mark.parametrize("kind", ["plan", "profile", "fitness"])
@@ -472,6 +485,29 @@ class TestInstall:
         assert ui["name_templates"] == ["{name} {date}"]
         assert call(app, "POST", "/api/ui-settings",
                     {"name_templates": ["{nope}"]}).status == 400
+
+
+class TestNames:
+    def test_the_library_names_every_run(self, app):
+        first, second = saved_run(seed=1), saved_run(seed=2)
+        runs = {r["id"]: r["name"] for r in call(app, "GET", "/api/runs").json()["runs"]}
+        assert sorted(runs.values()) == ["Mine Train 1", "Mine Train 2"]
+        assert call(app, "GET", f"/api/runs/{first}").json()["run"]["name"] == runs[first]
+
+    def test_opening_a_run_directly_names_it(self, app):
+        run_id = saved_run()
+        assert call(app, "GET", f"/api/runs/{run_id}").json()["run"]["name"] == "Mine Train 1"
+
+    def test_rename(self, app):
+        run_id = saved_run()
+        response = call(app, "POST", f"/api/runs/{run_id}/rename", {"name": "Big Thunder"})
+        assert response.status == 200 and response.json()["name"] == "Big Thunder"
+        assert call(app, "GET", f"/api/runs/{run_id}").json()["run"]["name"] == "Big Thunder"
+
+    def test_rename_refuses_an_empty_name(self, app):
+        run_id = saved_run()
+        response = call(app, "POST", f"/api/runs/{run_id}/rename", {"name": " "})
+        assert response.status == 400 and response.json()["field"] == "name"
 
 
 class TestDelete:

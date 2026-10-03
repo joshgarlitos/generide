@@ -5,23 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>generide</title>
+  <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
-<body>
-  <header class="topbar">
-    <a class="brand" href="#/library">generide</a>
-    <nav aria-label="Main">
-      <a href="#/new" data-nav="new">New run</a>
-      <a href="#/library" data-nav="library">Library</a>
-      <a href="#/library" id="active-chip" class="active-chip" hidden>
-        <span class="pulse" aria-hidden="true"></span><span id="active-chip-text">Running</span>
-      </a>
+<body class="desktop">
+  <header class="top c-grey outset">
+    <nav class="toolbar" aria-label="Main">
+      <a class="brand" href="#/library">generide</a>
+      <div class="toolgroup c-brown">
+        <a class="button" href="#/new" data-nav="new">New run</a>
+      </div>
+      <div class="toolgroup c-bordeaux">
+        <a class="button" href="#/library" data-nav="library">Library</a>
+      </div>
     </nav>
   </header>
   <main id="view" tabindex="-1">
-    <p class="muted">Loading…</p>
+    <section class="win c-grey">
+      <h1 class="win-caption">generide</h1>
+      <div class="win-body"><p>Loading…</p></div>
+    </section>
   </main>
-  <noscript><p class="banner warn">generide's page needs JavaScript turned on.</p></noscript>
+  <noscript>
+    <div class="noscript">
+      <section class="win c-bordeaux prompt">
+        <h1 class="win-caption">JavaScript is off</h1>
+        <div class="win-body"><p>generide's page needs JavaScript turned on.</p></div>
+      </section>
+    </div>
+  </noscript>
+  <footer class="foot">
+    <div class="statusbar c-darkgreen outset">
+      <a href="#/library" id="active-chip" class="status-run" hidden>
+        <span class="pulse" aria-hidden="true"></span><span id="active-chip-text">Running</span>
+      </a>
+      <span id="idle-text">No run active</span>
+    </div>
+  </footer>
 </body>
 </html>

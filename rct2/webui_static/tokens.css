@@ -1,0 +1,500 @@
+/* generide design tokens and components, in the style of RollerCoaster Tycoon 2.
+ *
+ * The rules behind every value here are in docs/design/README.md. Read that
+ * first; this file is the reference implementation, not the spec. The web UI
+ * serves it as /tokens.css, and docs/design/specimen.html links to it here,
+ * so there is one copy.
+ *
+ * Colour ramps are taken from the 256-colour palette that OpenRCT2 ships in
+ * src/openrct2/drawing/ImageImporter.h (StandardPalette). Each ramp has 12
+ * steps, 0 (darkest) to 11 (lightest), in the same order as the game's.
+ */
+
+/* Layout concept: a park "desktop" with bevelled windows sitting on it. */
+:root {
+  /* ---- Ramps ------------------------------------------------------------ */
+  /* grey: palette 10-21. Every neutral window frame. */
+  --grey-0: #172323; --grey-1: #233333; --grey-2: #2f4343; --grey-3: #3f5353;
+  --grey-4: #4b6363; --grey-5: #5b7373; --grey-6: #6f8383; --grey-7: #839797;
+  --grey-8: #9fafaf; --grey-9: #b7c3c3; --grey-10: #d3dbdb; --grey-11: #eff3f3;
+  /* bordeaux: palette 58-69 ("Indian Red"). Ride windows and error prompts. */
+  --bordeaux-0: #230000; --bordeaux-1: #4f0000; --bordeaux-2: #5f0707; --bordeaux-3: #6f0f0f;
+  --bordeaux-4: #7f1b1b; --bordeaux-5: #8f2727; --bordeaux-6: #a33b3b; --bordeaux-7: #b34f4f;
+  --bordeaux-8: #c76767; --bordeaux-9: #d77f7f; --bordeaux-10: #eb9f9f; --bordeaux-11: #ffbfbf;
+  /* brown: palette 214-225. Construction windows (building a request). */
+  --brown-0: #271300; --brown-1: #371f07; --brown-2: #472f0f; --brown-3: #5b3f1f;
+  --brown-4: #6b5333; --brown-5: #7b674b; --brown-6: #8f7f6b; --brown-7: #a3937f;
+  --brown-8: #bbab93; --brown-9: #cfc3ab; --brown-10: #e7dbc3; --brown-11: #fff3df;
+  /* darkgreen: palette 142-153 ("Sea Green"). Status bar and live progress. */
+  --darkgreen-0: #0b2b0f; --darkgreen-1: #0f3717; --darkgreen-2: #17471f; --darkgreen-3: #23532b;
+  --darkgreen-4: #2f633b; --darkgreen-5: #3b734b; --darkgreen-6: #4f875f; --darkgreen-7: #639b77;
+  --darkgreen-8: #7baf8b; --darkgreen-9: #93c7a7; --darkgreen-10: #afdbc3; --darkgreen-11: #cff3df;
+  /* lightblue: palette 130-141. Options, help, and reference windows. */
+  --lightblue-0: #001b6f; --lightblue-1: #002797; --lightblue-2: #0733a7; --lightblue-3: #0f43bb;
+  --lightblue-4: #1b53cb; --lightblue-5: #2b67df; --lightblue-6: #4387e3; --lightblue-7: #5ba3e7;
+  --lightblue-8: #77bbef; --lightblue-9: #8fd3f3; --lightblue-10: #afe7fb; --lightblue-11: #d7f7ff;
+  /* yellow: palette 46-57. Numbers that came from the game itself; warnings. */
+  --yellow-0: #471b00; --yellow-1: #5f2b00; --yellow-2: #773f00; --yellow-3: #8f5307;
+  --yellow-4: #a76f07; --yellow-5: #bf8b0f; --yellow-6: #d7a713; --yellow-7: #f3cb1b;
+  --yellow-8: #ffe72f; --yellow-9: #fff35f; --yellow-10: #fffb8f; --yellow-11: #ffffc3;
+  /* green: palette 94-105 ("saturated green"). The one main action per window. */
+  --green-0: #0f3f00; --green-1: #135300; --green-2: #176700; --green-3: #1f7b00;
+  --green-4: #278f07; --green-5: #379f17; --green-6: #47af27; --green-7: #5bbf3f;
+  --green-8: #6fcf57; --green-9: #8bdf73; --green-10: #a3ef8f; --green-11: #c3ffb3;
+  /* grass: palette 70-81. The park lawn behind the windows (light scheme). */
+  --grass-3: #3b5f27; --grass-4: #476f2b; --grass-5: #577f33; --grass-6: #638f3b;
+
+  /* ---- Scheme tokens (the only values that change with light and dark) -- */
+  --desktop: var(--grass-5);
+  --desktop-tile: var(--grass-4);
+
+  /* ---- Fixed tokens ----------------------------------------------------- */
+  --ink-dark: #000000;
+  --ink-light: #ffffff;
+  --focus-ring: var(--yellow-8);
+  --graph-bg: var(--grey-1);
+  --graph-grid: var(--grey-3);
+  --graph-axis: var(--grey-9);
+  --trace-speed: var(--yellow-8);
+  --trace-height: var(--darkgreen-10);
+  --trace-lift: var(--lightblue-8);
+  --trace-stall: var(--bordeaux-10);
+  --trace-score: var(--green-9);
+
+  /* One game pixel. RCT2 draws 1px bevels at 640x480; on a modern screen we
+     draw them at 2px, the same as OpenRCT2's 2x window scale. */
+  --u: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --control-h: 28px;   /* 14 game pixels, the height of an RCT2 button */
+  --caption-h: 28px;
+  --tab-h: 30px;
+
+  --font-ui: Verdana, Tahoma, "DejaVu Sans", "Segoe UI", sans-serif;
+  --font-display: "Pixelify Sans", Verdana, Tahoma, "DejaVu Sans", sans-serif;
+  --font-code: "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;     /* default UI text */
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-read: 15px;   /* long-form reading (devlog, wiki) */
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desktop: var(--grey-0);
+    --desktop-tile: #0f1919;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desktop: var(--grey-0);
+  --desktop-tile: #0f1919;
+  color-scheme: dark;
+}
+
+/* ---- Window colours -------------------------------------------------------
+ * Every component reads these local variables, so one class recolours a
+ * window and everything in it, like RCT2's per-window colour scheme.
+ * Steps follow OpenRCT2's fillInset(): fill = light (7), highlight =
+ * lighter (8), shadow = midDark (5). The caption is darker (3) and wells are
+ * lighter (10) than the game, for text contrast. Text on a window fill is
+ * always --ink (black, or white on bordeaux); quieter text colours pass
+ * contrast only inside wells, so --well-quiet is for wells only. */
+.c-grey, .c-bordeaux, .c-brown, .c-darkgreen, .c-lightblue, .c-yellow, .c-green {
+  background: var(--fill);
+  color: var(--ink);
+}
+.c-grey      { --fill: var(--grey-7); --hi: var(--grey-8); --lo: var(--grey-5); --deep: var(--grey-3); --well: var(--grey-10); --well-lo: var(--grey-6); --well-quiet: var(--grey-3); --ink: var(--ink-dark); --hover: var(--grey-8); --row-hover: var(--grey-9); }
+.c-bordeaux  { --fill: var(--bordeaux-7); --hi: var(--bordeaux-8); --lo: var(--bordeaux-5); --deep: var(--bordeaux-3); --well: var(--bordeaux-11); --well-lo: var(--bordeaux-6); --well-quiet: var(--bordeaux-3); --ink: var(--ink-light); --hover: var(--bordeaux-6); --row-hover: var(--bordeaux-10); }
+.c-brown     { --fill: var(--brown-7); --hi: var(--brown-8); --lo: var(--brown-5); --deep: var(--brown-3); --well: var(--brown-10); --well-lo: var(--brown-6); --well-quiet: var(--brown-3); --ink: var(--ink-dark); --hover: var(--brown-8); --row-hover: var(--brown-9); }
+.c-darkgreen { --fill: var(--darkgreen-7); --hi: var(--darkgreen-8); --lo: var(--darkgreen-5); --deep: var(--darkgreen-3); --well: var(--darkgreen-10); --well-lo: var(--darkgreen-6); --well-quiet: var(--darkgreen-3); --ink: var(--ink-dark); --hover: var(--darkgreen-8); --row-hover: var(--darkgreen-9); }
+.c-lightblue { --fill: var(--lightblue-7); --hi: var(--lightblue-8); --lo: var(--lightblue-5); --deep: var(--lightblue-3); --well: var(--lightblue-11); --well-lo: var(--lightblue-6); --well-quiet: var(--lightblue-3); --ink: var(--ink-dark); --hover: var(--lightblue-8); --row-hover: var(--lightblue-10); }
+.c-yellow    { --fill: var(--yellow-6); --hi: var(--yellow-8); --lo: var(--yellow-4); --deep: var(--yellow-3); --well: var(--yellow-11); --well-lo: var(--yellow-5); --well-quiet: var(--yellow-3); --ink: var(--ink-dark); --hover: var(--yellow-8); --row-hover: var(--yellow-10); }
+.c-green     { --fill: var(--green-5); --hi: var(--green-7); --lo: var(--green-3); --deep: var(--green-1); --well: var(--green-11); --well-lo: var(--green-4); --well-quiet: var(--green-2); --ink: var(--ink-dark); --hover: var(--green-7); --row-hover: var(--green-10); }
+
+/* ---- Bevels ---------------------------------------------------------------
+ * Outset: light on the top and left edges, shadow on the bottom and right.
+ * Inset is the reverse. No blur, no radius, ever. */
+.outset {
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+.inset {
+  box-shadow: inset var(--u) var(--u) 0 var(--lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+
+/* ---- Page ---------------------------------------------------------------- */
+.desktop {
+  margin: 0;
+  min-height: 100%;
+  background-color: var(--desktop);
+  /* A 2x2 checker at game-pixel size reads as terrain without being noise. */
+  background-image:
+    linear-gradient(45deg, var(--desktop-tile) 25%, transparent 25%, transparent 75%, var(--desktop-tile) 75%),
+    linear-gradient(45deg, var(--desktop-tile) 25%, transparent 25%, transparent 75%, var(--desktop-tile) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  color: var(--ink-light);
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .desktop { background-image: none; }
+}
+
+:where(.desktop) :focus-visible {
+  outline: var(--u) solid var(--focus-ring);
+  outline-offset: var(--u);
+}
+.c-yellow :focus-visible { outline-color: var(--ink-dark); }
+
+/* ---- Window -------------------------------------------------------------- */
+.win {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--u);
+  box-shadow:
+    inset var(--u) var(--u) 0 var(--hi),
+    inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo),
+    0 0 0 1px var(--ink-dark);
+}
+.win-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--caption-h);
+  padding: 0 calc(var(--caption-h) + var(--space-2));
+  background: var(--deep);
+  box-shadow: inset var(--u) var(--u) 0 var(--lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+  color: var(--ink-light);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  text-align: center;
+  text-wrap: balance;
+  /* White text with a 1px black outline, as the game draws window titles. */
+  text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
+  margin: 0;
+}
+.win-close {
+  position: absolute;
+  top: calc(var(--u) * 2);
+  right: calc(var(--u) * 2);
+  width: calc(var(--caption-h) - var(--u) * 2);
+  height: calc(var(--caption-h) - var(--u) * 2);
+}
+.win-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  min-width: 0;
+}
+/* A second colour for the page under the tabs, like the ride window's
+   grey frame around a bordeaux page. */
+.win-page {
+  margin-top: 0;
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+
+/* ---- Tabs ---------------------------------------------------------------- */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--u);
+  padding: var(--space-1) var(--space-2) 0;
+  margin: 0;
+  list-style: none;
+}
+.tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tab-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) 0 0 var(--deep);
+}
+.tab[aria-selected="true"] {
+  background: var(--fill);
+  position: relative;
+  top: var(--u);
+  font-weight: 700;
+}
+
+/* ---- Buttons ------------------------------------------------------------- */
+.btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+.btn:hover { background: var(--hover); }
+.btn:active, .btn[aria-pressed="true"], .btn[aria-current="page"] {
+  background: var(--hover);
+  box-shadow: inset var(--u) var(--u) 0 var(--deep), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+  padding-top: var(--u);
+}
+.btn:disabled, .btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--lo);
+  text-shadow: 1px 1px 0 var(--hi);
+}
+.btn-icon { width: var(--control-h); padding: 0; }
+@media (pointer: coarse) {
+  :root { --control-h: 36px; --tab-h: 36px; }
+}
+
+/* ---- Wells: inset areas for lists, tables, text entry, and read-outs ----- */
+.well {
+  background: var(--well);
+  color: var(--ink-dark);
+  padding: var(--space-2);
+  min-width: 0;
+  box-shadow: inset var(--u) var(--u) 0 var(--well-lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+.well-scroll { overflow: auto; max-width: 100%; }
+.well-graph {
+  background: var(--graph-bg);
+  color: var(--graph-axis);
+  box-shadow: inset var(--u) var(--u) 0 var(--ink-dark), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+
+/* ---- Form controls ------------------------------------------------------- */
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.label { font-size: var(--text-md); color: var(--ink); }
+.hint { font-size: var(--text-sm); color: var(--ink); margin: 0; }
+.well .hint { color: var(--well-quiet); }
+
+.input, .select {
+  appearance: none;
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: 0;
+  background: var(--well);
+  color: var(--ink-dark);
+  font: inherit;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  box-shadow: inset var(--u) var(--u) 0 var(--well-lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+}
+.select {
+  padding-right: calc(var(--control-h) + var(--space-1));
+}
+.select-wrap { position: relative; display: flex; min-width: 0; }
+.select-wrap .select { flex: 1; }
+.select-wrap::after {
+  content: "\25BC";
+  position: absolute;
+  right: var(--u);
+  top: var(--u);
+  bottom: var(--u);
+  width: calc(var(--control-h) - var(--u) * 2);
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  color: var(--ink-dark);
+  pointer-events: none;
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+  background: var(--fill);
+}
+.spinner { display: flex; min-width: 0; }
+.spinner .input { flex: 1; width: 100%; }
+.spinner .btn { width: var(--control-h); padding: 0; font-size: 9px; }
+
+.check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.check input {
+  appearance: none;
+  margin: 0;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--well);
+  box-shadow: inset var(--u) var(--u) 0 var(--well-lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+  cursor: pointer;
+}
+.check input:checked::after {
+  content: "\2713";
+  color: var(--ink-dark);
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* ---- Group box: an etched frame with a label in its top edge ------------- */
+.groupbox {
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3);
+  border: 0;
+  min-width: 0;
+  box-shadow: inset 1px 1px 0 var(--lo), inset -1px -1px 0 var(--hi), 1px 1px 0 var(--hi), -1px -1px 0 var(--lo);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* The label sits on the frame's top edge and hides the line behind it, as
+   the game's group boxes do; without the fill the line strikes through it. */
+.groupbox > legend {
+  padding: 0 var(--space-1);
+  font-size: var(--text-md);
+  color: var(--ink);
+  background: var(--fill);
+}
+
+/* ---- Stat read-outs: "Excitement rating: 6.52 (High)" -------------------- */
+.stats { display: grid; gap: var(--space-1); margin: 0; }
+.stat { display: flex; flex-wrap: wrap; gap: 0 var(--space-1); margin: 0; font-variant-numeric: tabular-nums; }
+.stat dt::after { content: ":"; }
+.stat dt, .stat dd { margin: 0; }
+.stat dd b { font-weight: 700; }
+.stat .qual { font-style: italic; }
+.well .stat .qual { color: var(--well-quiet); font-style: normal; }
+.from-game {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  background: var(--yellow-8);
+  color: var(--ink-dark);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  box-shadow: inset 1px 1px 0 var(--yellow-10), inset -1px -1px 0 var(--yellow-4);
+}
+.estimate {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  color: inherit;
+  font-size: var(--text-xs);
+  outline: 1px dashed currentColor;
+  outline-offset: -1px;
+}
+
+/* ---- Progress bar -------------------------------------------------------- */
+.progress {
+  height: 14px;
+  background: var(--well);
+  box-shadow: inset var(--u) var(--u) 0 var(--well-lo), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
+  padding: var(--u);
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--green-6);
+  box-shadow: inset 0 var(--u) 0 var(--green-9), inset 0 calc(-1 * var(--u)) 0 var(--green-3);
+}
+
+/* ---- Tables in wells, like the ride list --------------------------------- */
+.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: var(--text-md); }
+.table th {
+  text-align: left;
+  font-weight: 400;
+  padding: var(--space-1) var(--space-2);
+  background: var(--fill);
+  color: var(--ink);
+  white-space: nowrap;
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+.table td { padding: var(--space-1) var(--space-2); vertical-align: top; }
+.table .num { text-align: right; }
+.table tbody tr:hover td { background: var(--row-hover); }
+.table tbody tr[aria-selected="true"] td { background: var(--deep); color: var(--ink-light); }
+
+/* ---- Toolbar and status bar ---------------------------------------------- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+}
+.toolgroup { display: flex; gap: 0; }
+.statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- News ticker and prompts --------------------------------------------- */
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  background: #000;
+  color: var(--ink-light);
+  font-size: var(--text-md);
+  box-shadow: inset var(--u) var(--u) 0 var(--grey-2), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--grey-4);
+}
+.ticker .when { color: var(--grey-9); font-variant-numeric: tabular-nums; }
+.ticker b { color: var(--yellow-8); font-weight: 400; }
+
+/* A notice inside a window: a small raised box in its own colour, with a
+   glyph so the meaning never rests on colour alone. */
+.notice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2) var(--space-3);
+  box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
+}
+.notice-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  background: var(--deep);
+  color: var(--ink-light);
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+.notice-body { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.notice-body p, .notice-body ul { margin: 0; }
+.notice-body ul { padding-left: 20px; }
+
+/* Error and confirm prompts: centred white text on bordeaux, as in the game. */
+.prompt .win-body { text-align: center; align-items: center; }
+.prompt .actions { justify-content: center; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+
+/* ---- Sprites ------------------------------------------------------------- */
+.sprite { image-rendering: pixelated; image-rendering: crisp-edges; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

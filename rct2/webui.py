@@ -49,6 +49,7 @@ DEFAULT_COMMAND = (sys.executable, "-u", str(REPO_ROOT / "evolve_coaster.py"))
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/tokens.css": ("tokens.css", "text/css; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
 
@@ -302,7 +303,7 @@ def _live(run: runrecord.Run, now: float) -> Dict[str, Any]:
     }
 
 
-def _list_entry(record: Dict[str, Any]) -> Dict[str, Any]:
+def _list_entry(record: Dict[str, Any], name: Optional[str] = None) -> Dict[str, Any]:
     run_id = record["id"]
     if record.get("status") == "unreadable":
         return {"id": run_id, "status": "unreadable", "name": run_id,
@@ -318,7 +319,7 @@ def _list_entry(record: Dict[str, Any]) -> Dict[str, Any]:
     installs = record.get("installs") or []
     return {
         "id": run_id,
-        "name": runrecord.display_name(record),
+        "name": name or runrecord.run_name(record),
         "created": record.get("created"),
         "status": record.get("status"),
         "parent": record.get("parent"),
@@ -346,7 +347,7 @@ def run_detail(run: runrecord.Run, now: Optional[float] = None) -> Dict[str, Any
     directory = runrecord.run_dir(run.id)
     return {
         "id": run.id,
-        "name": runrecord.display_name(record),
+        "name": runrecord.run_name(record),
         "status": record.get("status"),
         "created": record.get("created"),
         "finished": record.get("finished"),
@@ -620,6 +621,7 @@ class App:
                     ("GET", "rerun"): lambda: self.get_rerun(run_id),
                     ("POST", "check"): lambda: self.start_check(run_id),
                     ("POST", "install"): lambda: self.install(run_id, self._body(request)),
+                    ("POST", "rename"): lambda: self.rename(run_id, self._body(request)),
                     ("GET", "name"): lambda: self.preview_name(run_id, query),
                     ("GET", "download"): lambda: self.download(run_id),
                     ("GET", "plan.svg"): lambda: self.svg(run_id, "plan"),
@@ -668,9 +670,17 @@ class App:
         return _json_response(200, {"active": detail})
 
     def list_runs(self) -> Response:
-        return _json_response(200, {"runs": [_list_entry(r) for r in runrecord.list_runs()]})
+        records = runrecord.list_runs()
+        names = runrecord.name_unnamed_runs(records)
+        return _json_response(200, {"runs": [_list_entry(r, names.get(r["id"])) for r in records]})
+
+    def _ensure_named(self, run_id: str) -> None:
+        """Name a run opened before the library was ever listed."""
+        if runrecord.saved_name(run_id) is None:
+            runrecord.name_unnamed_runs()
 
     def get_run(self, run_id: str) -> Response:
+        self._ensure_named(run_id)
         run = runrecord.load_run(run_id)
         detail = run_detail(run)
         detail["stoppable"] = self.supervisor.owns(run_id)
@@ -800,6 +810,14 @@ class App:
         except openrct2_paths.InvalidName as exc:
             raise ApiError(400, str(exc), field="name")
 
+    def rename(self, run_id: str, body: Dict[str, Any]) -> Response:
+        runrecord.load_record(run_id)  # a 404 for a run that is not there
+        try:
+            name = runrecord.set_run_name(run_id, body.get("name"))
+        except runrecord.InvalidRunName as exc:
+            raise ApiError(400, str(exc), field="name")
+        return _json_response(200, {"name": name})
+
     def preview_name(self, run_id: str, query: Dict[str, str]) -> Response:
         record = runrecord.load_record(run_id)
         final = self._final_name(record, query.get("name", ""), query.get("template"))
@@ -831,7 +849,7 @@ class App:
             raise ApiError(404, "This run has no exported ride.")
         record = runrecord.load_record(run_id)
         try:
-            filename = openrct2_paths.sanitize_name(runrecord.display_name(record))
+            filename = openrct2_paths.sanitize_name(runrecord.run_name(record))
         except openrct2_paths.InvalidName:
             filename = run_id
         filename = filename.encode("ascii", "replace").decode().replace('"', "'")

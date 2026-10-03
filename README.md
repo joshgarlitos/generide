@@ -190,7 +190,7 @@ rct2/
   settings.py       The web UI's settings table and validation
   openrct2_paths.py Game locations, the one-at-a-time game check, and install
   webui.py          The web UI's server and JSON API
-  webui_static/     The page: one HTML file, one stylesheet, one script
+  webui_static/     The page: one HTML file, the design tokens, one stylesheet, one script
 generide_web.py      Starts the web UI
 evolve_coaster.py    Command-line evolution
 tests/               Unit and fixture-based regression tests
@@ -198,6 +198,8 @@ data/sample_rides/   Real OpenRCT2 exports used as fixtures and templates
 ```
 
 For a deeper look, see the [architecture guide](docs/architecture.md), [roadmap](docs/roadmap.md), and [development log](docs/devlog.md).
+
+The [design system](docs/design/README.md) sets how generide's web UI and pictures look, based on RollerCoaster Tycoon 2's interface. The [writing style guide](docs/writing-style.md) sets how its documentation, devlog, and UI text read.
 
 ## Roadmap
 

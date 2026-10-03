@@ -5,11 +5,11 @@ which is a slow loop for a question as simple as "did the hill survive?".
 These produce a plan view and a fitness curve from data we already have, so
 a run can be looked at without the game.
 
-SVG rather than a raster format for two reasons: it stays sharp in the
-devlog at any size, and it carries its own stylesheet, so a diagram inlined
-into a page follows that page's light or dark theme. The palette and the
-theme mechanism match `docs/assets/rle-diagram.svg` so the two sit together
-without looking like they came from different projects.
+SVG rather than a raster format because it stays sharp in the devlog and the
+web UI at any size. Every picture paints its own dark background, like the
+ride graphs in RollerCoaster Tycoon 2, so it reads the same on a light page,
+a dark page, and GitHub, and needs no stylesheet to follow a theme. The
+colours are the chart colours in `docs/design/README.md`.
 """
 
 from dataclasses import dataclass
@@ -18,44 +18,29 @@ from typing import AbstractSet, Iterable, Optional, Sequence
 from rct2.geometry import OccupiedTile, Position, occupied_tiles, track_bounds
 from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS, trace
 
-# Matches docs/assets/rle-diagram.svg. Kept as one block so a change to the
-# design system is one edit rather than a hunt through string literals.
-# Light values are written straight onto each element as presentation
-# attributes so the file renders correctly anywhere, including GitHub, which
-# strips <style> out of SVGs altogether. The stylesheet below only has to
-# carry the dark overrides, and CSS beats a presentation attribute wherever
-# the stylesheet does survive. Palette matches docs/assets/rle-diagram.svg.
-LIGHT = {
-    "bg": "#fcfcfa", "text": "#1a1a1a", "text_sec": "#6a6a64",
-    "accent": "#59670f", "border": "#e5e3d8",
+# The chart colours from docs/design/README.md, as the game's palette values
+# that rct2/webui_static/tokens.css names. Written straight onto each element
+# as presentation attributes, because GitHub strips <style> out of SVGs.
+# Kept as one block so a change to the design system is one edit rather than
+# a hunt through string literals.
+GRAPH = {
+    "bg": "#233333",        # --graph-bg (grey step 1)
+    "text": "#eff3f3",      # grey step 11
+    "text_sec": "#b7c3c3",  # --graph-axis (grey step 9)
+    "border": "#3f5353",    # --graph-grid (grey step 3)
+    "score": "#8bdf73",     # --trace-score (green step 9)
+    "speed": "#ffe72f",     # --trace-speed (yellow step 8)
+    "height": "#afdbc3",    # --trace-height (dark green step 10)
+    "lift": "#77bbef",      # --trace-lift (light blue step 8)
+    "stall": "#eb9f9f",     # --trace-stall (bordeaux step 10)
+    "start": "#ffe72f",     # the station marker on the plan
 }
-DARK = {
-    "bg": "#1a1a17", "text": "#f0efe8", "text_sec": "#9a9a90",
-    "accent": "#a0b030", "border": "#3a3a33",
-}
-ELEVATION_LIGHT = ["#e8e6d8", "#d8d9c0", "#c6cba4", "#b2bd87",
-                   "#9cae6a", "#849d4e", "#6b8b33", "#59670f"]
-ELEVATION_DARK = ["#2f2f27", "#3a3d2c", "#474d31", "#555e36",
-                  "#64703b", "#748340", "#8a9a3a", "#a0b030"]
+# The brown ramp, steps 4 to 11: low ground is dark, high ground is light.
+ELEVATION = ["#6b5333", "#7b674b", "#8f7f6b", "#a3937f",
+             "#bbab93", "#cfc3ab", "#e7dbc3", "#fff3df"]
+FONT = "Verdana,Tahoma,'DejaVu Sans','Segoe UI',sans-serif"
 
-_DARK_RULES = "\n".join(
-    [f"      .e{i} {{ fill: {c}; }}" for i, c in enumerate(ELEVATION_DARK)]
-    + [f"      .bg {{ fill: {DARK['bg']}; }}",
-       f"      .tx {{ fill: {DARK['text']}; }}",
-       f"      .ts {{ fill: {DARK['text_sec']}; }}",
-       f"      .ax {{ stroke: {DARK['border']}; }}",
-       f"      .ac {{ stroke: {DARK['accent']}; }}",
-       f"      .acs {{ stroke: {DARK['text_sec']}; }}",
-       f"      .gap {{ stroke: {DARK['bg']}; }}"]
-)
-
-_THEME = f"""
-    @media (prefers-color-scheme: dark) {{
-{_DARK_RULES}
-    }}
-"""
-
-ELEVATION_BANDS = len(ELEVATION_LIGHT)
+ELEVATION_BANDS = len(ELEVATION)
 
 
 def _escape(text: str) -> str:
@@ -65,10 +50,10 @@ def _escape(text: str) -> str:
 def _elevation_band(z: int, min_z: int, max_z: int) -> int:
     """Which of the eight colour bands an elevation falls in.
 
-    Banded rather than a continuous gradient because the colours are CSS
-    variables, which cannot be interpolated. Eight bands is enough to read
+    Banded rather than a continuous gradient because the colours come from
+    the game's palette, which has fixed steps. Eight bands is enough to read
     a hill's shape and few enough that each stays distinguishable from its
-    neighbours in both themes.
+    neighbours.
     """
     if max_z <= min_z:
         return ELEVATION_BANDS - 1
@@ -132,7 +117,7 @@ def render_track(
 ) -> str:
     """Top-down plan of a track, each tile shaded by its height.
 
-    Reads like a blueprint: darker olive is higher ground. The first tile
+    Reads like a blueprint: lighter tiles are higher ground. The first tile
     carries a marker, because a plan view with no orientation is a shape
     rather than a ride, and knowing where the station is makes the rest
     legible.
@@ -167,14 +152,14 @@ def render_track(
         rects.append(
             f'<rect class="e{band} gap" x="{sx}" y="{sy}" '
             f'width="{tile_px}" height="{tile_px}" '
-            f'fill="{ELEVATION_LIGHT[band]}" stroke="{LIGHT["bg"]}" stroke-width="0.5"/>'
+            f'fill="{ELEVATION[band]}" stroke="{GRAPH["bg"]}" stroke-width="0.5"/>'
         )
 
     first = plan.tiles[0]
     fx, fy = screen(first.x, first.y)
     marker = (
         f'<rect class="ac" x="{fx}" y="{fy}" width="{tile_px}" height="{tile_px}" '
-        f'fill="none" stroke="{LIGHT["accent"]}" stroke-width="2"/>'
+        f'fill="none" stroke="{GRAPH["start"]}" stroke-width="2"/>'
     )
 
     footprint = f"{plan.width_tiles} x {plan.depth_tiles} tiles"
@@ -187,16 +172,14 @@ def render_track(
     w = max(grid_w, text_w) + pad * 2
 
     return f"""<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" role="img" \
-style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,\
-'Helvetica Neue',Arial,sans-serif;background:{LIGHT["bg"]};">
+style="width:100%;font-family:{FONT};background:{GRAPH["bg"]};">
   <title>{_escape(title)}</title>
   <desc>Top-down plan of a roller coaster track. Each square is one occupied \
-tile, shaded from light (lowest) to deep olive (highest). {_escape(subtitle)}</desc>
-  <style>{_THEME}</style>
-  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
+tile, shaded from dark brown (lowest) to pale sand (highest). {_escape(subtitle)}</desc>
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{GRAPH["bg"]}"/>
   <text class="tx" x="{pad}" y="26" font-size="14" font-weight="600" \
-fill="{LIGHT["text"]}">{_escape(title)}</text>
-  <text class="ts" x="{pad}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">\
+fill="{GRAPH["text"]}">{_escape(title)}</text>
+  <text class="ts" x="{pad}" y="44" font-size="11" fill="{GRAPH["text_sec"]}">\
 {_escape(subtitle)}</text>
 {chr(10).join("  " + r for r in rects)}
   {marker}
@@ -250,45 +233,43 @@ def render_fitness_history(
             )
         )
         valid_layer = (
-            f'<path class="acs" d="{valid_path}" fill="none" stroke="{LIGHT["text_sec"]}" '
+            f'<path class="acs" d="{valid_path}" fill="none" stroke="{GRAPH["text_sec"]}" '
             f'stroke-width="1" stroke-dasharray="3 3"/>\n  '
             f'<text class="ts" x="{w - right + 6}" y="{top_pad + 4}" font-size="10" '
-            f'fill="{LIGHT["text_sec"]}">100%</text>\n  '
+            f'fill="{GRAPH["text_sec"]}">100%</text>\n  '
             f'<text class="ts" x="{w - right + 6}" y="{top_pad + plot_h}" font-size="10" '
-            f'fill="{LIGHT["text_sec"]}">0%</text>\n  '
+            f'fill="{GRAPH["text_sec"]}">0%</text>\n  '
             f'<text class="ts" x="{w - right + 6}" y="{top_pad + plot_h + 18}" font-size="10" '
-            f'fill="{LIGHT["text_sec"]}">valid</text>'
+            f'fill="{GRAPH["text_sec"]}">valid</text>'
         )
 
     generations = len(fitness_history)
     subtitle = f"{generations} generations, best {hi:.2f}"
 
     return f"""<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" role="img" \
-style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,\
-'Helvetica Neue',Arial,sans-serif;background:{LIGHT["bg"]};">
+style="width:100%;font-family:{FONT};background:{GRAPH["bg"]};">
   <title>{_escape(title)}</title>
   <desc>Line chart of best fitness per generation over {generations} generations, \
 peaking at {hi:.2f}. A dashed line shows the share of the population that was \
 buildable.</desc>
-  <style>{_THEME}</style>
-  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
-  <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{GRAPH["bg"]}"/>
+  <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{GRAPH["text"]}">\
 {_escape(title)}</text>
-  <text class="ts" x="{left}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(subtitle)}</text>
+  <text class="ts" x="{left}" y="44" font-size="11" fill="{GRAPH["text_sec"]}">{_escape(subtitle)}</text>
   <line class="ax" x1="{left}" y1="{top_pad}" x2="{left}" y2="{top_pad + plot_h}" \
-stroke="{LIGHT["border"]}" stroke-width="1"/>
+stroke="{GRAPH["border"]}" stroke-width="1"/>
   <line class="ax" x1="{left}" y1="{top_pad + plot_h}" x2="{left + plot_w}" y2="{top_pad + plot_h}" \
-stroke="{LIGHT["border"]}" stroke-width="1"/>
+stroke="{GRAPH["border"]}" stroke-width="1"/>
   <text class="ts" x="{left - 8}" y="{top_pad + 4}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{hi:.2f}</text>
+fill="{GRAPH["text_sec"]}">{hi:.2f}</text>
   <text class="ts" x="{left - 8}" y="{top_pad + plot_h}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{lo:.2f}</text>
-  <text class="ts" x="{left}" y="{h - 16}" font-size="10" fill="{LIGHT["text_sec"]}">0</text>
+fill="{GRAPH["text_sec"]}">{lo:.2f}</text>
+  <text class="ts" x="{left}" y="{h - 16}" font-size="10" fill="{GRAPH["text_sec"]}">0</text>
   <text class="ts" x="{left + plot_w}" y="{h - 16}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{generations - 1}</text>
+fill="{GRAPH["text_sec"]}">{generations - 1}</text>
   <text class="ts" x="{left + plot_w / 2}" y="{h - 16}" text-anchor="middle" font-size="10" \
-fill="{LIGHT["text_sec"]}">generation</text>
-  <path class="ac" d="{fitness_path}" fill="none" stroke="{LIGHT["accent"]}" stroke-width="2"/>
+fill="{GRAPH["text_sec"]}">generation</text>
+  <path class="ac" d="{fitness_path}" fill="none" stroke="{GRAPH["score"]}" stroke-width="2"/>
   {valid_layer}
 </svg>
 """
@@ -370,16 +351,16 @@ def render_profile(
     for pairs in lift_paths:
         layers.append(
             f'<path class="ac" data-series="lift" d="{path(pairs)}" fill="none" '
-            f'stroke="{LIGHT["accent"]}" stroke-width="6" stroke-opacity="0.45" '
+            f'stroke="{GRAPH["lift"]}" stroke-width="6" stroke-opacity="0.55" '
             f'stroke-linecap="round"/>'
         )
     layers.append(
         f'<path class="acs" data-series="speed" d="{path(speed_pts)}" fill="none" '
-        f'stroke="{LIGHT["text_sec"]}" stroke-width="1.2" stroke-dasharray="4 3"/>'
+        f'stroke="{GRAPH["speed"]}" stroke-width="1.5" stroke-dasharray="4 3"/>'
     )
     layers.append(
         f'<path class="ac" data-series="height" d="{path(height_pts)}" fill="none" '
-        f'stroke="{LIGHT["accent"]}" stroke-width="2"/>'
+        f'stroke="{GRAPH["height"]}" stroke-width="2"/>'
     )
 
     seen_drops = set()
@@ -391,7 +372,7 @@ def render_profile(
         layers.append(
             f'<text class="tx" data-drop="{p.drop}" x="{x}" y="{round(y - 7, 1)}" '
             f'text-anchor="middle" font-size="10" font-weight="600" '
-            f'fill="{LIGHT["text"]}">D{p.drop}</text>'
+            f'fill="{GRAPH["text"]}">D{p.drop}</text>'
         )
 
     notes = []
@@ -400,12 +381,12 @@ def render_profile(
         x, y = x_at(stop.distance_m), y_height(stop.height_in)
         layers.append(
             f'<path class="tx" data-series="stall" d="M{x - 5},{y - 5} L{x + 5},{y + 5} '
-            f'M{x - 5},{y + 5} L{x + 5},{y - 5}" stroke="{LIGHT["text"]}" '
+            f'M{x - 5},{y + 5} L{x + 5},{y - 5}" stroke="{GRAPH["stall"]}" '
             f'stroke-width="2" fill="none"/>'
         )
         layers.append(
             f'<text class="tx" x="{x}" y="{round(y + 18, 1)}" text-anchor="middle" '
-            f'font-size="10" fill="{LIGHT["text"]}">stalls here</text>'
+            f'font-size="10" fill="{GRAPH["stall"]}">stalls here</text>'
         )
         notes.append(f"the train stalls on piece {stop.index + 1}")
 
@@ -419,36 +400,34 @@ def render_profile(
         subtitle += ", " + ", ".join(notes)
 
     return f"""<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" role="img" \
-style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,\
-'Helvetica Neue',Arial,sans-serif;background:{LIGHT["bg"]};">
+style="width:100%;font-family:{FONT};background:{GRAPH["bg"]};">
   <title>{_escape(title)}</title>
   <desc>Side profile of a roller coaster: height along the ride as a solid line, \
 with the lift hill drawn heavier, and speed as a dashed line on the right-hand \
 scale. Drops are numbered where they start. {_escape(subtitle)}.</desc>
-  <style>{_THEME}</style>
-  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{LIGHT["bg"]}"/>
-  <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
+  <rect class="bg" x="0" y="0" width="{w}" height="{h}" fill="{GRAPH["bg"]}"/>
+  <text class="tx" x="{left}" y="26" font-size="14" font-weight="600" fill="{GRAPH["text"]}">\
 {_escape(title)}</text>
-  <text class="ts" x="{left}" y="44" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(subtitle)}</text>
+  <text class="ts" x="{left}" y="44" font-size="11" fill="{GRAPH["text_sec"]}">{_escape(subtitle)}</text>
   <line class="ax" x1="{left}" y1="{top_pad}" x2="{left}" y2="{top_pad + plot_h}" \
-stroke="{LIGHT["border"]}" stroke-width="1"/>
+stroke="{GRAPH["border"]}" stroke-width="1"/>
   <line class="ax" x1="{left}" y1="{top_pad + plot_h}" x2="{left + plot_w}" y2="{top_pad + plot_h}" \
-stroke="{LIGHT["border"]}" stroke-width="1"/>
+stroke="{GRAPH["border"]}" stroke-width="1"/>
   <text class="ts" x="{left - 8}" y="{top_pad + head + 4}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{hi_z * HEIGHT_UNIT_M:.0f} m</text>
+fill="{GRAPH["text_sec"]}">{hi_z * HEIGHT_UNIT_M:.0f} m</text>
   <text class="ts" x="{left - 8}" y="{top_pad + plot_h}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{lo_z * HEIGHT_UNIT_M:.0f} m</text>
+fill="{GRAPH["text_sec"]}">{lo_z * HEIGHT_UNIT_M:.0f} m</text>
   <text class="ts" x="{left + plot_w + 6}" y="{top_pad + 4}" font-size="10" \
-fill="{LIGHT["text_sec"]}">{top_mph:.0f} mph</text>
+fill="{GRAPH["text_sec"]}">{top_mph:.0f} mph</text>
   <text class="ts" x="{left + plot_w + 6}" y="{top_pad + plot_h}" font-size="10" \
-fill="{LIGHT["text_sec"]}">0 mph</text>
+fill="{GRAPH["text_sec"]}">0 mph</text>
   <text class="ts" x="{left + plot_w + 6}" y="{top_pad + plot_h + 18}" font-size="10" \
-fill="{LIGHT["text_sec"]}">speed</text>
-  <text class="ts" x="{left}" y="{h - 16}" font-size="10" fill="{LIGHT["text_sec"]}">station</text>
+fill="{GRAPH["text_sec"]}">speed</text>
+  <text class="ts" x="{left}" y="{h - 16}" font-size="10" fill="{GRAPH["text_sec"]}">station</text>
   <text class="ts" x="{left + plot_w}" y="{h - 16}" text-anchor="end" font-size="10" \
-fill="{LIGHT["text_sec"]}">{round(ride.points[-1].distance_m)} m</text>
+fill="{GRAPH["text_sec"]}">{round(ride.points[-1].distance_m)} m</text>
   <text class="ts" x="{left + plot_w / 2}" y="{h - 16}" text-anchor="middle" font-size="10" \
-fill="{LIGHT["text_sec"]}">distance along the ride</text>
+fill="{GRAPH["text_sec"]}">distance along the ride</text>
 {chr(10).join("  " + layer for layer in layers)}
 </svg>
 """
@@ -462,14 +441,12 @@ def _empty_svg(title: str, reason: str) -> str:
     away the result the user was waiting for.
     """
     return f"""<svg viewBox="0 0 320 80" xmlns="http://www.w3.org/2000/svg" role="img" \
-style="width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,\
-'Helvetica Neue',Arial,sans-serif;background:{LIGHT["bg"]};">
+style="width:100%;font-family:{FONT};background:{GRAPH["bg"]};">
   <title>{_escape(title)}</title>
   <desc>{_escape(reason)}</desc>
-  <style>{_THEME}</style>
-  <rect class="bg" x="0" y="0" width="320" height="80" fill="{LIGHT["bg"]}"/>
-  <text class="tx" x="16" y="32" font-size="14" font-weight="600" fill="{LIGHT["text"]}">\
+  <rect class="bg" x="0" y="0" width="320" height="80" fill="{GRAPH["bg"]}"/>
+  <text class="tx" x="16" y="32" font-size="14" font-weight="600" fill="{GRAPH["text"]}">\
 {_escape(title)}</text>
-  <text class="ts" x="16" y="52" font-size="11" fill="{LIGHT["text_sec"]}">{_escape(reason)}</text>
+  <text class="ts" x="16" y="52" font-size="11" fill="{GRAPH["text_sec"]}">{_escape(reason)}</text>
 </svg>
 """
