@@ -213,11 +213,43 @@ class TestStartAndStop:
         assert "boom" in response.json()["console"]
         assert not any(runrecord.library_root().iterdir())
 
-    def test_a_run_started_elsewhere_cannot_be_stopped_from_the_page(self, app):
+    def test_a_run_started_elsewhere_with_an_unverifiable_pid_cannot_be_stopped(
+        self, app, monkeypatch,
+    ):
+        # A run this server did not launch, whose pid generide cannot
+        # positively confirm is still the same process (no fingerprint
+        # captured, or `ps` unavailable): refused, pointed at Ctrl-C.
         run_id = runrecord.create_run(seed=1, request={}, settings=[], generations=5)
+        monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: None)
         response = call(app, "POST", f"/api/runs/{run_id}/stop")
         assert response.status == 409
         assert "terminal" in response.json()["error"]
+
+    def test_a_run_started_elsewhere_with_a_verified_pid_can_be_stopped(self, app):
+        # A run this server did not launch (a terminal run, or one from a
+        # previous server), but whose recorded pid generide can still
+        # verify: stoppable directly, no supervisor child needed.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            run_id = runrecord.create_run(
+                seed=1, request={}, settings=[], generations=5, pid=child.pid,
+            )
+            assert call(app, "GET", f"/api/runs/{run_id}").json()["run"]["stoppable"] is True
+
+            response = call(app, "POST", f"/api/runs/{run_id}/stop")
+            assert response.status == 202
+            assert child.wait(timeout=5) != 0
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+
+    def test_stopping_a_run_that_already_finished_is_refused(self, app):
+        run_id = runrecord.create_run(seed=1, request={}, settings=[], generations=5)
+        runrecord.finish_run(run_id, "completed", generations_run=5)
+        response = call(app, "POST", f"/api/runs/{run_id}/stop")
+        assert response.status == 409
+        assert "not running" in response.json()["error"]
 
 
 class TestStatus:
@@ -239,6 +271,26 @@ class TestStatus:
         runrecord.create_run(seed=1, request={}, settings=[], generations=60)
         live = call(app, "GET", "/api/active").json()["active"]["live"]
         assert live["remaining"] is None and live["estimating"] is True
+
+    def test_a_run_whose_pid_was_reused_is_shown_as_interrupted_not_stuck_running(
+        self, app, monkeypatch,
+    ):
+        # The process that started this run has exited (e.g. a reboot) and
+        # an unrelated one, still alive, was handed the same pid. Without
+        # detecting that, the run would read as running forever: it would
+        # block new page runs and could never be deleted from the page.
+        run_id = runrecord.create_run(seed=1, request={}, settings=[], generations=60)
+        monkeypatch.setattr(runrecord, "_pid_fingerprint", lambda pid: "a-different-process")
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+        assert run["status"] == "interrupted"
+        assert run["stoppable"] is False
+        assert call(app, "GET", "/api/active").json()["active"] is None
+
+        # And it is no longer blocking, or stuck: a new run can start, and
+        # this one can be deleted.
+        assert call(app, "POST", "/api/runs", {"values": {"seed": 2}}).status == 201
+        assert call(app, "DELETE", f"/api/runs/{run_id}").status == 200
 
     def test_run_detail_labels_estimates_and_flags_problems(self, app):
         run_id = saved_run(seed=2, segments=STALLS, status="failed", with_ride=False)

@@ -4,6 +4,18 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-09-30: Stopping a run the page didn't start, without risking someone else's process
+
+Two things the web UI's code review left open (PR #64): the page could only Stop a run it had launched itself, and a run record still marked `running` after the machine restarted could get stuck that way forever, since the only liveness check was whether its pid was alive, and pids get reused.
+
+Both trace back to the same gap: a pid alone does not prove which process it names. The fix is one fingerprint, captured once and checked twice. `runrecord.create_run` now records `ps -o lstart= -p <pid>` (the process's start time, stable and cheap) alongside the pid. `_repair`, which already downgraded a dead-pid `running` record to `interrupted`, now also downgrades one whose live pid's current fingerprint no longer matches the one captured at creation, which is exactly what a reused pid looks like. That closes the stuck-forever case: an interrupted run stops blocking new page runs and can be deleted again.
+
+The stop-from-the-page case needed the same check used the other direction, before signaling instead of after observing. `runrecord.can_signal` requires a positive match, not just an unproven one: no captured fingerprint, or `ps` failing right now, refuses rather than guessing. That asymmetry is deliberate. Getting the repair check wrong in the unverifiable case just leaves a display saying "running" a beat longer, so it defaults to trusting liveness, same as before this existed. Getting the stop check wrong could send SIGTERM to a stranger's process, so it defaults to refusing. `Supervisor.owns()` still handles a page-started run; `signal_stop` is the fallback for everything else, a terminal run included, and the page's Stop button and its Ctrl-C note were already wired to a `stoppable` flag, so making that flag accurate was the entire UI change.
+
+`ps` is one more thing shelled out to, alongside the OpenRCT2 binary itself, so this stays inside the standard-library constraint. It's present on macOS and Linux (CI's own), so the tests exercise the real thing rather than a stand-in.
+
+---
+
 ## 2026-09-27: A web page to drive it, and a record of every run
 
 Until now the only way in was `evolve_coaster.py` and its twenty-odd flags, and the only way to judge a ride was to copy it into the game, restart, build it, and ride it. I've installed rides that turned out to be duds that way. This build puts a page in front of all of it (`python generide_web.py`): a request form that explains every setting, a live view of the run, a result with a plan, a side profile, and stats, a check in the headless game, install under a chosen name, and a library where any run can be rerun with one change and compared with the original. The plan is `docs/plans/2026-09-27-0936-feat-web-ride-workbench-plan.md` (issue #63).
