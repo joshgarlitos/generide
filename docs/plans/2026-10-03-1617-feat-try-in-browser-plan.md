@@ -55,21 +55,23 @@ Most of those visitors also don't own RollerCoaster Tycoon 2. OpenRCT2 needs the
 
 - R4. The visitor chooses from a short set of settings that shape the ride, such as rating targets, station length, and seed, each with a plain explanation and its allowed range, using the wording the local web UI already uses where one exists.
 - R5. The visitor can start a run with the defaults untouched, so one click is enough to see generide work.
-- R6. Every combination of allowed settings finishes in roughly 30 seconds or less on a typical laptop in a current desktop browser; the limits on run size are set by measurement in the browser, not by copying the local defaults.
+- R6. Every combination of allowed settings finishes in roughly 30 seconds or less on a typical laptop in a current desktop browser, with run-size limits set by measurement in the browser; if measurement shows that time cannot meet R16, the time limit rises rather than the ride bar falling.
 - R7. Settings mistakes are pointed out beside the field before the run starts, as in the local web UI.
+- R16. With the default settings, the finished ride passes construction checks, its train finishes the circuit, and it has at least one real drop.
 
 **Watching and finishing a run**
 
-- R8. While a run is going, the page shows the generation, the best ride so far as a plan and a side profile, and the best score by generation, updating live, and the visitor can stop the run and keep its best ride.
-- R9. When a run ends, the page shows the finished ride's plan, side profile, and stats, labels generide's own estimates as estimates, flags a ride that fails construction checks or whose train does not finish the circuit, and offers the ride as a `.td6` download.
+- R8. While a run is going, the page shows the generation, the best ride so far as a plan and a side profile, and the best score by generation, updating live, and once the first generation has appeared the visitor can stop the run and keep its best ride.
+- R9. When a run ends, the page shows the finished ride's plan, side profile, and stats, labels generide's own estimates as estimates, flags a ride that fails construction checks or whose train does not finish the circuit, offers the ride as a `.td6` download, and lets the visitor return to the settings, with their last choices kept, to start another run.
 - R10. The page states that checking a ride in the headless game and installing it into OpenRCT2 need the local tool, and links to the repository's instructions for it.
 - R11. After a run, the page points the visitor to the repository and to running the full tool locally.
 
 **Keeping the page healthy**
 
-- R12. Publishing an engine change on the main branch updates the page without a manual step, and the page runs the same engine code as the repository, not a separate copy.
+- R12. Publishing an engine change on the main branch updates the page without a manual step, and the page runs the same engine code as the repository, not a separate copy. Before a new version goes live, publishing runs the default and the largest allowed settings in a headless browser, and keeps the last good page live if either run fails or takes longer than R6 allows.
 - R13. On a phone or an unsupported browser, the page either works or says plainly that it needs a desktop browser, rather than failing silently.
 - R14. A visitor with a slow connection sees progress while the page loads, so the first wait never looks like a broken page.
+- R15. If the engine fails to load or a run errors partway, the page shows a plain message, a way to retry, and the repository link, rather than a blank or frozen page.
 
 ### Key Flows
 
@@ -81,22 +83,23 @@ Most of those visitors also don't own RollerCoaster Tycoon 2. OpenRCT2 needs the
 
 ### Acceptance Examples
 
-- AE1. **Covers R5, R6, R8.** Given a first-time visitor on a laptop, when they press go without changing any setting, then the first generation appears within a few seconds and the run finishes in roughly 30 seconds or less.
+- AE1. **Covers R5, R6, R8, R16.** Given a first-time visitor on a laptop, when they press go without changing any setting, then the first generation appears within a few seconds, the run finishes within R6's limit, and the ride has at least one real drop.
 - AE2. **Covers R8.** Given a run in progress, when the visitor presses stop, then the run ends and the page shows the best ride found so far, the same as a finished run.
 - AE3. **Covers R9.** Given a run whose best ride fails construction checks or whose train does not finish the circuit, when the run ends, then the result is flagged and the download is still offered with that flag visible.
 - AE4. **Covers R10.** Given a visitor looking at a finished ride, when they look for a way to check it in the game or install it, then the page tells them those need the local tool and links to how to set it up.
 - AE5. **Covers R13.** Given a visitor on a phone whose browser cannot run the engine, when they open the link, then they see a message that the page needs a desktop browser, plus the link to the repository.
 - AE6. **Covers R9.** Given a finished run, when the visitor refreshes or leaves the page, then the run is gone; nothing on the page claims it was saved.
+- AE7. **Covers R15.** Given a visitor whose browser fails to load the engine, when loading stops, then the page says the demo could not start, offers a retry, and links to the repository.
 
 ### Success Criteria
 
-- A visitor with no prior setup goes from opening the link to a finished ride in about a minute, page load included.
-- The ride the page produces for a given seed and settings matches what the local CLI produces for the same seed and settings.
+- A visitor with no prior setup goes from opening the link to a finished ride in about a minute, page load included, or in that time plus whatever R6's limit rises by.
+- The ride the page produces for a given seed and settings matches what the local CLI produces when given the same seed and every setting the page used, including the fixed settings the page does not show.
 
 ### Scope Boundaries
 
 - No headless-game checks or OpenRCT2 installs on the page (R10 covers how the page handles their absence).
-- No run library, rerun, or side-by-side comparison on the page.
+- No run library, rerunning of saved runs, or side-by-side comparison on the page.
 - No full settings range, benchmark harness, or other fitness methods beyond what the curated settings need.
 - No server, accounts, or saved state shared between visitors.
 - No layout designed for phones beyond R13.
@@ -119,7 +122,7 @@ This plan covers trying generide in the browser without installing it. The break
 - generide's engine (`rct2/` and `evolve_coaster.py`) imports only the Python standard library, and `requirements.txt` lists only `pytest`. The in-browser approach depends on that staying true for the code paths a run uses.
 - Evolution reads `data/sample_rides/manic_miner_test.td6` as its template, so the page has to ship that file.
 - The plan, side profile, and score-by-generation pictures are drawn in Python as SVG (`rct2/render.py`), not in browser JavaScript, so the in-browser engine can produce the same pictures the local web UI shows.
-- Assumption: Python running in a browser is slower than native Python by a factor small enough that R6's limits still allow interesting rides. A 30-generation, population-30 physics run took about 15 seconds in native Python; the README's example run takes one to two minutes.
+- Assumption: Python running in a browser is slower than native Python by a factor small enough that R6's limits still allow rides that meet R16; if not, R6 says which side gives way. A 30-generation, population-30 physics run took about 15 seconds in native Python; the README's example run takes one to two minutes.
 
 ### Outstanding Questions
 
