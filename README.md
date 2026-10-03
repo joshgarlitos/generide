@@ -2,6 +2,8 @@
 
 **Evolving playable roller coasters for RollerCoaster Tycoon 2.**
 
+**[Try it in your browser](https://joshgarlitos.github.io/generide/)**: pick a few settings, press Go, and watch a Mine Train evolve. Nothing to install.
+
 generide is a Python tool for reading, validating, generating, and evolving RollerCoaster Tycoon 2 (RCT2) track designs. It works directly with the game's `.td6` format and produces checksummed files that can be loaded into [OpenRCT2](https://openrct2.io).
 
 I started this project as a way to explore how I could generate new rides for RCT2 and get them running in the game. That turned into a much more interesting problem involving binary file formats, three-dimensional track geometry, construction rules, approximate physics, and a genetic algorithm that has to produce something the game will accept.
@@ -58,7 +60,9 @@ The headless oracle is built and the benchmark harness can call it, though the g
 
 ## Try it
 
-The project currently targets Python 3 and uses `pytest` as its only dependency.
+To see generide work without installing anything, use the [browser version](https://joshgarlitos.github.io/generide/). It runs generide's own engine in your browser through [Pyodide](https://pyodide.org), with a short list of settings and runs sized to finish in about half a minute, and it downloads the finished `.td6`. Checking a ride in the real game and installing it need the local tool and OpenRCT2, described below.
+
+To run generide on your own machine: the project currently targets Python 3 and uses `pytest` as its only dependency.
 
 ```bash
 git clone https://github.com/joshgarlitos/generide.git
@@ -191,6 +195,9 @@ rct2/
   openrct2_paths.py Game locations, the one-at-a-time game check, and install
   webui.py          The web UI's server and JSON API
   webui_static/     The page: one HTML file, the design tokens, one stylesheet, one script
+  demo.py           One run for the in-browser page, built the way the CLI builds it
+demo/                The in-browser page: the page, its Web Worker, and its browser tests
+tools/build_demo.py  Builds the in-browser page into _site/ (after `npm ci --prefix demo`)
 generide_web.py      Starts the web UI
 evolve_coaster.py    Command-line evolution
 tests/               Unit and fixture-based regression tests
