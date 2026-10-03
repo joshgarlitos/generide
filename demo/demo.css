@@ -1,0 +1,22 @@
+/* The in-browser page's few additions to the local web UI's styles.
+ * Everything else comes from tokens.css and style.css, so both pages look
+ * the same; see docs/design/README.md. */
+
+.code-line {
+  margin: 0;
+  padding: var(--space-2);
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
