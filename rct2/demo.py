@@ -47,13 +47,14 @@ VISIBLE = (
 # what produces real drops; parts is the CLI's default genome.
 FIXED = {"fitness": "physics", "genome": "parts", "mutation_rate": 0.1}
 
-# Run size and the starting seed, set from measurements in a browser runtime
-# (see docs/devlog.md, 2026-10-03): the smallest size where the default ride
-# meets the ride bar for every measured seed, with the slowest allowed
-# settings still finishing within the page's time limit.
-GENERATIONS = 30
-POPULATION = 30
-DEFAULT_SEED = 123
+# Run size and the starting seed, from measurements (docs/devlog.md,
+# 2026-10-03). 25 generations of 25 is the largest size whose slowest
+# allowed settings still finish in about 27 seconds in Pyodide; at that size
+# every one of 20 measured seeds meets the ride bar (R16), and seed 2 gave
+# the most exciting default ride.
+GENERATIONS = 25
+POPULATION = 25
+DEFAULT_SEED = 2
 
 # Tighter than the local web UI's ranges, so the slowest allowed settings
 # still finish quickly. Measured alongside the run size.

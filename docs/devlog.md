@@ -4,6 +4,37 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-03: generide in the browser, and how big a run fits in 30 seconds
+
+Someone who finds generide through my portfolio can't see it do anything without cloning it, making a virtual environment, and starting a server, and most of them don't own RollerCoaster Tycoon 2, so the in-game half is out of reach anyway. This build puts a page on GitHub Pages that runs generide's own engine in the visitor's browser: pick a few settings, press Go, watch a Mine Train evolve, download the `.td6`. The plan is `docs/plans/2026-10-03-1617-feat-try-in-browser-plan.md`.
+
+The engine was already standard library only, which is the whole reason this works. The page loads [Pyodide](https://pyodide.org) (CPython compiled to WebAssembly) in a Web Worker, unpacks the real `rct2/` package into it, and calls `rct2/demo.py`, a small module that builds a run exactly the way `evolve_coaster.py` does for `--genome parts --fitness physics`. No engine code changed. Pyodide is copied from a pinned npm package into the site at build time rather than loaded from a CDN, so the page depends on nothing else being up.
+
+The numbers that decided the run size, all with default settings unless noted:
+
+- **Same ride in the browser and the CLI.** A Pyodide run (seed 123, 4 generations of 8) writes a `.td6` whose SHA-256 matches CPython's exactly (`d0f288e069a54179…`). A test also pins `rct2/demo.py` to `evolve_coaster.py` byte for byte under CPython, using the command the page prints. That made it safe to measure ride quality in native Python, which is about twice as fast.
+- **Time, in Pyodide under Node** (median of 3 seeds, worst in brackets):
+
+  | Size | Defaults | Slowest allowed (60 x 60, station 12) | Small (12 x 12, station 2) |
+  |---|---|---|---|
+  | 20 x 20 | 11.0 s (12.2) | 15.1 s (15.5) | 12.4 s (12.5) |
+  | 25 x 25 | 20.8 s (20.9) | 25.9 s (26.8) | 23.6 s (23.9) |
+  | 30 x 30 | 28.2 s (28.4) | 38.3 s (42.2) | 34.1 s (35.0) |
+
+  Loading Pyodide and importing the engine took 2.7 s on top.
+- **Ride bar** (the default ride builds, finishes the circuit, and has at least one drop): 10 of 10 seeds at 20 x 20, 30 x 30, and 40 x 30, and 20 of 20 at 25 x 25.
+
+Every size passed the ride bar, so time decided it. 25 generations of 25 is the largest size where even the slowest settings the page allows finish under 30 seconds, so the footprint and station maximums (60, 60, and 12, tighter than the local web UI's 250 and 20) could stay where they were. The default seed is 2, the most exciting of the 20 at that size (5.37 estimated excitement, 3 drops); the median was 5.04. In headless Chromium the page's own timed runs took 17.9 s for the defaults and 26.0 s for the slowest settings.
+
+Two things worth remembering:
+
+- Stopping a run kills the worker. Python running synchronously in a worker can't read a message mid-run, and the shared-memory interrupt Pyodide offers needs cross-origin isolation headers GitHub Pages can't send. So every time the best ride improves, the worker sends the whole ride (pictures, stats, `.td6` bytes), and Stop just keeps the last one and starts a fresh worker for the next run.
+- `tests/test_physics.py`'s recorded-reference cases fail in this cloud container (Python 3.11 on Linux) in the last digit of airtime and vertical g, with none of this change applied. They pass in CI on Python 3.9. Floating-point results can differ by platform in the last bit, which is exactly why the browser-versus-CPython byte check above mattered before trusting the quality numbers.
+
+Not measured: Firefox and Safari run WebAssembly at different speeds than V8, so the 30-second figure is a Chromium number.
+
+---
+
 ## 2026-09-30: Stopping a run the page didn't start, without risking someone else's process
 
 Two things the web UI's code review left open (PR #64): the page could only Stop a run it had launched itself, and a run record still marked `running` after the machine restarted could get stuck that way forever, since the only liveness check was whether its pid was alive, and pids get reused.
