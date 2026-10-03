@@ -6,6 +6,7 @@ names. Whether the real runtime runs the engine is the browser tests' job
 (demo/tests/).
 """
 
+import io
 import json
 import subprocess
 import sys
@@ -40,7 +41,7 @@ def test_build_writes_the_page_runtime_and_engine(tmp_path, fake_pyodide):
 
 
 def test_engine_archive_holds_the_run_module_its_imports_and_the_template():
-    names = set(zipfile.ZipFile(__import__("io").BytesIO(build_demo.engine_archive())).namelist())
+    names = set(zipfile.ZipFile(io.BytesIO(build_demo.engine_archive())).namelist())
     assert "rct2/demo.py" in names
     assert "evolve_coaster.py" in names
     assert "data/sample_rides/manic_miner_test.td6" in names
@@ -50,7 +51,7 @@ def test_the_unpacked_engine_runs_on_its_own(tmp_path):
     # Imports rct2.demo from nothing but the archive and runs a tiny ride, so
     # a module the run needs but the archive leaves out fails here, not in a
     # visitor's browser.
-    with zipfile.ZipFile(__import__("io").BytesIO(build_demo.engine_archive())) as archive:
+    with zipfile.ZipFile(io.BytesIO(build_demo.engine_archive())) as archive:
         archive.extractall(tmp_path / "engine")
     code = (
         "import sys; sys.path.insert(0, sys.argv[1]);"

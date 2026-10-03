@@ -18,9 +18,10 @@ const state = {
   view: null, // settings_view() from the engine, once loaded
   values: null, // the last values the visitor ran with, kept for the next run
   onReady: null, // the settings form's hook for enabling go
+  showErrors: null, // the settings form's hook for showing field errors
   run: null, // the run in progress
   validateId: 0,
-  urls: [], // object URLs for the current pictures, revoked on replace
+  urls: {}, // object URL per picture slot, revoked on replace
 };
 
 // ---------------------------------------------------------------------------
@@ -89,20 +90,24 @@ function setView(screen, ...nodes) {
   }
 }
 
-function svgUrl(svg) {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  state.urls.push(url);
-  return url;
+// Each picture slot (plan, profile, score chart, download) keeps one object
+// URL; replacing a slot's picture releases the one it replaces, so a run
+// that sends many updates does not hold every old picture in memory.
+function slotUrl(slot, blob) {
+  if (state.urls[slot]) URL.revokeObjectURL(state.urls[slot]);
+  state.urls[slot] = URL.createObjectURL(blob);
+  return state.urls[slot];
 }
 
 function releasePictures() {
-  for (const url of state.urls) URL.revokeObjectURL(url);
-  state.urls = [];
+  for (const url of Object.values(state.urls)) URL.revokeObjectURL(url);
+  state.urls = {};
 }
 
-function picture(svg, caption, alt) {
+function picture(slot, svg, caption, alt) {
+  const src = slotUrl(slot, new Blob([svg], { type: "image/svg+xml" }));
   return h("figure", { class: "well well-graph graph" },
-    h("img", { src: svgUrl(svg), alt }), caption && h("figcaption", {}, caption));
+    h("img", { src, alt }), caption && h("figcaption", {}, caption));
 }
 
 function repoLink(text) {
@@ -141,6 +146,7 @@ function onMessage(worker, message) {
       if (state.showErrors && message.id === state.validateId) state.showErrors(message.errors);
       break;
     case "invalid":
+      endRun();
       showSettings(message.errors);
       break;
     case "progress":
@@ -180,9 +186,14 @@ function showLoading(message) {
     h("p", { "aria-live": "polite" }, `Step ${step} of ${steps}: ${message.text}`)));
 }
 
+function endRun() {
+  if (state.run) state.run.finish();
+  state.run = null;
+}
+
 function showError(message) {
   const lastRide = state.run && state.run.last;
-  state.run = null;
+  endRun();
   const what = message.where === "load"
     ? "The demo could not start."
     : "The run stopped with an error.";
@@ -342,13 +353,13 @@ function startRun(values) {
       bar.style.width = `${Math.min(100, (100 * done) / p.generations)}%`;
       barBox.setAttribute("aria-valuenow", String(done));
       if (done % 5 === 0 || done === p.generations) live.textContent = `Generation ${done} of ${p.generations}`;
-      put(fitness, picture(p.fitness_svg, "Best score by generation.", "Best score by generation"));
+      put(fitness, picture("fitness", p.fitness_svg, "Best score by generation.", "Best score by generation"));
     },
     best(b) {
       run.last = b;
       put(pictures,
-        picture(b.plan_svg, "Best ride so far: top-down plan, lighter is higher.", "Top-down plan of the best ride so far"),
-        picture(b.profile_svg, "Best ride so far: side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the best ride so far"));
+        picture("plan", b.plan_svg, "Best ride so far: top-down plan, lighter is higher.", "Top-down plan of the best ride so far"),
+        picture("profile", b.profile_svg, "Best ride so far: side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the best ride so far"));
       stop.disabled = false;
       stopNote.textContent = "";
     },
@@ -399,20 +410,19 @@ function statsTables(result) {
 }
 
 function showResult(result) {
-  if (state.run) state.run.finish();
-  state.run = null;
+  endRun();
   releasePictures();
   const seed = result.seed ?? (result.values && result.values.seed);
+  const hasSeed = seed !== null && seed !== undefined && seed !== "";
   const hasRide = result.td6 instanceof Uint8Array;
 
   const download = hasRide
     ? h("a", {
       class: "button primary",
-      href: URL.createObjectURL(new Blob([result.td6], { type: "application/octet-stream" })),
-      download: `generide-mine-train${seed !== null && seed !== undefined && seed !== "" ? `-seed-${seed}` : ""}.td6`,
+      href: slotUrl("download", new Blob([result.td6], { type: "application/octet-stream" })),
+      download: `generide-mine-train${hasSeed ? `-seed-${seed}` : ""}.td6`,
     }, "Download the .td6")
     : null;
-  if (download) state.urls.push(download.getAttribute("href"));
 
   const again = h("button", { type: "button" }, "New run");
   again.addEventListener("click", () => showSettings());
@@ -429,11 +439,11 @@ function showResult(result) {
       : null,
     hasRide ? null : banner("bad", h("p", {}, "No buildable ride was found, so there is nothing to download. Try another seed or larger footprint.")),
     h("div", { class: "pictures" },
-      picture(result.plan_svg, "Top-down plan, lighter is higher.", "Top-down plan of the ride"),
-      picture(result.profile_svg, "Side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the ride")),
+      picture("plan", result.plan_svg, "Top-down plan, lighter is higher.", "Top-down plan of the ride"),
+      picture("profile", result.profile_svg, "Side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the ride")),
     statsTables(result),
     h("div", { class: "actions" }, download, again),
-    seed !== null && seed !== undefined && seed !== ""
+    hasSeed
       ? h("p", { class: "small" }, `Seed ${seed}. The same seed and settings give the same ride again.`)
       : null,
     win({ colour: "brown", title: "Take it further" },

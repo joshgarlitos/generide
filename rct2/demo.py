@@ -30,6 +30,8 @@ from rct2.evolution import evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness
 from rct2.generate import create_hill_circuit
 
+from evolve_coaster import create_ride_from_segments
+
 TEMPLATE = Path(__file__).resolve().parent.parent / "data" / "sample_rides" / "manic_miner_test.td6"
 
 # The settings a visitor sees, in the order the page shows them.
@@ -79,7 +81,6 @@ def settings_view() -> Dict[str, Any]:
         "settings": rows,
         "generations": GENERATIONS,
         "population": POPULATION,
-        "estimate_note": settings.ESTIMATE_NOTE,
     }
 
 
@@ -123,13 +124,12 @@ def ride_result(segments: List[int], max_width: Optional[int], max_depth: Option
     summary = runrecord.ride_summary(segments, max_width, max_depth)
     data = None
     if summary["valid"]:
-        from evolve_coaster import create_ride_from_segments
-
         ride = create_ride_from_segments(list(segments), TEMPLATE)
         data = checksum.append(td6.encode(ride))
     return {
         "summary": summary,
-        # The local web UI's own wording for the numbers and the flags.
+        # The local web UI's own wording for the numbers and the flags. The
+        # empty record is a page run's: never saved, never checked in the game.
         "stats_view": webui._stats_view(summary, {}),
         "warnings": webui._warnings(summary, {}),
         "plan_svg": render.render_track(segments, title="Top-down plan"),
@@ -181,12 +181,13 @@ def run(
 
     history: List[float] = []
     valid_history: List[float] = []
-    best_sent: List[float] = []
+    # The last ride sent as "best": its fitness, segments, and payload.
+    best_sent: Dict[str, Any] = {}
 
     def send_best(generation: int, individual) -> None:
-        best_sent[:] = [individual.fitness]
         payload = ride_result(individual.segments, values["max_width"], values["max_depth"])
         payload.update(generation=generation, fitness=individual.fitness)
+        best_sent.update(fitness=individual.fitness, segments=list(individual.segments), payload=payload)
         emit("best", payload)
 
     def progress(generation: int, population_now) -> None:
@@ -200,13 +201,11 @@ def run(
             "seed": seed,
             "generation": generation,
             "generations": generations,
-            "best_fitness": best.fitness if best else None,
-            "avg_fitness": population_now.average_fitness(),
             "fitness_svg": render.render_fitness_history(
                 history, valid_history, title="Best score by generation",
             ),
         })
-        if best is not None and (not best_sent or best.fitness > best_sent[0]):
+        if best is not None and (not best_sent or best.fitness > best_sent["fitness"]):
             send_best(generation, best)
 
     stats = evolve_parts(
@@ -220,9 +219,12 @@ def run(
     )
 
     best = stats.best_individual
-    result = ride_result(best.segments, values["max_width"], values["max_depth"])
-    if not best_sent or best.fitness > best_sent[0]:
+    if best_sent and best_sent["segments"] == list(best.segments):
+        # The ride the page already has; no need to simulate and render it again.
+        result = {k: v for k, v in best_sent["payload"].items() if k not in ("generation", "fitness")}
+    else:
         # A best bred in the last generation only shows up here, as in the CLI.
+        result = ride_result(best.segments, values["max_width"], values["max_depth"])
         emit("best", dict(result, generation=stats.generations, fitness=best.fitness))
     result.update(
         seed=seed,

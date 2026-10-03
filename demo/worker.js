@@ -23,15 +23,22 @@ function post(message) {
   self.postMessage(message, transfer);
 }
 
-async function boot() {
-  post({ type: "loading", step: 1, steps: 3, text: "Downloading the Python runtime (about 10 MB, once)" });
-  py = await loadPyodide({ indexURL: new URL("./pyodide/", import.meta.url).href });
-
-  post({ type: "loading", step: 2, steps: 3, text: "Downloading generide" });
+async function fetchEngine() {
   const manifest = await (await fetch(new URL("./engine.json", import.meta.url), { cache: "no-cache" })).json();
   const response = await fetch(new URL(`./${manifest.archive}`, import.meta.url));
   if (!response.ok) throw new Error(`The engine download failed (${response.status}).`);
-  py.unpackArchive(await response.arrayBuffer(), "zip", { extractDir: ENGINE_DIR });
+  return response.arrayBuffer();
+}
+
+async function boot() {
+  post({ type: "loading", step: 1, steps: 3, text: "Downloading the Python runtime (about 10 MB, once)" });
+  // The engine downloads while the runtime does.
+  const engine = fetchEngine();
+  engine.catch(() => {}); // awaited below; this only stops an early unhandled rejection
+  py = await loadPyodide({ indexURL: new URL("./pyodide/", import.meta.url).href });
+
+  post({ type: "loading", step: 2, steps: 3, text: "Downloading generide" });
+  py.unpackArchive(await engine, "zip", { extractDir: ENGINE_DIR });
 
   post({ type: "loading", step: 3, steps: 3, text: "Starting generide" });
   py.runPython(`import sys\nsys.path.insert(0, "${ENGINE_DIR}")`);
