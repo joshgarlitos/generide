@@ -293,6 +293,52 @@ def test_bank_lateral_credit_matches_the_real_fixture_tightly():
     assert stats.max_lateral_g == pytest.approx(1.28, abs=0.15)
 
 
+def test_ride_length_matches_the_real_fixture_header():
+    """Issue #60: pin the simulated length against the length the game measured.
+
+    The fixture's TD6 header stores the ride length OpenRCT2 measured on the
+    real test lap: 691 m. TILE_M is calibrated so `ride_length` lands on that
+    number, because it is the unit `ratings.requirement_length`'s 370
+    threshold is written in. At the old TILE_M of 3.0 this read 481.8 m, 30%
+    short, and no test noticed because none asserted length at all.
+
+    The tolerance is 2%. The calibration currently lands within 0.5% here, and
+    on the hill-circuit seed, whose live oracle reading of 183 m is recorded
+    in issue #60 (it simulates to 183.7 m). The slack leaves room for a refit of
+    TILE_M against more tracks without a test edit, while staying far inside
+    the 30% error this guards against.
+    """
+    from rct2 import td6
+
+    ride = td6.load(FIXTURE)
+    segments = [element.segment_type for element in ride.elements]
+    lifts = {index for index, element in enumerate(ride.elements) if element.chain_lift}
+
+    assert ride.ride_length == 691  # the header really holds the game's reading
+
+    stats = simulate(segments, lift_indices=lifts)
+
+    assert stats.ride_length == pytest.approx(ride.ride_length, rel=0.02)
+
+
+def test_scale_coupled_constants_stay_expressed_at_the_current_tile_scale():
+    """Issue #60: FRICTION_COEFF and the g-force coefficients move with TILE_M.
+
+    Each one consumes a horizontal length, so recalibrating TILE_M alone makes
+    the real Manic Miner stall (friction is charged per metre) and shifts every
+    g-force. These pin the products and ratios that must hold at the scale the
+    constants were fitted at (3.0 m per tile), so an edit that changes one
+    without the others fails here rather than silently invalidating them.
+    """
+    fit_tile_m = 3.0
+
+    # Energy lost over one flat tile is the same as at the fitted scale.
+    assert physics.FRICTION_COEFF * physics.TILE_M == pytest.approx(0.01 * fit_tile_m)
+    # The shape terms divide by length / radius, which grew with TILE_M.
+    assert physics.GFORCE_VERTICAL_COEFF / physics.TILE_M == pytest.approx(0.56393 / fit_tile_m)
+    assert physics.GFORCE_LATERAL_COEFF / physics.TILE_M == pytest.approx(0.44517 / fit_tile_m)
+
+
 def test_gforce_is_linear_in_speed_not_quadratic():
     """Confirms the functional form, not just the fitted constants.
 
