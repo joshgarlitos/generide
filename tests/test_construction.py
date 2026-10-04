@@ -182,6 +182,34 @@ def test_real_mine_train_completes_under_the_stall_screen():
     assert simulate(segments, lift_indices=lifts).completed
 
 
+def test_stall_screen_never_passes_a_track_the_simulation_stalls():
+    """Issue #60: the screen must stay conservative against the corrected scale.
+
+    Rescaling TILE_M re-expressed the friction the simulation charges per
+    metre, and `ProxyFitness` trusts this screen to avoid passing tracks the
+    real simulation stalls. Checked over a seeded corpus of the part-based
+    tracks evolution actually builds from, plus the real fixture. The
+    flat-genome generator (`generate_random_track`) is deliberately not
+    included: it already produces a handful of tracks the screen passes and the
+    simulation stalls, before and after the rescale, which is a separate gap.
+    """
+    import random
+
+    from rct2.mutations import flatten_parts, generate_random_track_parts
+
+    ride = td6.load(FIXTURE)
+    fixture = [element.segment_type for element in ride.elements]
+    lifts = {index for index, element in enumerate(ride.elements) if element.chain_lift}
+    assert energy_stall_index(fixture, lift_indices=lifts) is None
+    assert simulate(fixture, lift_indices=lifts).completed
+
+    rng = random.Random(60)
+    for _ in range(300):
+        segments = flatten_parts(generate_random_track_parts(rng))
+        if energy_stall_index(segments) is None:
+            assert simulate(segments).completed, segments
+
+
 def test_stall_screen_constants_match_the_physics_model():
     """Pin the head constants so the two energy models cannot drift.
 

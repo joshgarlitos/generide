@@ -8,7 +8,15 @@ Unit conventions:
 - Segment data uses RCT2 integer units: distances in tiles, heights in RCT2
   height units (a 25-degree slope climbs 2 units per tile, 60-degree climbs 8).
 - The simulation converts once at the boundary and runs in meters/seconds:
-  TILE_M meters per tile, HEIGHT_UNIT_M meters per height unit.
+  TILE_M meters per tile, HEIGHT_UNIT_M meters per height unit. Neither is a
+  surveyed real-world size. HEIGHT_UNIT_M is confirmed by the game's drop
+  height and drop count; TILE_M is calibrated so `ride_length` matches the
+  length OpenRCT2 itself reports (see TILE_M), because that is the unit the
+  rating thresholds are written in.
+- TILE_M is coupled to FRICTION_COEFF, GFORCE_VERTICAL_COEFF and
+  GFORCE_LATERAL_COEFF: each consumes a horizontal length, so they are
+  expressed through TILE_SCALE and move with it. Change the scale in one
+  place and they follow.
 - Rating multipliers in RATING_WEIGHTS are fitted against real designs; see
   the constant's own docstring for the fit and its limits.
 """
@@ -20,10 +28,35 @@ from typing import Dict, List, NamedTuple, Optional, Set
 from rct2 import construction
 from rct2.segments import SEGMENTS, Segment
 
-TILE_M = 3.0
+# Horizontal scale, calibrated against the ride length OpenRCT2 reports
+# (issue #60). It was 3.0, which read about 30% short on every track tried.
+# The per-piece geometry was never the problem: the shortfall stayed within
+# one percent of a fixed multiplier across a 0.22 and a 0.57 fraction of turn
+# length, which a wrong turn model could not do and a wrong scale does.
+#
+# Solving TILE_M so the simulated length equals the game's, per track:
+#   manic_miner_test.td6 (header, 691 m)             -> 4.379
+#   create_hill_circuit() seed (live oracle, 183 m)  -> 4.342
+# 4.36 is the midpoint: -0.4% and +0.4% on those two. Two paired
+# measurements is thin. Re-run the fit with more `oracle.score_track()`
+# readings before trusting the last decimal.
+#
+# This is a calibration, not a survey: the "meters" here were never real
+# meters. The vertical scale (HEIGHT_UNIT_M) is independent and unchanged:
+# drop count and highest drop match the game exactly on the fixture.
+TILE_M = 4.36
+# The scale at which FRICTION_COEFF, GFORCE_VERTICAL_COEFF and
+# GFORCE_LATERAL_COEFF were fitted. Do not change this when recalibrating
+# TILE_M; it records where those three numbers came from.
+_FIT_TILE_M = 3.0
+TILE_SCALE = TILE_M / _FIT_TILE_M
 HEIGHT_UNIT_M = 0.75
 GRAVITY = 9.81
-FRICTION_COEFF = 0.01  # rolling friction deceleration per meter, as fraction of g
+# Rolling friction deceleration per meter, as fraction of g. Scale-coupled to
+# TILE_M: energy lost is 2 * FRICTION_COEFF * GRAVITY * length_m, so when the
+# same piece got longer this had to shrink by the same factor to keep the
+# energy lost per piece (0.01 at the original 3.0 m per tile).
+FRICTION_COEFF = 0.01 / TILE_SCALE
 LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
 MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
 BANK_LATERAL_CREDIT = 0.226  # lateral g absorbed by a banked turn; see issue #41 below
@@ -63,8 +96,15 @@ BANK_LATERAL_CREDIT = 0.226  # lateral g absorbed by a banked turn; see issue #4
 # Negative g (airtime/crests) is the visible remaining gap. It was not chased
 # further here because the fit set is already small (6 designs); narrowing it
 # needs more real designs, which needs #25 first.
-GFORCE_VERTICAL_COEFF = 0.56393
-GFORCE_LATERAL_COEFF = 0.44517
+#
+# Both coefficients are scale-coupled to TILE_M (issue #60). The vertical
+# term divides by an arc length and the lateral term by a turn radius, and
+# both grew with TILE_M, so each coefficient grows by TILE_SCALE to leave the
+# g-force a piece produces exactly where the fit above put it. The numbers
+# written here are the values as fitted at 3.0 m per tile. BANK_LATERAL_CREDIT
+# is a flat subtraction already in g, so it does not move.
+GFORCE_VERTICAL_COEFF = 0.56393 * TILE_SCALE
+GFORCE_LATERAL_COEFF = 0.44517 * TILE_SCALE
 
 # 2026-08-10, issue #41: our own generated rides under-read lateral g. A ride
 # we generated and loaded in-game measured 1.37g; this predicted 0.76g.
