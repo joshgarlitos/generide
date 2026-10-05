@@ -150,11 +150,11 @@ Today the plan view is a grid of squares shaded by height. It shows where the tr
 - KTD2. **The engine draws, the page turns.** `render.render_isometric(segments, angle, ...)` is a pure function returning one SVG for one quarter-turn angle. The local web UI fetches `GET /api/runs/{id}/iso.svg?angle=N` when the viewer turns. The browser demo gets all four angles in each `best` payload, because the engine runs in a worker that cannot answer a request mid-run. Governs R6, R7, R13, R14.
 - KTD3. **Track geometry lives in its own module.** `rct2/trackpath.py` turns a segment list into one centerline per piece (world tile coordinates plus height), built from `geometry.py` poses and `segments.py` definitions. The renderer and the train both read it, so the train rides exactly the line the rails are drawn on. Governs R1, R3, R9.
 - KTD4. **Pieces are drawn as short chunks sorted back to front, with a height tiebreak.** Each piece's centerline is cut into chunks, and every chunk (rails, ties, its support column) is one paint-order item keyed by rotated depth, then height. A crossing then paints the upper chunk last from all four angles. Whole-piece sorting would draw a long piece wholly in front of or behind a piece it only partly overlaps. Governs R2.
-- KTD5. **Turns are circular arcs derived from the piece's own entry and exit.** A quarter turn's radius is its forward offset and a half turn's is half its sideways offset, so the 3-tile, 5-tile, and helix pieces share one rule, and the helix's backward-moving end needs no special case. Slopes rise by the piece's own `elevation_delta` with a smooth profile whose start and end slopes follow its slope state. A height unit is a quarter tile, which gives about 27 and 63 degrees for the 25 and 60 degree pieces (AE1; confirmed in U2). Governs R3.
-- KTD6. **The train moves by SMIL `animateMotion` along the same path, with per-piece timing.** `keyPoints` are cumulative path length in screen space and `keyTimes` are cumulative simulated time from `physics.trace()`, so the train is slow on the lift and fast on drops and the lap is 20 seconds whatever the ride's length. A stalled ride's path stops at the start of the stalled piece, the animation freezes there, and a cross marks it. Lap numbers are never hard-coded, so they follow `trace()` when joshgarlitos/generide#60 changes ride length. Governs R9, R10.
-- KTD7. **One shared module draws the view in both pages.** `rct2/webui_static/iso-view.js` builds the picture, turn controls, reduced-motion handling, and Play lap. The local web UI imports it, and `tools/build_demo.py` copies it into the site beside `tokens.css` and `style.css`. The two apps stay separate; only this component is shared. Governs R6, R7, R12, R13, R14.
-- KTD8. **Turn controls are two buttons, "Turn left" and "Turn right", with a "View N of 4" label.** Four angle buttons add a control group for no extra capability, because a quarter turn at a time is the requirement. The default angle is set by eye in U2. Governs R6.
-- KTD9. **Reduced motion is read by the page once per picture** through `matchMedia("(prefers-reduced-motion: reduce)")`, which pauses at time zero and shows the Play lap button. Governs R12.
+- KTD5. **Turns are circular arcs derived from the piece's own entry and exit.** Because pieces run from entry edge midpoint to entry edge midpoint, a quarter turn's radius is its `forward_delta` plus half a tile (1.5 tiles for the 3-tile turn and 2.5 for the 5-tile turn, the radii `physics.segment_length` already uses) and a half turn's radius is half its `right_delta`. The 3-tile, 5-tile, and helix pieces then share one rule, and the helix's backward-moving end needs no special case. Slopes rise by the piece's own `elevation_delta` with a smooth profile whose start and end slopes follow its slope state. The drawing uses the game's geometry, where a height unit is a quarter tile, which gives about 27 and 63 degrees for the 25 and 60 degree pieces (AE1; confirmed in U2). That is steeper than the physics' own meters imply (`HEIGHT_UNIT_M` against `TILE_M` is about 19 and 54 degrees), and the picture follows the piece names, not the physics scale. Train speeds still come from the physics. Governs R3.
+- KTD6. **The train moves by SMIL `animateMotion` along the same path, with per-piece timing.** The element sets `calcMode="linear"`, because the default `paced` mode ignores `keyPoints` and `keyTimes` and would run the train at constant speed. `keyPoints` are cumulative path length in screen space and `keyTimes` are cumulative simulated time from `physics.trace()`, so the train is slow on the lift and fast on drops and the lap is 20 seconds whatever the ride's length. A stalled ride's path stops at the start of the stalled piece, plays once over 20 seconds, freezes there, and a cross marks it. Lap numbers are never hard-coded, so they follow `trace()` when joshgarlitos/generide#60 changes ride length. The train is painted over the whole track, so it shows in front of a hill it is actually behind. This is accepted and checked by eye in U2. Governs R9, R10.
+- KTD7. **One shared script draws the view in both pages.** `rct2/webui_static/iso-view.js` is a plain script that exposes one global, `IsoView`, and builds the picture, turn controls, reduced-motion handling, and Play lap. The local page loads it with a second `<script src="/iso-view.js" defer>` before `app.js`, which is a classic script and cannot import. The demo's module `app.js` imports it for its side effect and then uses the same global. `tools/build_demo.py` copies it into the site beside `tokens.css` and `style.css`. The two apps stay separate; only this component is shared. Governs R6, R7, R12, R13, R14.
+- KTD8. **Turn controls are two buttons, "Turn left" and "Turn right", with a "View N of 4" label.** Turn left moves the viewpoint a quarter turn counter-clockwise, so the ride appears to turn clockwise, and "View 1" is angle 0. Four angle buttons add a control group for no extra capability, because a quarter turn at a time is the requirement. The default angle is set by eye in U2. On the compare screen one pair and one label sit above the grid and drive every picture, so rides are always compared from the same side. Governs R6.
+- KTD9. **Reduced motion is read by the page once per picture** through `matchMedia("(prefers-reduced-motion: reduce)")`, which pauses at time zero and shows the Play lap button. Under reduced motion a restart (new best ride or turn) returns the train to a still station and never starts motion. Play lap is disabled while a lap runs. On a stalled ride it runs to the stall point and holds there with the marker, and the next press returns it to the station and runs again. On the compare screen there is one reduced-motion line and one Play lap button for the grid. Governs R11, R12.
 
 ### High-Level Technical Design
 
@@ -174,7 +174,7 @@ Paint order for one picture: ground grid, then all chunks sorted by rotated dept
 
 ### Scope notes from planning
 
-Considered and not built: rail banking tilt (pieces draw level; nobody asked for it, and the rails read the same shape), a lift hill colour or speed colouring (already deferred in the Product Contract), and a free-orbit view. Revisit banking if the rough render in U2 reads wrongly on banked turns.
+Considered and not built: rail banking tilt (pieces draw level; nobody asked for it, and the rails read the same shape), a lift hill colour or speed colouring (already deferred in the Product Contract), and a free-orbit view. Revisit banking if the rough render in U2 reads wrongly on banked turns. Also considered and not built: a pause toggle for viewers who have no reduced-motion setting. R12 settles reduced motion with the user, and a looping train longer than five seconds is normally expected to be pausable, so this is worth the user's call. Reusing the Play lap button as a toggle would be the cheapest form.
 
 ---
 
@@ -196,8 +196,8 @@ Considered and not built: rail banking tilt (pieces draw level; nobody asked for
   - Covers AE1. A gentle slope piece (0x04) and a steep slope piece (0x05), one tile each, rise 2 and 8 height units, and the steep one rises exactly four times as much.
   - For the Manic Miner fixture (`data/sample_rides/manic_miner_test.td6`, 89 pieces), the path is continuous: each piece's last sample equals the next piece's first sample.
   - For the same closed circuit, the final sample equals the first, in position and height.
-  - A quarter turn 3 (0x2A) and quarter turn 5 (0x10) leave on the heading `advance_position` reports and have constant distance from their arc centre.
-  - A half-turn helix (0x5A) ends one tile behind where it started in the forward direction, without a jump or reversal in the sample sequence.
+  - A quarter turn 3 (0x2A) and quarter turn 5 (0x10) leave on the heading `advance_position` reports and have constant distance from their arc centre, 1.5 and 2.5 tiles.
+  - A half-turn helix (0x5A) ends at zero forward displacement and three tiles sideways from its start edge midpoint, without a jump or reversal in the sample sequence.
   - An empty segment list returns an empty path without raising.
 - **Verification:** `tests/test_trackpath.py` passes, and no other module's tests change.
 
@@ -231,28 +231,31 @@ Considered and not built: rail banking tilt (pieces draw level; nobody asked for
 - **Dependencies:** U2 and the user's go-ahead on the look.
 - **Files:** `rct2/render.py` (modify), `tests/test_render.py` (modify).
 - **Approach:**
-  - Add a train element (a short row of cars, sized by eye) animated with `animateMotion` along the track path (KTD6). `keyPoints` come from the cumulative screen-space polyline length at piece boundaries and `keyTimes` from cumulative `time_s` over the total, so lap proportions are the simulation's and no number is hard-coded.
+  - Add a train element (a short row of cars, sized by eye) animated with `animateMotion` and `calcMode="linear"` along the track path (KTD6). `keyPoints` come from the cumulative screen-space polyline length at piece boundaries and `keyTimes` from cumulative `time_s` over the total, so lap proportions are the simulation's and no number is hard-coded.
   - Lap duration is 20 seconds for a completed ride and repeats without end. Pieces on the lift and in the station use `trace()`'s times like any other piece.
-  - A stalled ride truncates the path at the start of the stalled piece, plays once and freezes there, and draws the cross and "stalls here" label in `GRAPH["stall"]` as the profile does.
+  - A stalled ride truncates the path at the start of the stalled piece, plays once over 20 seconds and freezes there, and draws the cross and "stalls here" label in `GRAPH["stall"]` as the profile does.
   - The picture ships the animation ready to run; the page pauses it (KTD1).
 - **Patterns to follow:** `render_profile`'s stall marker and its use of `trace()` for lift runs.
 - **Test scenarios:**
   - Covers AE6. For Manic Miner, the share of `keyTimes` span that sits on lift and station pieces is within one point of that share in `trace()` (about 39 percent), and the animation duration is 20 seconds.
   - Covers AE4. A ride whose train stalls on a hill gets a path that ends at that piece, a freeze at the end, and a stall marker at the same point; its animation does not repeat.
-  - `keyPoints` and `keyTimes` start at 0, end at 1, never decrease, and have equal length.
+  - `keyPoints` and `keyTimes` start at 0, end at 1, never decrease, and have equal length, and the element has `calcMode="linear"`.
   - A different angle changes `keyPoints` but not the duration or the `keyTimes`.
   - A ride that completes has no stall marker.
-- **Verification:** `tests/test_render.py` passes, and a headless render at two times in the lap shows the train in two different places on the track.
+- **Verification:** `tests/test_render.py` passes. A headless render sampled at the lift hill's share of the lap shows the train well short of that share of the path, and at two times in the lap shows it in two different places.
 
 ### U4. Local web UI
 
 - **Goal:** The isometric view replaces the plan on the run screen (live and finished) and the compare screen, with turn controls and the train.
 - **Requirements:** R6, R7, R11, R12, R13. Covers AE3, AE5.
 - **Dependencies:** U3.
-- **Files:** `rct2/webui.py` (modify), `rct2/webui_static/iso-view.js` (create), `rct2/webui_static/app.js` (modify), `rct2/webui_static/style.css` (modify), `tests/test_webui.py` (modify).
+- **Files:** `rct2/webui.py` (modify: the route and a `STATIC_FILES` entry for `/iso-view.js`), `rct2/webui_static/index.html` (modify: load the script), `rct2/webui_static/iso-view.js` (create), `rct2/webui_static/app.js` (modify), `rct2/webui_static/style.css` (modify), `tests/test_webui.py` (modify).
 - **Approach:**
   - `GET /api/runs/{id}/iso.svg?angle=N`: render the run's latest best ride at that angle (KTD2). A missing or non-numeric angle means 0, and any integer is taken modulo 4.
-  - `iso-view.js` fetches the SVG, inlines it, adds Turn left and Turn right buttons with a "View N of 4" label, and keeps the chosen angle in page state so a new best ride redraws at the same angle and restarts the lap (R7, R11). It pauses at time zero and shows Play lap when reduced motion is on (KTD9), with a line saying why. Play lap runs one lap and returns to the station.
+  - `iso-view.js` fetches the SVG, inlines it, adds Turn left and Turn right buttons with a "View N of 4" label, and keeps the chosen angle in page state so a new best ride redraws at the same angle and restarts the lap (R7, R11). It pauses at time zero and shows Play lap when reduced motion is on, with a line saying why, and follows KTD9 for restarts, a running lap, and a stalled ride.
+  - A redraw replaces only the SVG node. The buttons stay mounted so keyboard focus stays on the pressed button, the "View N of 4" label is an `aria-live="polite"` region, and the SVG's `<desc>` names the view number, so `render_isometric` takes the angle for the description as well as the drawing.
+  - A turn keeps the old picture on screen until the new one arrives, ignores any response older than the latest request, and on a failed fetch keeps the old picture and restores the previous label.
+  - On the compare screen one control pair, one label, and one reduced-motion line with its Play lap button sit above the grid and drive every picture (KTD8).
   - In `app.js`, replace the plan picture in `renderPictures` and in the compare grid. Image alt text and captions change from "Top-down plan" to the isometric wording. Keep `plan.svg` and `profile.svg` routes as they are.
   - Inlined SVG ids are made unique per picture so the compare grid can hold several.
 - **Patterns to follow:** `picture()` and `renderPictures` in `rct2/webui_static/app.js`; `WebUI.svg` in `rct2/webui.py`.
@@ -261,7 +264,10 @@ Considered and not built: rail banking tilt (pieces draw level; nobody asked for
   - `iso.svg?angle=1` differs from `angle=0`, and `angle=5` equals `angle=1`.
   - A run with no improvements returns the empty card rather than an error.
   - Covers AE3. In a browser pass against a running local UI, a view turned a quarter turn stays at that angle when a better ride arrives and the train starts at the station.
-  - Covers AE5. With reduced motion emulated, the train is still at the station, the explaining line shows, and Play lap runs one lap and returns it.
+  - Covers AE5. With reduced motion emulated, the train is still at the station, the explaining line shows, and Play lap runs one lap and returns it. A turn or a new best ride in that state leaves the train still.
+  - After Turn right is pressed and the picture redraws, keyboard focus is still on the Turn right button.
+  - Two quick presses of Turn right end on the second angle with a matching label, even when the first response arrives last.
+  - The compare screen shows one control pair above the grid, and pressing it changes every picture.
 - **Verification:** `pytest` passes, and a headless-Chromium pass over the run screen and the compare screen confirms the picture, turn buttons, and train, with screenshots checked by eye (`ce-test-browser`).
 
 ### U5. Browser demo
@@ -274,10 +280,11 @@ Considered and not built: rail banking tilt (pieces draw level; nobody asked for
   - `ride_result` replaces `plan_svg` with `iso_svgs`, four strings indexed by angle (KTD2). The rest of the payload is unchanged.
   - `build_demo.py` copies `iso-view.js` into the site beside the shared CSS (KTD7), and `app.js` in `demo/` imports it. The `plan_svg` key and its test assertion are updated together.
   - The picture's turn state lives in the page, so a new `best` message redraws at the current angle.
+- **Execution note:** Measure the render cost in Pyodide first (`demo/tools/measure.mjs`). If four renders on every improving best push the timed smoke runs toward the CI limit (`DEMO_TIME_LIMIT` is 41 s against about 27 s measured), send only the current angle during a run and all four once the run ends.
 - **Patterns to follow:** `picture()` and `slotUrl` in `demo/app.js`; the shared CSS copy in `tools/build_demo.py`.
 - **Test scenarios:**
   - `ride_result` returns four distinct, parseable `iso_svgs` and no `plan_svg`.
-  - `build_demo` output contains `iso-view.js`, and `engine_files` still packs every module including `trackpath.py`.
+  - `build_demo` output contains `iso-view.js`, the demo page loads it, and `engine_files` still packs every module including `trackpath.py`.
   - In the browser test, a default run ends with an isometric picture, turn buttons change the picture, and the existing "Top-down plan of the ride" assertions are updated to the new alt text.
   - The timed smoke cases stay within their limits, which is the success criterion that drawing adds no noticeable time.
 - **Verification:** `pytest` passes, `python tools/build_demo.py` builds, and `npx playwright test` from `demo/` passes including both timed smoke cases.
