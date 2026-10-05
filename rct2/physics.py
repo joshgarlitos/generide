@@ -13,10 +13,10 @@ Unit conventions:
   height and drop count; TILE_M is calibrated so `ride_length` matches the
   length OpenRCT2 itself reports (see TILE_M), because that is the unit the
   rating thresholds are written in.
-- TILE_M is coupled to FRICTION_COEFF, GFORCE_VERTICAL_COEFF and
-  GFORCE_LATERAL_COEFF: each consumes a horizontal length, so they are
-  expressed through TILE_SCALE and move with it. Change the scale in one
-  place and they follow.
+- TILE_M is coupled to FRICTION_COEFF and GFORCE_VERTICAL_COEFF: each
+  consumes a horizontal length, so they are expressed through TILE_SCALE and
+  move with it. Change the scale in one place and they follow. Lateral g does
+  not depend on TILE_M: it is the game's own per-piece table (LATERAL_FACTOR).
 - Rating multipliers in RATING_WEIGHTS are fitted against real designs; see
   the constant's own docstring for the fit and its limits.
 """
@@ -45,9 +45,9 @@ from rct2.segments import SEGMENTS, Segment
 # meters. The vertical scale (HEIGHT_UNIT_M) is independent and unchanged:
 # drop count and highest drop match the game exactly on the fixture.
 TILE_M = 4.36
-# The scale at which FRICTION_COEFF, GFORCE_VERTICAL_COEFF and
-# GFORCE_LATERAL_COEFF were fitted. Do not change this when recalibrating
-# TILE_M; it records where those three numbers came from.
+# The scale at which FRICTION_COEFF and GFORCE_VERTICAL_COEFF were fitted. Do
+# not change this when recalibrating TILE_M; it records where those two numbers
+# came from.
 _FIT_TILE_M = 3.0
 TILE_SCALE = TILE_M / _FIT_TILE_M
 HEIGHT_UNIT_M = 0.75
@@ -57,9 +57,9 @@ GRAVITY = 9.81
 # same piece got longer this had to shrink by the same factor to keep the
 # energy lost per piece (0.01 at the original 3.0 m per tile).
 FRICTION_COEFF = 0.01 / TILE_SCALE
+MPH_PER_MS = 2.23694
 LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
 MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
-BANK_LATERAL_CREDIT = 0.226  # lateral g absorbed by a banked turn; see issue #41 below
 
 # G-force is linear in speed, not speed-squared over a geometric radius.
 #
@@ -97,55 +97,69 @@ BANK_LATERAL_CREDIT = 0.226  # lateral g absorbed by a banked turn; see issue #4
 # further here because the fit set is already small (6 designs); narrowing it
 # needs more real designs, which needs #25 first.
 #
-# Both coefficients are scale-coupled to TILE_M (issue #60). The vertical
-# term divides by an arc length and the lateral term by a turn radius, and
-# both grew with TILE_M, so each coefficient grows by TILE_SCALE to leave the
-# g-force a piece produces exactly where the fit above put it. The numbers
-# written here are the values as fitted at 3.0 m per tile. BANK_LATERAL_CREDIT
-# is a flat subtraction already in g, so it does not move.
+# GFORCE_VERTICAL_COEFF is scale-coupled to TILE_M (issue #60). The vertical
+# term divides by an arc length, which grew with TILE_M, so the coefficient
+# grows by TILE_SCALE to leave the g-force a piece produces exactly where the
+# fit above put it. The number written here is the value as fitted at 3.0 m
+# per tile.
+#
+# The "within ~0.5g" lateral residual above and the negative-g gap share a
+# cause that was found later (issue #41, below): the real values these were
+# fitted against are quantized. The vertical coefficient has the same
+# problem and has not been refit.
 GFORCE_VERTICAL_COEFF = 0.56393 * TILE_SCALE
-GFORCE_LATERAL_COEFF = 0.44517 * TILE_SCALE
 
-# 2026-08-10, issue #41: our own generated rides under-read lateral g. A ride
-# we generated and loaded in-game measured 1.37g; this predicted 0.76g.
+# Lateral g is the game's own formula, not a fit (issue #41).
 #
-# First attempt shrank the 3-tile turn's assumed radius (in segment_length())
-# from 1.5 tiles to 1.0, based on that ride plus manic_miner_test.td6 both
-# implying a smaller radius. That was two points agreeing by coincidence. The
-# original game install (the 205 designs RCT Classic ships, at ~/Library/
-# Application Support/Steam/.../RCT Classic.app/Contents/Resources) has 5
-# more designs our segment table can fully simulate. Checked against all of
-# them plus our own ride, radius 1.0 was worse in aggregate than the original
-# 1.5 (sum of squared error 4.5 against 1.0): implied radius across those 5
-# designs ranges 0.83-2.0 tiles, no single value fits more than one or two at
-# a time, and 1.5 already had the lowest total error of anything tried.
-# Reverted to 1.5.
+# Vehicle::GetGForces() in OpenRCT2 computes, on every physics tick:
 #
-# Of those 5 designs, the two whose worst turn is banked (Manic Miner,
-# Penguin Paradise) were both underpredicted at that radius; the three with
-# an unbanked worst turn were close (within about 0.1g, one exception at
-# 0.52g -- Penguin Toboggan, already a known residual from the original #23
-# fit). Solving each banked case for the credit that reproduces its real
-# value, holding the radius at 1.5 and the coefficient fixed:
-#   Manic Miner:       raw 1.572g, real 1.28g -> implies a 0.292g credit
-#   Penguin Paradise:  raw 2.080g, real 1.92g -> implies a 0.160g credit
-# Averaging to 0.226 and re-running through simulate() (not the hand
-# arithmetic above, which is why this is checked against the real function
-# rather than trusted from the derivation): Manic Miner predicts 1.35g
-# against real 1.28 (was 0.98, error was -0.30, now +0.07), Penguin Paradise
-# predicts 1.85g against real 1.92 (was 1.41, error was -0.51, now -0.07).
+#   lateral_g_x100 = (|velocity| * 98 / lateralFactor) * 10 >> 16
 #
-# This does not fix the ride that motivated it. That ride has no banked
-# turns at all, so this credit never touches it -- it still predicts 0.76g
-# against the real 1.37g, unchanged. Its bottleneck turn also runs at a much
-# lower speed (7.67 m/s) than any of the 5 real designs' bottlenecks (14-21
-# m/s), which is a real, unexplained difference and the likely next place to
-# look: a model that is linear in speed with no offset will underpredict
-# hardest exactly where speed is lowest, if the real per-piece factor RCT2
-# uses isn't purely proportional to speed either. Not chased further here.
+# where lateralFactor is one constant per track piece, stored on the piece's
+# TrackElementDescriptor (src/openrct2/ride/ted/TED.*.h, `.lateralFactor`).
+# The sign only says left or right. The game keeps the largest value seen on
+# the test lap. LATERAL_FACTOR is that table for the pieces we model. A piece
+# with no entry has no lateral g in the game either.
 #
-# BANK_LATERAL_CREDIT moved to 0.226 below. GFORCE_LATERAL_COEFF and the turn
-# radii are unchanged from the original #23 fit.
+# Why the earlier fit under-read. It modelled lateral g as a fitted
+# coefficient times speed over turn radius, less a flat credit on banked
+# turns, and fitted it to the g-force bytes in 6 real designs' headers. The
+# game writes those bytes as the runtime value divided by 32 with integer
+# division (src/openrct2/rct2/T6Exporter.cpp), so every g-force read from a
+# TD6 header, and every max_*_g in data/calibration.csv, is a multiple of
+# 0.32g rounded down. The true value lies in [stored, stored + 0.32). The fit
+# absorbed that bias: its implied factors (about 164 for the 5-tile turn and
+# 99 for the 3-tile turn) are about 1.7x the game's 98 and 59, and the
+# turn-type ratio was right, which is why it looked plausible. The ride that
+# started #41 was read from the game's own display, not a header, so it was
+# the one reading without the bias: 1.37g measured against 0.76g predicted.
+#
+# Checks against the data we have, keeping the quantization in mind:
+#   manic_miner_test.td6 header reads 1.28g, so the real value is in
+#     [1.28, 1.60). This gives 1.64g at simulated speeds. Our simulated max
+#     speed is about 5% above the game's, so a little high is expected.
+#   the #41 ride, 1.37g real: its tightest turn is an unbanked 3-tile turn
+#     (factor 59) at 7.67 m/s in the simulation, which is 1.27g by this
+#     formula (worked by hand; that ride's segments are not in the repo).
+#
+# Speed is the larger of the piece's entry and exit speeds, because the game
+# records the maximum over the ticks on the piece, not the mean. The game also
+# averages each tick's value with the previous tick's; that smooths a piece's
+# first few ticks and does not change a steady turn, so it is not modelled.
+#
+# Not ported: banked turns and helices also carry a verticalFactor, which adds
+# to vertical g in the game. The vertical model above does not include it.
+LATERAL_FACTOR = {
+    0x10: 98, 0x11: 98,  # quarter turn, 5 tiles
+    0x22: 98, 0x23: 98, 0x24: 98, 0x25: 98,  # the same turn on a 25 degree slope
+    0x2A: 59, 0x2B: 59,  # quarter turn, 3 tiles
+    0x16: 160, 0x17: 160,  # banked quarter turn, 5 tiles
+    0x2C: 100, 0x2D: 100,  # banked quarter turn, 3 tiles
+    0x5A: 100,  # half helix down, small
+    0x5E: 160,  # half helix down, large
+}
+# The game shows mph as velocity * 9 >> 18, so one mph is this many raw units.
+_VELOCITY_UNITS_PER_MPH = 262144 / 9
 
 # Slope state names from construction.slope_state_at mapped to track angle.
 _SLOPE_ANGLE_RAD = {
@@ -155,9 +169,6 @@ _SLOPE_ANGLE_RAD = {
     "down": math.radians(-25),
     "steep_down": math.radians(-60),
 }
-
-# Turn pieces that are banked (felt lateral g is reduced on these).
-_BANKED_TURNS = {0x16, 0x17, 0x2C, 0x2D, 0x5A, 0x5E}
 
 # Station pieces drive the train at lift speed, like a chain lift. Shared with
 # construction.energy_stall_index so both energy models agree on what is powered.
@@ -183,12 +194,11 @@ def segment_length(segment: Segment) -> SegmentGeometry:
 
     # Turn radius by displacement shape: 5-tile quarter turns (forward=2,
     # right=3) curve at ~2.5 tiles, 3-tile turns (forward=1, right=2) at ~1.5.
-    # Checked against 5 real designs plus one of our own (issue #41,
-    # 2026-08-10): implied radius across them ranges 0.83-2.0 tiles with no
-    # single value fitting more than one or two at a time, and 1.5 has the
-    # lowest total error of the values tried. The lateral-g miss on our own
-    # rides traced to BANK_LATERAL_CREDIT instead; see that constant's
-    # docstring in GFORCE_LATERAL_COEFF's block above.
+    # These set the arc length. They no longer feed lateral g, which comes
+    # from the game's per-piece table (LATERAL_FACTOR). An earlier fit tried to
+    # recover the radius from lateral g readings, and found implied radii of
+    # 0.83-2.0 tiles with no single value fitting; that spread was the
+    # quantization in the readings, not the radius (issue #41).
     shape = (abs(segment.forward_delta), abs(segment.right_delta))
     radius_tiles = {(2, 3): 2.5, (1, 2): 1.5}.get(shape)
     if radius_tiles is None:
@@ -214,6 +224,19 @@ class RideStats:
     airtime: float  # seconds with vertical g below zero
     completed: bool
     stall_index: Optional[int]
+
+
+def _lateral_g(seg_id: int, speed_ms: float) -> Optional[float]:
+    """Lateral g on one piece at a given speed, by the game's own formula.
+
+    None for a piece with no lateral factor. See LATERAL_FACTOR for the
+    formula, its source, and how it was checked.
+    """
+    factor = LATERAL_FACTOR.get(seg_id)
+    if factor is None:
+        return None
+    velocity = speed_ms * MPH_PER_MS * _VELOCITY_UNITS_PER_MPH
+    return velocity * 98 / factor * 10 / 65536 / 100
 
 
 def _vertical_g(
@@ -333,12 +356,7 @@ def trace(
         g_vert = _vertical_g(prev_angle, angle, mean_speed, geometry.length_m)
         prev_angle = angle
 
-        lateral_g: Optional[float] = None
-        if geometry.radius_m is not None:
-            # Linear in speed, same reasoning as the vertical term above.
-            lateral_g = GFORCE_LATERAL_COEFF * mean_speed / geometry.radius_m
-            if seg_id in _BANKED_TURNS:
-                lateral_g = max(0.0, lateral_g - BANK_LATERAL_CREDIT)
+        lateral_g = _lateral_g(seg_id, max(speed, exit_speed))
 
         # Drop tracking: OpenRCT2 counts a drop the moment the train enters a
         # run of downward-sloped elements (Vehicle.cpp's testing-flags walk),
@@ -508,7 +526,6 @@ RATING_WEIGHTS = {
     "nausea_inversion_count": 0.027337,
 }
 
-MPH_PER_MS = 2.23694
 _RATING_FEATURES = (
     "max_speed_mph",
     "average_speed_mph",

@@ -235,20 +235,21 @@ FIXTURE = Path(__file__).parent.parent / "data" / "sample_rides" / "manic_miner_
 
 
 def test_gforce_model_matches_the_real_fixture_within_a_stated_tolerance():
-    """The committed regression check for the velocity-linear g-force model.
+    """The committed regression check for the g-force model against a real ride.
 
-    The fitted coefficients (GFORCE_VERTICAL_COEFF, GFORCE_LATERAL_COEFF) come
-    from 6 real designs read from a local game install, which isn't something
-    this test can load -- those .td6 files aren't committed, only the fit's
-    result is. This fixture is what's actually checked in, and it was not
-    part of the fit, so matching it is real evidence the coefficients
-    generalize rather than just memorizing the 6 they were tuned on.
+    GFORCE_VERTICAL_COEFF was fitted to 6 real designs read from a local game
+    install, which isn't something this test can load; those .td6 files aren't
+    committed, only the fit's result is. Lateral g is not fitted: it is the
+    game's own per-piece table (LATERAL_FACTOR). This fixture is what's
+    actually checked in, and it was not part of the vertical fit.
 
-    Real values (from the fixture's own TD6 header, which is a real game
-    export): +g=2.56, -g=-0.64, lateral=1.28. Tolerances match the residuals
-    documented on GFORCE_VERTICAL_COEFF -- this is not a tight equality
-    check, because the model is still an approximation, just no longer one
-    that's wrong by a factor of 2-4x.
+    Real values come from the fixture's TD6 header: +g=2.56, -g=-0.64,
+    lateral=1.28. The game stores those bytes as the runtime value divided by
+    32 with integer division, so each is a floor to 0.32g and the true value
+    is up to 0.32g higher. Tolerances are loose for that reason and because the
+    model is still an approximation, just no longer one that's wrong by a
+    factor of 2-4x. The lateral value gets a tighter, interval-aware check in
+    the next test.
     """
     from rct2 import td6
 
@@ -270,17 +271,17 @@ def test_gforce_model_matches_the_real_fixture_within_a_stated_tolerance():
     assert stats.max_lateral_g < 2.5
 
 
-def test_bank_lateral_credit_matches_the_real_fixture_tightly():
-    """Dedicated pin for issue #41's fix, tighter than the generous check above.
+def test_lateral_g_agrees_with_the_fixture_headers_quantized_reading():
+    """Issue #41: the fixture's lateral g, checked against what its header allows.
 
-    The fixture's worst turn is banked, so this is checking the specific
-    thing that changed: BANK_LATERAL_CREDIT moved from 0.67 to 0.226 based on
-    this fixture and one other real design (Penguin Paradise, not committed)
-    both implying a value near 0.2-0.3 once the turn radius was confirmed
-    correct. Before this fix, the fixture predicted 0.98g against real 1.28g;
-    after, 1.35g. Error flipped sign (-0.30 to +0.07) but shrank by more than
-    4x, which is why this gets its own tight-tolerance test rather than
-    resting on the generous abs=0.6 above.
+    The header byte is the game's max lateral g divided by 32 with integer
+    division, so a stored 4 means the real value is in [1.28, 1.60), not 1.28.
+    Comparing against 1.28 as if exact is what biased the earlier fit low. The
+    simulation reads 1.64g here, 0.04 above the top of the interval, which is
+    the size of error to expect from a simulated max speed that is about 5%
+    above the game's (and lateral g is linear in speed). The 0.15 slack covers
+    that and nothing more: an unbanked 3-tile turn read through the old fitted
+    coefficient would have sat well below the floor of the interval.
     """
     from rct2 import td6
 
@@ -288,9 +289,54 @@ def test_bank_lateral_credit_matches_the_real_fixture_tightly():
     segments = [element.segment_type for element in ride.elements]
     lifts = {index for index, element in enumerate(ride.elements) if element.chain_lift}
 
+    floor = ride.max_lateral_g * 0.32  # the header's reading, rounded down
     stats = simulate(segments, lift_indices=lifts)
 
-    assert stats.max_lateral_g == pytest.approx(1.28, abs=0.15)
+    assert floor - 0.15 <= stats.max_lateral_g < floor + 0.32 + 0.15
+
+
+def test_lateral_g_follows_the_games_formula_and_factor_table():
+    """Issue #41: pin the formula and the table, not just one ride.
+
+    The game computes (|velocity| * 98 / lateralFactor) * 10 >> 16, in
+    hundredths of g, with velocity in raw units where mph is velocity * 9 >> 18.
+    The anchor below redoes that arithmetic in integers for a known piece and
+    speed, independently of the float version in physics.
+    """
+    speed_ms = 10.0
+
+    raw_velocity = int(speed_ms * physics.MPH_PER_MS * 2**18 / 9)
+    expected = ((raw_velocity * 98 // 98) * 10 >> 16) / 100  # 5-tile turn, factor 98
+    assert physics._lateral_g(0x10, speed_ms) == pytest.approx(expected, abs=0.01)
+
+    # Linear in speed, and the ratio between turn types is the ratio of the
+    # game's factors, so a tighter turn pulls harder at the same speed.
+    assert physics._lateral_g(0x10, 2 * speed_ms) == pytest.approx(
+        2 * physics._lateral_g(0x10, speed_ms)
+    )
+    assert physics._lateral_g(0x2A, speed_ms) / physics._lateral_g(0x10, speed_ms) == pytest.approx(98 / 59)
+    assert physics._lateral_g(0x2C, speed_ms) / physics._lateral_g(0x2A, speed_ms) == pytest.approx(59 / 100)
+
+    # Left and right pieces share a magnitude, the slope does not change a
+    # 5-tile turn's factor, and a piece with no entry has no lateral g.
+    assert physics._lateral_g(0x11, speed_ms) == physics._lateral_g(0x10, speed_ms)
+    assert physics._lateral_g(0x22, speed_ms) == physics._lateral_g(0x10, speed_ms)
+    assert physics._lateral_g(0x00, speed_ms) is None
+    assert physics._lateral_g(0x04, speed_ms) is None
+
+    # It does not depend on the horizontal scale: only the speed does.
+    assert physics.LATERAL_FACTOR[0x2A] == 59 and physics.LATERAL_FACTOR[0x10] == 98
+
+
+def test_trace_reports_lateral_g_on_turns_only_at_the_faster_of_entry_and_exit():
+    track = [0x02, 0x01, 0x2A, 0x00]
+    ride = physics.trace(track, lift_indices={0, 1, 2, 3})
+
+    turn = ride.points[2]
+    assert turn.g_lateral == pytest.approx(
+        physics._lateral_g(0x2A, max(turn.speed_in, turn.speed_out))
+    )
+    assert ride.points[3].g_lateral is None
 
 
 def test_ride_length_matches_the_real_fixture_header():
@@ -322,21 +368,21 @@ def test_ride_length_matches_the_real_fixture_header():
 
 
 def test_scale_coupled_constants_stay_expressed_at_the_current_tile_scale():
-    """Issue #60: FRICTION_COEFF and the g-force coefficients move with TILE_M.
+    """Issue #60: FRICTION_COEFF and the vertical g coefficient move with TILE_M.
 
     Each one consumes a horizontal length, so recalibrating TILE_M alone makes
     the real Manic Miner stall (friction is charged per metre) and shifts every
-    g-force. These pin the products and ratios that must hold at the scale the
-    constants were fitted at (3.0 m per tile), so an edit that changes one
-    without the others fails here rather than silently invalidating them.
+    vertical g-force. These pin the products and ratios that must hold at the
+    scale the constants were fitted at (3.0 m per tile), so an edit that
+    changes one without the other fails here rather than silently invalidating
+    them. Lateral g is not scale-coupled: it is the game's own table.
     """
     fit_tile_m = 3.0
 
     # Energy lost over one flat tile is the same as at the fitted scale.
     assert physics.FRICTION_COEFF * physics.TILE_M == pytest.approx(0.01 * fit_tile_m)
-    # The shape terms divide by length / radius, which grew with TILE_M.
+    # The shape term divides by a length, which grew with TILE_M.
     assert physics.GFORCE_VERTICAL_COEFF / physics.TILE_M == pytest.approx(0.56393 / fit_tile_m)
-    assert physics.GFORCE_LATERAL_COEFF / physics.TILE_M == pytest.approx(0.44517 / fit_tile_m)
 
 
 def test_gforce_is_linear_in_speed_not_quadratic():

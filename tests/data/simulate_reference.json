@@ -116,7 +116,7 @@
    "highest_drop": 10,
    "max_positive_g": 2.3510507730075387,
    "max_negative_g": -0.6751949585576859,
-   "max_lateral_g": 1.3494687587711829,
+   "max_lateral_g": 1.6443586113024786,
    "airtime": 2.1085196350908495,
    "completed": true,
    "stall_index": null
@@ -226,7 +226,7 @@
    "highest_drop": 10,
    "max_positive_g": 2.3510507730075387,
    "max_negative_g": -0.6751949585576859,
-   "max_lateral_g": 1.3494687587711829,
+   "max_lateral_g": 1.6443586113024786,
    "airtime": 2.1085196350908495,
    "completed": true,
    "stall_index": null
@@ -263,7 +263,7 @@
    "highest_drop": 0.0,
    "max_positive_g": 1.0,
    "max_negative_g": 1.0,
-   "max_lateral_g": 0.20073524940682136,
+   "max_lateral_g": 0.36330264708097937,
    "airtime": 0.0,
    "completed": false,
    "stall_index": 9
@@ -320,7 +320,7 @@
    "highest_drop": 10,
    "max_positive_g": 1.9639834447981213,
    "max_negative_g": -0.12126815405855007,
-   "max_lateral_g": 1.206225316513575,
+   "max_lateral_g": 2.0182388887887113,
    "airtime": 0.8058547179968071,
    "completed": true,
    "stall_index": null
@@ -429,7 +429,7 @@
    "highest_drop": 0.0,
    "max_positive_g": 1.0594924768481537,
    "max_negative_g": 0.8221672364874806,
-   "max_lateral_g": 0.20073524940682136,
+   "max_lateral_g": 0.36330264708097937,
    "airtime": 0.0,
    "completed": false,
    "stall_index": 11
@@ -524,7 +524,7 @@
    "highest_drop": 24,
    "max_positive_g": 2.5023060411505638,
    "max_negative_g": -0.24178969047137688,
-   "max_lateral_g": 1.8555387087166677,
+   "max_lateral_g": 3.1004898375972205,
    "airtime": 1.954216901876105,
    "completed": false,
    "stall_index": 66
@@ -563,7 +563,7 @@
    "highest_drop": 0.0,
    "max_positive_g": 1.0,
    "max_negative_g": 1.0,
-   "max_lateral_g": 0.0,
+   "max_lateral_g": 0.1864680785961913,
    "airtime": 0.0,
    "completed": false,
    "stall_index": 9
@@ -620,7 +620,7 @@
    "highest_drop": 26,
    "max_positive_g": 2.648018140326001,
    "max_negative_g": -0.963573711767585,
-   "max_lateral_g": 1.03566028189546,
+   "max_lateral_g": 1.9058803124014903,
    "airtime": 1.1479296466893998,
    "completed": true,
    "stall_index": null
@@ -711,7 +711,7 @@
    "highest_drop": 20,
    "max_positive_g": 2.371284119861714,
    "max_negative_g": -0.37663112065551074,
-   "max_lateral_g": 1.6968129251402269,
+   "max_lateral_g": 2.8358155835221353,
    "airtime": 1.196092998313566,
    "completed": false,
    "stall_index": 33
@@ -753,7 +753,7 @@
    "highest_drop": 0.0,
    "max_positive_g": 1.0,
    "max_negative_g": 1.0,
-   "max_lateral_g": 0.11248403607688033,
+   "max_lateral_g": 0.21872302222222223,
    "airtime": 0.0,
    "completed": false,
    "stall_index": 9
@@ -835,7 +835,7 @@
    "highest_drop": 24,
    "max_positive_g": 2.5023060411505638,
    "max_negative_g": -0.4608096352493889,
-   "max_lateral_g": 1.758498104482494,
+   "max_lateral_g": 2.9386691115461026,
    "airtime": 1.5788281981641488,
    "completed": true,
    "stall_index": null
@@ -879,7 +879,7 @@
    "highest_drop": 4,
    "max_positive_g": 1.7097588431181794,
    "max_negative_g": 0.43519862095255707,
-   "max_lateral_g": 0.31642605252664935,
+   "max_lateral_g": 0.5407810028641936,
    "airtime": 0.0,
    "completed": true,
    "stall_index": null
@@ -975,7 +975,7 @@
    "highest_drop": 22,
    "max_positive_g": 2.438288544190794,
    "max_negative_g": -0.17087879689453123,
-   "max_lateral_g": 1.7513307759844743,
+   "max_lateral_g": 2.926717923986615,
    "airtime": 1.4692766911156674,
    "completed": false,
    "stall_index": 42
@@ -1029,7 +1029,7 @@
    "highest_drop": 0.0,
    "max_positive_g": 1.0,
    "max_negative_g": 1.0,
-   "max_lateral_g": 0.0,
+   "max_lateral_g": 0.20089257113138503,
    "airtime": 0.0,
    "completed": false,
    "stall_index": 10
@@ -1097,7 +1097,7 @@
    "highest_drop": 22,
    "max_positive_g": 2.438288544190794,
    "max_negative_g": -0.12126815405855007,
-   "max_lateral_g": 1.768201639636946,
+   "max_lateral_g": 2.954849476250251,
    "airtime": 1.1397458633053061,
    "completed": true,
    "stall_index": null
