@@ -319,7 +319,7 @@ The engine stays standard library only. Pictures use literal colours from `GRAPH
 ## Definition of Done
 
 - Every R in the Product Contract is met, and AE1 to AE6 each have a test or a recorded browser check.
-- The user has judged the first rough render and the default angle and scale are recorded in KTD8.
+- The user has judged the first rough render and the default angle is recorded in KTD8 and the height scale is the single named constant in `rct2/render.py`.
 - `pytest`, the demo build, and `npx playwright test` pass, including the timed smoke cases.
 - The old top-down drawing, the plan file output, the side profile, and the score chart are unchanged.
 - README, devlog, and roadmap are updated, and the learning is captured or one line says nothing was.
