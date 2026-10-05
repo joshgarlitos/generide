@@ -15,11 +15,14 @@ from rct2.render import (
     ELEVATION_BANDS,
     GRAPH,
     _elevation_band,
+    iso_paint_order,
     plan_track,
     render_fitness_history,
+    render_isometric,
     render_profile,
     render_track,
 )
+from rct2.trackpath import PiecePath, track_path
 
 FLAT_OVAL = [0x02, 0x01, 0x00, 0x00, 0x00]
 
@@ -61,7 +64,8 @@ def test_fills_are_literal_colours_rather_than_css_variables():
     lambda: render_track(manic_miner_segments()),
     lambda: render_profile(manic_miner_segments(), _manic_miner_lifts()),
     lambda: render_fitness_history([1.0, 2.0, 2.5], [0.5, 0.7, 0.9]),
-], ids=["plan", "profile", "fitness"])
+    lambda: render_isometric(manic_miner_segments()),
+], ids=["plan", "profile", "fitness", "isometric"])
 def test_pictures_look_the_same_in_any_theme(render):
     # Charts sit on their own dark background, like the game's ride graphs
     # (docs/design/README.md), so nothing may depend on a stylesheet that
@@ -187,10 +191,91 @@ def test_profile_of_empty_track_uses_empty_state():
     render_profile(FLAT_OVAL),
     render_fitness_history([1.0, 2.0, 2.5]),
     render_track([]),
-], ids=["plan", "profile", "fitness", "empty"])
+    render_isometric(FLAT_OVAL),
+    render_isometric([]),
+], ids=["plan", "profile", "fitness", "empty", "isometric", "isometric-empty"])
 def test_every_picture_paints_its_own_background(svg):
     # The light text is only readable on the dark background the picture
     # paints for itself; without it, a light page shows through.
     root = ET.fromstring(svg)
     backgrounds = root.findall("{http://www.w3.org/2000/svg}rect[@class='bg']")
     assert backgrounds
+
+
+# ---------------------------------------------------------------------------
+# Isometric view
+
+
+def _bridge_over_road():
+    # A road along x at height 0 and a bridge along y at height 8, crossing in
+    # tile (0, 0). Built by hand so the crossing is exact.
+    road = PiecePath(0, 0x00, tuple((x / 4, 0.0, 0.0) for x in range(-2, 3)))
+    bridge = PiecePath(1, 0x00, tuple((0.0, y / 4, 8.0) for y in range(-2, 3)))
+    return [road, bridge]
+
+
+@pytest.mark.parametrize("angle", [0, 1, 2, 3])
+def test_a_bridge_is_painted_after_the_road_it_crosses_from_every_angle(angle):
+    # Covers AE2. Pieces nearer the viewer paint later, and where two pieces
+    # share a tile the higher one paints later, so the bridge ends up on top.
+    order = iso_paint_order(_bridge_over_road(), angle)
+
+    last_road = max(i for i, chunk in enumerate(order) if chunk.piece == 0)
+    first_bridge = min(i for i, chunk in enumerate(order) if chunk.piece == 1)
+    assert first_bridge > last_road
+
+
+@pytest.mark.parametrize("angle", [0, 1, 2, 3])
+def test_a_real_crossing_paints_the_upper_track_last(angle):
+    paths = track_path(manic_miner_segments())
+    order = iso_paint_order(paths, angle)
+
+    by_tile = {}
+    for position, chunk in enumerate(order):
+        by_tile.setdefault(chunk.tile, []).append((position, chunk.z))
+    crossings = {t: v for t, v in by_tile.items() if len({round(z) for _, z in v}) > 1}
+    assert crossings, "fixture is expected to cross over itself"
+    for entries in crossings.values():
+        heights_in_paint_order = [z for _, z in sorted(entries)]
+        assert heights_in_paint_order == sorted(heights_in_paint_order)
+
+
+def test_the_isometric_picture_parses_and_uses_literal_colours():
+    svg = render_isometric(manic_miner_segments(), title="Manic Miner")
+
+    assert ET.fromstring(svg).tag.endswith("svg")
+    assert "var(--" not in svg
+
+
+def test_the_isometric_footprint_matches_the_geometry():
+    segments = manic_miner_segments()
+    bounds = track_bounds(Position(), segments)
+
+    assert f"{bounds.width} x {bounds.depth} tiles" in render_isometric(segments)
+
+
+def test_each_quarter_turn_gives_a_different_picture_and_four_turns_come_back():
+    segments = manic_miner_segments()
+    pictures = [render_isometric(segments, angle) for angle in range(4)]
+
+    assert len(set(pictures)) == 4
+    assert render_isometric(segments, 4) == pictures[0]
+    assert render_isometric(segments, -1) == pictures[3]
+
+
+def test_the_description_names_the_view():
+    root = ET.fromstring(render_isometric(manic_miner_segments(), 2))
+    desc = root.find("{http://www.w3.org/2000/svg}desc").text
+
+    assert "View 3 of 4" in desc
+
+
+def test_the_isometric_picture_stays_small_enough_to_send_four_at_a_time():
+    # The browser demo carries all four angles in each update.
+    assert len(render_isometric(manic_miner_segments()).encode("utf-8")) < 150_000
+
+
+def test_an_empty_track_renders_the_empty_card_in_isometric():
+    svg = render_isometric([])
+
+    assert "the track is empty" in svg
