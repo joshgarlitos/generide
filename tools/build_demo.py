@@ -44,6 +44,23 @@ PYODIDE_FILES = (
 TEMPLATE = Path("data") / "sample_rides" / "manic_miner_test.td6"
 
 
+def page_version(repo: Path = REPO) -> str:
+    """A short hash of every file the page is made of, apart from the engine.
+
+    The engine is named by its own hash, but the page's scripts keep their
+    names, so a browser can hold an old copy of one while it fetches the new
+    engine. The build writes this version into both the page script and the
+    engine manifest, and the page compares them (see `showStale` in
+    demo/app.js).
+    """
+    digest = hashlib.sha256()
+    sources = [repo / "demo" / name for name in PAGE_FILES]
+    sources += [repo / "rct2" / "webui_static" / name for name in SHARED_CSS + SHARED_JS]
+    for path in sorted(sources, key=lambda p: p.name):
+        digest.update(path.name.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:16]
+
+
 def engine_files(repo: Path = REPO):
     """Repo-relative paths of everything a run needs, in a stable order."""
     files = sorted(p.relative_to(repo) for p in (repo / "rct2").glob("*.py"))
@@ -81,6 +98,9 @@ def build(out: Path, pyodide_dir: Path, repo: Path = REPO) -> Path:
         shutil.copy2(repo / "demo" / name, out / name)
     for name in SHARED_CSS + SHARED_JS:
         shutil.copy2(repo / "rct2" / "webui_static" / name, out / name)
+    version = page_version(repo)
+    script = out / "app.js"
+    script.write_text(script.read_text().replace("__PAGE_VERSION__", version))
 
     runtime = out / "pyodide"
     runtime.mkdir()
@@ -91,7 +111,9 @@ def build(out: Path, pyodide_dir: Path, repo: Path = REPO) -> Path:
     digest = hashlib.sha256(data).hexdigest()[:16]
     archive_name = f"engine-{digest}.zip"
     (out / archive_name).write_bytes(data)
-    (out / "engine.json").write_text(json.dumps({"archive": archive_name, "sha256": digest}) + "\n")
+    (out / "engine.json").write_text(
+        json.dumps({"archive": archive_name, "sha256": digest, "page": version}) + "\n"
+    )
     # GitHub Pages runs Jekyll unless told not to, and Jekyll drops files
     # whose names start with an underscore.
     (out / ".nojekyll").write_text("")

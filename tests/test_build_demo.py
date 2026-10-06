@@ -8,6 +8,7 @@ names. Whether the real runtime runs the engine is the browser tests' job
 
 import io
 import json
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -75,3 +76,27 @@ def test_missing_runtime_names_the_folder(tmp_path):
     with pytest.raises(SystemExit) as error:
         build_demo.build(tmp_path / "site", missing)
     assert str(missing) in str(error.value)
+
+
+def test_the_build_stamps_one_page_version_into_the_manifest_and_the_script(tmp_path, fake_pyodide):
+    out = build_demo.build(tmp_path / "site", fake_pyodide)
+    manifest = json.loads((out / "engine.json").read_text())
+    script = (out / "app.js").read_text()
+
+    assert manifest["page"] == build_demo.page_version()
+    # The script carries the same version, so a browser holding an old copy of
+    # either one can tell the two no longer match.
+    assert f'"{manifest["page"]}"' in script
+    assert "__PAGE_VERSION__" not in script
+
+
+def test_the_page_version_follows_the_page_files(tmp_path):
+    repo = tmp_path / "repo"
+    shutil.copytree(build_demo.DEMO, repo / "demo", ignore=shutil.ignore_patterns("node_modules", "tests"))
+    shutil.copytree(build_demo.REPO / "rct2" / "webui_static", repo / "rct2" / "webui_static")
+
+    before = build_demo.page_version(repo)
+    assert before == build_demo.page_version(repo)
+
+    (repo / "demo" / "app.js").write_text((repo / "demo" / "app.js").read_text() + "\n// edited\n")
+    assert build_demo.page_version(repo) != before

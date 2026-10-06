@@ -144,3 +144,18 @@ test("with reduced motion the train waits, and Play lap runs a lap without losin
   await expect(play).toHaveAttribute("aria-disabled", "false");
   await context.close();
 });
+
+test("a page and an engine from different deploys ask for a reload instead of running mismatched", async ({ page }) => {
+  // A browser can hold an old copy of the page's script for a few minutes
+  // after a deploy while it fetches the new engine; the manifest says which
+  // page version the engine belongs to.
+  await page.route("**/engine.json", async (route) => {
+    const response = await route.fetch();
+    const manifest = await response.json();
+    await route.fulfill({ response, json: { ...manifest, page: "an-older-page" } });
+  });
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "Reload to get the latest version" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Go" })).toHaveCount(0);
+});
