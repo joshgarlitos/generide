@@ -4,6 +4,27 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-06: An isometric view of a ride, with a train
+
+The best ride so far now draws as an isometric picture, from any of four quarter-turn angles, with a train that laps the track at the simulation's speeds. It replaces the top-down plan on the local web UI's run and compare screens and on the in-browser page. The plan is `docs/plans/2026-10-04-1519-feat-isometric-ride-view-plan.md`, and the work is in [#74](https://github.com/joshgarlitos/generide/pull/74).
+
+![Manic Miner in isometric view](assets/manic-miner-isometric.svg)
+
+The first piece of work was a rough render of the Manic Miner fixture (89 pieces, 15 x 18 tiles, 22 height units), looked at before anything else was built. Two things changed after I saw it. Every station piece now draws in the station colour, because only the first tile was marked. Manic Miner has two stations of four pieces each with one flat piece between them, which matches the two-station finding in the 2026-08-29 entry, so the gap in the yellow is in the file and not a drawing bug. The support columns went from two per piece to one, fainter.
+
+What I measured and what I assumed:
+
+- **Slope angle (assumed, checked by arithmetic).** A height unit is a quarter tile in the game's geometry, so the 25 and 60 degree pieces draw at 26.6 and 63.4 degrees. The physics uses its own meters (`HEIGHT_UNIT_M` 0.75 against `TILE_M` 4.36), which imply 19.0 and 54.0 degrees. The picture follows the piece names, and the train's speeds still come from the physics.
+- **Lap proportions (measured).** The train spends 38.8 percent of a lap on lift and station pieces, which is the share `physics.trace` gives for Manic Miner. The simulated lap is now 93.3 seconds, with 36.2 on lift and station. The plan said 65.7 seconds, which predates the length calibration in #69. The picture takes the share from the trace, so it follows whatever the trace says.
+- **Cost (measured).** One Manic Miner picture is about 134 KB. Four angles render in 24 ms in CPython. The browser page's timed smoke runs took 16.0 s and 19.0 s for the defaults and 24.0 s and 26.1 s for the slowest settings on two runs in headless Chromium, against 17.9 s and 26.0 s before this change and a CI limit of 41 s. The spread between runs is larger than any difference the pictures add.
+- **Not measured.** Only Chromium. Reduced motion was tested through emulation, not on a device with the setting on.
+
+The train was the part that took work. It moves by an SVG animation along the track path, and two things made it sit still without any error. The default `calcMode` ignores the per-piece timing, so it needs `linear`. And a picture inserted by script does not start its animation until it has been laid out and restarted, so one drawn on a tab that is not showing yet never starts on its own. The animation clock kept advancing while the train stood still, which is why it took screenshots a second apart to see it. The page now starts the train when the picture becomes visible. The details are in `docs/solutions/ui-bugs/`.
+
+Still to do: a free-orbit view, colouring the track by speed or marking the lift hill, drawing the lean of banked turns, and keeping the train behind a hill it passes behind. It is drawn over the whole track today.
+
+---
+
 ## 2026-10-03: generide in the browser, and how big a run fits in 30 seconds
 
 Someone who finds generide through my portfolio can't see it do anything without cloning it, making a virtual environment, and starting a server, and most of them don't own RollerCoaster Tycoon 2, so the in-game half is out of reach anyway. This build puts a page on GitHub Pages that runs generide's own engine in the visitor's browser: pick a few settings, press Go, watch a Mine Train evolve, download the `.td6`. The plan is `docs/plans/2026-10-03-1617-feat-try-in-browser-plan.md`.

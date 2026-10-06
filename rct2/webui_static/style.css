@@ -97,7 +97,7 @@ button:active:not(:disabled), .button[href]:active, .button[aria-current="page"]
   padding-top: var(--u);
   box-shadow: inset var(--u) var(--u) 0 var(--deep), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
 }
-button:disabled, .button[aria-disabled="true"] {
+button:disabled, button[aria-disabled="true"], .button[aria-disabled="true"] {
   cursor: not-allowed;
   color: var(--lo);
   text-shadow: 1px 1px 0 var(--hi);

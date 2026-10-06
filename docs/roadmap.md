@@ -103,7 +103,8 @@ Presentation can grow too: names, colors, scenery, and batches of different fina
 | Run library shared by the CLI and the web UI | Complete |
 | Local web UI: request form, live runs, results, check, install, library, comparison | Complete |
 | In-game OpenRCT2 panel that talks to generide | Planned |
-| Rotatable 3D view of a track | Planned |
+| Isometric view of a ride in quarter turns, with a train at the simulation's speeds | Complete |
+| Free-orbit 3D view of a track | Planned |
 | Several runs at once from the web UI | Planned |
 | Headless check and install on Windows and Linux | Planned |
 | Replay how a ride evolved, from the run library | Planned |

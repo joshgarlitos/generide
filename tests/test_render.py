@@ -397,3 +397,15 @@ def test_a_ride_that_completes_has_no_stall_marker():
     svg = render_isometric(manic_miner_segments())
 
     assert "data-stall" not in svg
+
+
+def test_the_stall_cross_sits_where_the_train_stops():
+    svg = render_isometric(STALLING)
+    path = _motion(svg).get("path")
+    last_x, last_y = (float(v) for v in path.split("L")[-1].split(","))
+    root = ET.fromstring(svg)
+    cross = root.find(".//{http://www.w3.org/2000/svg}path[@data-stall]").get("d")
+    # The cross is drawn centred on the train's final position.
+    first_x, first_y = (float(v) for v in cross[1:].split("L")[0].split(","))
+    assert first_x + 5 == pytest.approx(last_x, abs=0.1)
+    assert first_y + 5 == pytest.approx(last_y, abs=0.1)

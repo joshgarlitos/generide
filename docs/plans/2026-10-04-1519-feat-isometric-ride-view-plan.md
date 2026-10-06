@@ -22,7 +22,7 @@ execution: code
 
 ## Product Contract
 
-Product Contract preservation: unchanged in meaning and IDs. The four questions it deferred to planning are answered in KTD1, KTD2, KTD5, KTD6, KTD8, and KTD9 and removed from Outstanding Questions.
+Product Contract preservation: unchanged in meaning and IDs, with the Manic Miner lap figures refreshed after the length calibration in joshgarlitos/generide#69 (about 93 seconds, not 66). The four questions it deferred to planning are answered in KTD1, KTD2, KTD5, KTD6, KTD8, and KTD9 and removed from Outstanding Questions.
 
 ### Summary
 
@@ -39,7 +39,7 @@ Today the plan view is a grid of squares shaded by height. It shows where the tr
 - **The picture is a static isometric image with rotate controls, not a freely draggable 3D view.** (session-settled: user-directed; chosen over a drag-to-orbit canvas: a static picture with rotate buttons is enough.) Governs R1, R6.
 - **It replaces the top-down plan rather than sitting beside it.** (session-settled: user-directed; chosen over keeping both: one picture of the ride is enough.) Governs R13.
 - **A train animates on the track.** (session-settled: user-directed; chosen over a static picture alone: the train shows how the ride runs, not only its shape.) Governs R8, R9, R10, R11, R12.
-- **The lap is compressed to about 20 seconds and keeps the simulation's speed ratios.** (session-settled: user-directed; chosen over real time, about 66 seconds for the Manic Miner reference ride, and over constant speed, which hides the speed information the physics already has.) Governs R9.
+- **The lap is compressed to about 20 seconds and keeps the simulation's speed ratios.** (session-settled: user-directed; chosen over real time, about 93 seconds for the Manic Miner reference ride, and over constant speed, which hides the speed information the physics already has.) Governs R9.
 - **The size label, ground grid, and station marker carry over from the top-down plan.** (session-settled: user-approved; proposed because checking that a ride fits the park is part of why a ride is drawn at all.) Governs R4.
 - **Replacement covers every place the app and demo show the plan today. The old plan drawing and the command-line plan file stay.** (session-settled: user-approved; proposed over removing them: scripts and devlog images still use them.) Governs R13.
 - **The chosen angle stays put when a new best ride arrives, and the train restarts.** (session-settled: user-approved; proposed over resetting the angle on every new best, which would undo the viewer's choice every few seconds.) Governs R7, R11.
@@ -103,7 +103,7 @@ Today the plan view is a grid of squares shaded by height. It shows where the tr
 - AE3. **Covers R7, R11.** Given a run in progress with the view turned a quarter turn, when a better ride arrives, it is drawn from the same quarter turn and the train starts at the station.
 - AE4. **Covers R10.** Given a ride whose train runs out of speed on a hill, when its picture shows, the train stops at that hill with a marker and does not complete the lap.
 - AE5. **Covers R12.** Given reduced motion is on, when the picture appears, the train is still at the station and a line explains why. When Play lap is pressed, the train runs one lap and returns to the station.
-- AE6. **Covers R9.** Given the Manic Miner reference ride, whose simulated lap is about 66 seconds with 39 percent of it on the lift and station, when it plays, the lap takes about 20 seconds and the train spends the same 39 percent of the lap there.
+- AE6. **Covers R9.** Given the Manic Miner reference ride, whose simulated lap is about 93 seconds with 39 percent of it on the lift and station, when it plays, the lap takes about 20 seconds and the train spends the same 39 percent of the lap there.
 
 ### Success Criteria
 
@@ -135,7 +135,7 @@ Today the plan view is a grid of squares shaded by height. It shows where the tr
 
 - `rct2/render.py`: the top-down plan (`render_track`, `plan_track`), the side profile, and the shared palette and dark background.
 - `rct2/geometry.py` and `rct2/segments.py`: piece poses, headings, and elevation per piece, which give the track's path and slopes.
-- `rct2/physics.py`: `trace()` returns per-piece time, speed, lift flags, and the stall point. For the Manic Miner fixture it gives 89 pieces, a 65.7 second lap, 25.8 seconds on lift and station, speeds from 1.6 to 16.7 m/s, and a footprint of 15 by 18 tiles and 22 height units.
+- `rct2/physics.py`: `trace()` returns per-piece time, speed, lift flags, and the stall point. For the Manic Miner fixture it gives 89 pieces, a 93.3 second lap, 36.2 seconds on lift and station, speeds from 1.6 to 16.7 m/s, and a footprint of 15 by 18 tiles and 22 height units.
 - `rct2/webui.py`, `rct2/webui_static/app.js`, `rct2/demo.py`, and `demo/app.js`: where the plan is served and shown today, including the compare screen. The picture is swapped only when the best ride changes.
 - `STRATEGY.md`, "Rendering and fit": why seeing and judging fit matters.
 - `docs/plans/2026-10-03-1617-feat-try-in-browser-plan.md`: the browser demo this picture must also work in.

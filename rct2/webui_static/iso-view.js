@@ -58,7 +58,7 @@
     function stopLap() {
       if (lapTimer !== null) clearTimeout(lapTimer);
       lapTimer = null;
-      if (play) play.disabled = false;
+      if (play) play.setAttribute("aria-disabled", "false");
     }
 
     function rest(svg) {
@@ -92,9 +92,12 @@
       entry.watch.observe(entry.svg);
     }
 
+    // The button is marked disabled rather than being disabled, so a keyboard
+    // user who just pressed it keeps their place.
     function playLap() {
+      if (play.getAttribute("aria-disabled") === "true") return;
       stopLap();
-      play.disabled = true;
+      play.setAttribute("aria-disabled", "true");
       let longest = 0;
       for (const picture of pictures) {
         const svg = picture.svg;
@@ -108,11 +111,13 @@
           // A train that stalled stays at the stall until the next lap.
           if (picture.svg && !picture.svg.querySelector("[data-stall]")) rest(picture.svg);
         }
-        play.disabled = false;
+        play.setAttribute("aria-disabled", "false");
       }, longest + 100);
     }
 
     async function turn(step) {
+      // A turn redraws every picture at rest, so a lap in progress is over.
+      stopLap();
       const previous = current;
       const token = ++turns;
       current = (current + step + ANGLES) % ANGLES;
@@ -139,7 +144,14 @@
         watch: null,
         async show(view) {
           const mine = ++request;
-          const text = await load(view);
+          let text;
+          try {
+            text = await load(view);
+          } catch (err) {
+            // A newer request has started, so this failure is out of date too.
+            if (mine !== request) return;
+            throw err;
+          }
           // A newer request has started, so this answer is out of date.
           if (mine !== request) return;
           const svg = readSvg(text);
