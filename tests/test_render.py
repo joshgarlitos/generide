@@ -23,6 +23,7 @@ from rct2.render import (
     render_track,
 )
 from rct2.construction import STATION_SEGMENTS
+from rct2.physics import trace
 from rct2.trackpath import STRAIGHT_STEPS, PiecePath, track_path
 
 FLAT_OVAL = [0x02, 0x01, 0x00, 0x00, 0x00]
@@ -302,3 +303,97 @@ def test_a_track_with_no_station_piece_has_no_station_marks():
     svg = render_isometric([0x00, 0x00, 0x2B, 0x00])
 
     assert "data-station" not in svg
+
+
+def test_each_piece_has_at_most_one_support_column():
+    segments = manic_miner_segments()
+    svg = render_isometric(segments)
+
+    columns = svg.count('data-support="1"')
+    assert 0 < columns <= len(segments)
+
+
+# ---------------------------------------------------------------------------
+# The train
+
+
+def _motion(svg):
+    root = ET.fromstring(svg)
+    node = root.find(".//{http://www.w3.org/2000/svg}animateMotion")
+    assert node is not None, "the picture has no train animation"
+    return node
+
+
+def _floats(text):
+    return [float(v) for v in text.split(";")]
+
+
+def test_the_train_runs_at_the_simulations_speeds_over_twenty_seconds():
+    # Covers AE6. The share of the lap spent on lift and station pieces is the
+    # simulation's own, about 39 percent for Manic Miner, whatever the lap's
+    # length in seconds.
+    segments = manic_miner_segments()
+    ride = trace(segments)
+    motion = _motion(render_isometric(segments))
+
+    assert motion.get("dur") == "20s"
+    assert motion.get("repeatCount") == "indefinite"
+    times = _floats(motion.get("keyTimes"))
+    share = sum(
+        times[p.index + 1] - times[p.index] for p in ride.points if p.on_lift or p.is_station
+    )
+    assert share == pytest.approx(0.388, abs=0.01)
+
+
+def test_the_train_uses_linear_timing_or_the_speeds_are_ignored():
+    # The default `paced` mode throws keyTimes and keyPoints away and runs the
+    # train at one speed.
+    motion = _motion(render_isometric(manic_miner_segments()))
+
+    assert motion.get("calcMode") == "linear"
+    assert motion.get("rotate") == "auto"
+
+
+def test_key_times_and_key_points_cover_every_piece_and_never_run_backward():
+    segments = manic_miner_segments()
+    motion = _motion(render_isometric(segments))
+    times = _floats(motion.get("keyTimes"))
+    points = _floats(motion.get("keyPoints"))
+
+    assert len(times) == len(points) == len(segments) + 1
+    for series in (times, points):
+        assert series[0] == 0 and series[-1] == 1
+        assert series == sorted(series)
+
+
+def test_turning_the_view_changes_where_the_train_is_not_when():
+    segments = manic_miner_segments()
+    first, second = _motion(render_isometric(segments, 0)), _motion(render_isometric(segments, 1))
+
+    assert first.get("keyTimes") == second.get("keyTimes")
+    assert first.get("dur") == second.get("dur")
+    assert first.get("keyPoints") != second.get("keyPoints")
+
+
+STALLING = [0x02, 0x01] + [0x00] * 30
+
+
+def test_a_train_that_stalls_stops_where_the_simulation_says_with_a_marker():
+    # Covers AE4.
+    ride = trace(STALLING)
+    assert not ride.completed
+    svg = render_isometric(STALLING)
+    motion = _motion(svg)
+
+    assert motion.get("repeatCount") == "1"
+    assert motion.get("fill") == "freeze"
+    # Only the pieces before the stalled one are driven.
+    assert len(_floats(motion.get("keyTimes"))) == ride.stall_index + 1
+    assert 'data-stall="1"' in svg
+    assert "stalls here" in svg
+
+
+def test_a_ride_that_completes_has_no_stall_marker():
+    svg = render_isometric(manic_miner_segments())
+
+    assert "data-stall" not in svg

@@ -449,6 +449,8 @@ ISO_GAUGE = 0.36
 # Pieces at the viewer's side of the ride are painted last. The picture turns
 # in quarter turns, so there are four of them.
 ISO_ANGLES = 4
+# One lap of the animated train, however long the ride is.
+ISO_LAP_SECONDS = 20
 
 
 class IsoChunk(NamedTuple):
@@ -485,7 +487,6 @@ def iso_paint_order(
     chunks: List[IsoChunk] = []
     for path in paths:
         points = path.points
-        middle = len(points) // 2
         for i in range(len(points) - 1):
             a, b = points[i], points[i + 1]
             mid_x, mid_y = _rotate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, angle, cx, cy)
@@ -496,7 +497,7 @@ def iso_paint_order(
             chunks.append(IsoChunk(
                 piece=path.index, a=a, b=b,
                 tile=(tile_u, tile_v), z=z,
-                support=i == 0 or i == middle,
+                support=i == 0,
                 station=path.segment in STATION_SEGMENTS,
             ))
     # Larger u + v is farther from the viewer, so it paints first.
@@ -507,6 +508,7 @@ def iso_paint_order(
 def render_isometric(
     segments: Sequence[int],
     angle: int = 0,
+    lift_indices: Optional[AbstractSet[int]] = None,
     start: Optional[Position] = None,
     title: str = "Ride view",
     tile_px: int = 28,
@@ -516,6 +518,11 @@ def render_isometric(
     Drawn back to front, like the game's own view, from one of four angles
     (`angle` quarter turns). It shows generide's model of the ride, so a
     piece's slope follows its definition, not the game's exact geometry.
+
+    A train laps the track, animated inside the picture. Its speed on each
+    piece is the one `physics.trace` gives, so it crawls up the lift and
+    races down the drops, and the lap takes `ISO_LAP_SECONDS` whatever the
+    ride's length. A train that stalls runs to the stall and stops there.
     """
     angle %= ISO_ANGLES
     paths = track_path(segments, start)
@@ -591,8 +598,8 @@ def render_isometric(
             top = seen(project(a[0], a[1], a[2]))
             bottom = seen(project(a[0], a[1], ground_z))
             layers.append(
-                f'<path class="ts" d="M{fmt(top)}L{fmt(bottom)}" fill="none" '
-                f'stroke="{GRAPH["text_sec"]}" stroke-opacity="0.45" stroke-width="1.5"/>'
+                f'<path class="ts" data-support="1" d="M{fmt(top)}L{fmt(bottom)}" fill="none" '
+                f'stroke="{GRAPH["text_sec"]}" stroke-opacity="0.3" stroke-width="1.5"/>'
             )
         tie_a = seen(project(a[0] + ox, a[1] + oy, a[2]))
         tie_b = seen(project(a[0] - ox, a[1] - oy, a[2]))
@@ -610,6 +617,59 @@ def render_isometric(
         layers.append(
             f'<path class="ac"{tag} d="{"".join(rails)}" fill="none" stroke="{rail_colour}" '
             f'stroke-width="1.6" stroke-linecap="round"/>'
+        )
+
+    # The train rides the same centerlines the rails are drawn on, so it
+    # always runs on the track. Each piece is one stretch of the animation,
+    # timed by the simulation and placed by screen distance along the path.
+    ride = trace(list(segments), set(lift_indices) if lift_indices is not None else None)
+    driven = [p for p in ride.points if not p.stalled]
+    line: List[Tuple[float, float]] = []
+    key_points = [0.0]
+    key_times = [0.0]
+    travelled = 0.0
+    elapsed = 0.0
+    for point, path in zip(driven, paths):
+        for xyz in path.points:
+            screen = seen(project(*xyz))
+            if line:
+                if screen == line[-1] and xyz is path.points[0]:
+                    continue
+                travelled += math.hypot(screen[0] - line[-1][0], screen[1] - line[-1][1])
+            line.append(screen)
+        elapsed += point.time_s
+        key_points.append(travelled)
+        key_times.append(elapsed)
+
+    stall_at: Optional[Tuple[float, float]] = None
+    if not ride.completed:
+        stall_at = line[-1] if line else seen(project(*paths[0].points[0]))
+
+    if travelled > 0 and elapsed > 0:
+        points_attr = ";".join(f"{v / travelled:.4f}" for v in key_points)
+        times_attr = ";".join(f"{v / elapsed:.4f}" for v in key_times)
+        loop = 'repeatCount="indefinite"' if ride.completed else 'repeatCount="1" fill="freeze"'
+        cars = "".join(
+            f'<rect x="{x}" y="-3" width="6.5" height="6" rx="1.5" fill="{GRAPH["lift"]}" '
+            f'stroke="{GRAPH["bg"]}" stroke-width="0.8"/>'
+            for x in (-10, -3, 4)
+        )
+        path_attr = "M" + "L".join(fmt(pt) for pt in line)
+        layers.append(
+            f'<g class="ac" data-train="1">{cars}'
+            f'<animateMotion path="{path_attr}" dur="{ISO_LAP_SECONDS}s" {loop} '
+            f'calcMode="linear" rotate="auto" keyPoints="{points_attr}" keyTimes="{times_attr}"/></g>'
+        )
+    if stall_at is not None:
+        sx, sy = stall_at
+        layers.append(
+            f'<path class="tx" data-stall="1" d="M{sx - 5:.1f},{sy - 5:.1f}L{sx + 5:.1f},{sy + 5:.1f}'
+            f'M{sx - 5:.1f},{sy + 5:.1f}L{sx + 5:.1f},{sy - 5:.1f}" stroke="{GRAPH["stall"]}" '
+            f'stroke-width="2" fill="none"/>'
+        )
+        layers.append(
+            f'<text class="tx" x="{sx:.1f}" y="{sy + 18:.1f}" text-anchor="middle" '
+            f'font-size="10" fill="{GRAPH["stall"]}">stalls here</text>'
         )
 
     pad, label_h = 24, 46
