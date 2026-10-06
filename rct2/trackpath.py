@@ -66,7 +66,7 @@ def _height_fraction(t: float, segment_id: int, rise: int) -> float:
 def _piece_points(position: Position, index: int, segment_id: int) -> PiecePath:
     segment = get_segment(segment_id)
     forward_x, forward_y, right_x, right_y = _AXES[position.heading]
-    end = advance_position(position, segment)
+    end = advance_position(position, segment_id)
     end_forward_x, end_forward_y, _, _ = _AXES[end.heading]
 
     start_xy = (position.x - 0.5 * forward_x, position.y - 0.5 * forward_y)

@@ -165,8 +165,8 @@
       for (const entry of pictures) entry.show(current).catch(() => {});
     }
 
-    return { element, picture, refresh, angle: () => current };
+    return { element, picture, refresh };
   }
 
-  root.IsoView = { createGroup, ANGLES };
+  root.IsoView = { createGroup };
 })(window);

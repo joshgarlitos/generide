@@ -58,14 +58,6 @@ STATIC_FILES = {
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
 
-def _quarter_turns(raw: Optional[str]) -> int:
-    """The view angle a request asks for: a whole number, else the default view."""
-    try:
-        return int(raw) if raw is not None else 0
-    except ValueError:
-        return 0
-
-
 CONSOLE_LOG = "console.log"
 ORACLE_LOG = "oracle-log.jsonl"
 START_TIMEOUT_S = 15.0
@@ -517,6 +509,14 @@ class Supervisor:
 
 
 Route = Tuple[str, str]  # (method, pattern) where {id} marks a run id
+
+
+def _quarter_turns(raw: Optional[str]) -> int:
+    """The view angle a request asks for: a whole number, else the default view."""
+    try:
+        return int(raw) if raw is not None else 0
+    except ValueError:
+        return 0
 
 
 class App:

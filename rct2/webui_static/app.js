@@ -469,7 +469,6 @@ async function showRun(runId, tabParam) {
   // The isometric view keeps its buttons across new best rides, so keyboard
   // focus stays where the viewer put it; only the pictures are replaced.
   let iso = null;
-  let isoVersion = null;
   const profileSlot = h("div", { class: "profile-slot" });
 
   // ---- tabs ----
@@ -684,7 +683,6 @@ async function showRun(runId, tabParam) {
       return;
     }
     const label = run.status === "running" ? "Best ride so far" : "Result";
-    isoVersion = version;
     const profile = picture(`${path}/profile.svg?v=${version}`, `${label}: side profile. Solid line is height, dashed is speed, drops are numbered.`, "Side profile of the ride");
     put(profileSlot, profile);
     if (iso) {
@@ -693,7 +691,7 @@ async function showRun(runId, tabParam) {
       return;
     }
     const group = isoGroup();
-    const figure = group.picture((angle) => fetchSvg(`${path}/iso.svg?angle=${angle}&v=${isoVersion}`), "Isometric view of the ride");
+    const figure = group.picture((angle) => fetchSvg(`${path}/iso.svg?angle=${angle}&v=${pictureVersion}`), "Isometric view of the ride");
     const caption = h("figcaption", {}, `${label}: isometric view. The train runs a compressed lap.`);
     figure.append(caption);
     iso = { group, caption };
