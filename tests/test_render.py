@@ -15,11 +15,16 @@ from rct2.render import (
     ELEVATION_BANDS,
     GRAPH,
     _elevation_band,
+    iso_paint_order,
     plan_track,
     render_fitness_history,
+    render_isometric,
     render_profile,
     render_track,
 )
+from rct2.construction import STATION_SEGMENTS
+from rct2.physics import trace
+from rct2.trackpath import STRAIGHT_STEPS, PiecePath, track_path
 
 FLAT_OVAL = [0x02, 0x01, 0x00, 0x00, 0x00]
 
@@ -61,7 +66,8 @@ def test_fills_are_literal_colours_rather_than_css_variables():
     lambda: render_track(manic_miner_segments()),
     lambda: render_profile(manic_miner_segments(), _manic_miner_lifts()),
     lambda: render_fitness_history([1.0, 2.0, 2.5], [0.5, 0.7, 0.9]),
-], ids=["plan", "profile", "fitness"])
+    lambda: render_isometric(manic_miner_segments()),
+], ids=["plan", "profile", "fitness", "isometric"])
 def test_pictures_look_the_same_in_any_theme(render):
     # Charts sit on their own dark background, like the game's ride graphs
     # (docs/design/README.md), so nothing may depend on a stylesheet that
@@ -187,10 +193,219 @@ def test_profile_of_empty_track_uses_empty_state():
     render_profile(FLAT_OVAL),
     render_fitness_history([1.0, 2.0, 2.5]),
     render_track([]),
-], ids=["plan", "profile", "fitness", "empty"])
+    render_isometric(FLAT_OVAL),
+    render_isometric([]),
+], ids=["plan", "profile", "fitness", "empty", "isometric", "isometric-empty"])
 def test_every_picture_paints_its_own_background(svg):
     # The light text is only readable on the dark background the picture
     # paints for itself; without it, a light page shows through.
     root = ET.fromstring(svg)
     backgrounds = root.findall("{http://www.w3.org/2000/svg}rect[@class='bg']")
     assert backgrounds
+
+
+# ---------------------------------------------------------------------------
+# Isometric view
+
+
+def _bridge_over_road():
+    # A road along x at height 0 and a bridge along y at height 8, crossing in
+    # tile (0, 0). Built by hand so the crossing is exact.
+    road = PiecePath(0, 0x00, tuple((x / 4, 0.0, 0.0) for x in range(-2, 3)))
+    bridge = PiecePath(1, 0x00, tuple((0.0, y / 4, 8.0) for y in range(-2, 3)))
+    return [road, bridge]
+
+
+@pytest.mark.parametrize("angle", [0, 1, 2, 3])
+def test_a_bridge_is_painted_after_the_road_it_crosses_from_every_angle(angle):
+    # Covers AE2. Pieces nearer the viewer paint later, and where two pieces
+    # share a tile the higher one paints later, so the bridge ends up on top.
+    order = iso_paint_order(_bridge_over_road(), angle)
+
+    last_road = max(i for i, chunk in enumerate(order) if chunk.piece == 0)
+    first_bridge = min(i for i, chunk in enumerate(order) if chunk.piece == 1)
+    assert first_bridge > last_road
+
+
+@pytest.mark.parametrize("angle", [0, 1, 2, 3])
+def test_a_real_crossing_paints_the_upper_track_last(angle):
+    paths = track_path(manic_miner_segments())
+    order = iso_paint_order(paths, angle)
+
+    by_tile = {}
+    for position, chunk in enumerate(order):
+        by_tile.setdefault(chunk.tile, []).append((position, chunk.z))
+    crossings = {t: v for t, v in by_tile.items() if len({round(z) for _, z in v}) > 1}
+    assert crossings, "fixture is expected to cross over itself"
+    for entries in crossings.values():
+        heights_in_paint_order = [z for _, z in sorted(entries)]
+        assert heights_in_paint_order == sorted(heights_in_paint_order)
+
+
+def test_the_isometric_picture_parses_and_uses_literal_colours():
+    svg = render_isometric(manic_miner_segments(), title="Manic Miner")
+
+    assert ET.fromstring(svg).tag.endswith("svg")
+    assert "var(--" not in svg
+
+
+def test_the_isometric_footprint_matches_the_geometry():
+    segments = manic_miner_segments()
+    bounds = track_bounds(Position(), segments)
+
+    assert f"{bounds.width} x {bounds.depth} tiles" in render_isometric(segments)
+
+
+def test_each_quarter_turn_gives_a_different_picture_and_four_turns_come_back():
+    segments = manic_miner_segments()
+    pictures = [render_isometric(segments, angle) for angle in range(4)]
+
+    assert len(set(pictures)) == 4
+    assert render_isometric(segments, 4) == pictures[0]
+    assert render_isometric(segments, -1) == pictures[3]
+
+
+def test_the_description_names_the_view():
+    root = ET.fromstring(render_isometric(manic_miner_segments(), 2))
+    desc = root.find("{http://www.w3.org/2000/svg}desc").text
+
+    assert "View 3 of 4" in desc
+
+
+def test_the_isometric_picture_stays_small_enough_to_send_four_at_a_time():
+    # The browser demo carries all four angles in each update.
+    assert len(render_isometric(manic_miner_segments()).encode("utf-8")) < 150_000
+
+
+def test_an_empty_track_renders_the_empty_card_in_isometric():
+    svg = render_isometric([])
+
+    assert "the track is empty" in svg
+
+
+def test_every_station_piece_is_marked_not_only_the_first():
+    segments = manic_miner_segments()
+    stations = sum(1 for s in segments if s in STATION_SEGMENTS)
+    assert stations > 1, "fixture is expected to have a multi-piece station"
+
+    svg = render_isometric(segments)
+
+    # Each station piece is cut into the same number of chunks, and the rails
+    # of every one of them carry the station colour.
+    marked_rails = svg.count('data-station="rail"')
+    assert marked_rails == stations * STRAIGHT_STEPS
+    assert svg.count('data-station="tile"') == stations
+    assert f'data-station="rail" d=' in svg
+    assert GRAPH["start"] in svg
+
+
+def test_a_track_with_no_station_piece_has_no_station_marks():
+    svg = render_isometric([0x00, 0x00, 0x2B, 0x00])
+
+    assert "data-station" not in svg
+
+
+def test_each_piece_has_at_most_one_support_column():
+    segments = manic_miner_segments()
+    svg = render_isometric(segments)
+
+    columns = svg.count('data-support="1"')
+    assert 0 < columns <= len(segments)
+
+
+# ---------------------------------------------------------------------------
+# The train
+
+
+def _motion(svg):
+    root = ET.fromstring(svg)
+    node = root.find(".//{http://www.w3.org/2000/svg}animateMotion")
+    assert node is not None, "the picture has no train animation"
+    return node
+
+
+def _floats(text):
+    return [float(v) for v in text.split(";")]
+
+
+def test_the_train_runs_at_the_simulations_speeds_over_twenty_seconds():
+    # Covers AE6. The share of the lap spent on lift and station pieces is the
+    # simulation's own, about 39 percent for Manic Miner, whatever the lap's
+    # length in seconds.
+    segments = manic_miner_segments()
+    ride = trace(segments)
+    motion = _motion(render_isometric(segments))
+
+    assert motion.get("dur") == "20s"
+    assert motion.get("repeatCount") == "indefinite"
+    times = _floats(motion.get("keyTimes"))
+    share = sum(
+        times[p.index + 1] - times[p.index] for p in ride.points if p.on_lift or p.is_station
+    )
+    assert share == pytest.approx(0.388, abs=0.01)
+
+
+def test_the_train_uses_linear_timing_or_the_speeds_are_ignored():
+    # The default `paced` mode throws keyTimes and keyPoints away and runs the
+    # train at one speed.
+    motion = _motion(render_isometric(manic_miner_segments()))
+
+    assert motion.get("calcMode") == "linear"
+    assert motion.get("rotate") == "auto"
+
+
+def test_key_times_and_key_points_cover_every_piece_and_never_run_backward():
+    segments = manic_miner_segments()
+    motion = _motion(render_isometric(segments))
+    times = _floats(motion.get("keyTimes"))
+    points = _floats(motion.get("keyPoints"))
+
+    assert len(times) == len(points) == len(segments) + 1
+    for series in (times, points):
+        assert series[0] == 0 and series[-1] == 1
+        assert series == sorted(series)
+
+
+def test_turning_the_view_changes_where_the_train_is_not_when():
+    segments = manic_miner_segments()
+    first, second = _motion(render_isometric(segments, 0)), _motion(render_isometric(segments, 1))
+
+    assert first.get("keyTimes") == second.get("keyTimes")
+    assert first.get("dur") == second.get("dur")
+    assert first.get("keyPoints") != second.get("keyPoints")
+
+
+STALLING = [0x02, 0x01] + [0x00] * 30
+
+
+def test_a_train_that_stalls_stops_where_the_simulation_says_with_a_marker():
+    # Covers AE4.
+    ride = trace(STALLING)
+    assert not ride.completed
+    svg = render_isometric(STALLING)
+    motion = _motion(svg)
+
+    assert motion.get("repeatCount") == "1"
+    assert motion.get("fill") == "freeze"
+    # Only the pieces before the stalled one are driven.
+    assert len(_floats(motion.get("keyTimes"))) == ride.stall_index + 1
+    assert 'data-stall="1"' in svg
+    assert "stalls here" in svg
+
+
+def test_a_ride_that_completes_has_no_stall_marker():
+    svg = render_isometric(manic_miner_segments())
+
+    assert "data-stall" not in svg
+
+
+def test_the_stall_cross_sits_where_the_train_stops():
+    svg = render_isometric(STALLING)
+    path = _motion(svg).get("path")
+    last_x, last_y = (float(v) for v in path.split("L")[-1].split(","))
+    root = ET.fromstring(svg)
+    cross = root.find(".//{http://www.w3.org/2000/svg}path[@data-stall]").get("d")
+    # The cross is drawn centred on the train's final position.
+    first_x, first_y = (float(v) for v in cross[1:].split("L")[0].split(","))
+    assert first_x + 5 == pytest.approx(last_x, abs=0.1)
+    assert first_y + 5 == pytest.approx(last_y, abs=0.1)

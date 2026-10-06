@@ -97,6 +97,10 @@ Stores immutable geometry for the Mine Train segment types currently supported. 
 
 Provides position advancement, complete-track tracing, occupancy, bounds, collision reporting, and `validate_track()`. Validation returns structured issue codes rather than a bare boolean.
 
+### `rct2/trackpath.py`
+
+Turns a segment list into one centerline per piece, in tile coordinates for x and y and height units for z. A piece runs from the midpoint of its entry edge to the midpoint of the next piece's entry edge. Turns are circular arcs, with the radii `physics.segment_length` uses, and a slope transition bends from the gradient before it to the gradient after it. The isometric picture draws its rails along these lines and the train runs on them, so the train is always on the track it is drawn on.
+
 ### `rct2/generate.py`
 
 Builds generated rides using a real Mine Train file as a template for vehicle and unparsed header data. It replaces the track, calculates dimensions, adds entrance and exit records, and leaves scenery empty.

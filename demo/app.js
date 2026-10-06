@@ -23,6 +23,7 @@ const state = {
   run: null, // the run in progress
   validateId: 0,
   urls: {}, // object URL per picture slot, revoked on replace
+  isoAngle: 0, // the isometric view's quarter turn, kept as best rides arrive
 };
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,13 @@ function picture(slot, svg, caption, alt) {
   const src = slotUrl(slot, new Blob([svg], { type: "image/svg+xml" }));
   return h("figure", { class: "well well-graph graph" },
     h("img", { src, alt }), caption && h("figcaption", {}, caption));
+}
+
+// The isometric ride picture is inline SVG that iso-view.js draws and turns.
+// Every angle arrives with the ride, so turning needs no round trip to the
+// engine, which is busy evolving.
+function isoGroup() {
+  return IsoView.createGroup(h, { angle: state.isoAngle, onAngle: (angle) => { state.isoAngle = angle; } });
 }
 
 function repoLink(text) {
@@ -347,9 +355,11 @@ function startRun(values) {
     timeValue.textContent = duration((performance.now() - started) / 1000);
   }, 500);
 
+  const profileSlot = h("div", { class: "profile-slot" });
   const run = {
     last: null,
     seed: null,
+    iso: null,
     progress(p) {
       run.seed = p.seed;
       const done = p.generation + 1;
@@ -361,9 +371,15 @@ function startRun(values) {
     },
     best(b) {
       run.last = b;
-      put(pictures,
-        picture("plan", b.plan_svg, "Best ride so far: top-down plan, lighter is higher.", "Top-down plan of the best ride so far"),
-        picture("profile", b.profile_svg, "Best ride so far: side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the best ride so far"));
+      put(profileSlot, picture("profile", b.profile_svg, "Best ride so far: side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the best ride so far"));
+      if (run.iso) {
+        run.iso.refresh();
+      } else {
+        run.iso = isoGroup();
+        const figure = run.iso.picture((angle) => Promise.resolve(run.last.iso_svgs[angle]), "Isometric view of the best ride so far");
+        figure.append(h("figcaption", {}, "Best ride so far: isometric view. The train runs a compressed lap."));
+        put(pictures, h("div", { class: "iso-cell" }, run.iso.element, figure), profileSlot);
+      }
       stop.disabled = false;
       stopNote.textContent = "";
     },
@@ -451,7 +467,7 @@ function showResult(result) {
       : null,
     hasRide ? null : banner("bad", h("p", {}, "No buildable ride was found, so there is nothing to download. Try another seed or larger footprint.")),
     h("div", { class: "pictures" },
-      picture("plan", result.plan_svg, "Top-down plan, lighter is higher.", "Top-down plan of the ride"),
+      resultIso(result),
       picture("profile", result.profile_svg, "Side profile. Solid line is height, dashed is speed, drops are numbered.", "Side profile of the ride")),
     statsTables(result),
     h("div", { class: "actions" }, download, again),
@@ -464,6 +480,13 @@ function showResult(result) {
       command ? h("p", {}, "This command makes the same ride locally:") : null,
       command,
       h("p", {}, "The code, the design notes, and the devlog are on ", repoLink("GitHub"), "."))));
+}
+
+function resultIso(result) {
+  const group = isoGroup();
+  const figure = group.picture((angle) => Promise.resolve(result.iso_svgs[angle]), "Isometric view of the ride");
+  figure.append(h("figcaption", {}, "Isometric view. The train runs a compressed lap."));
+  return h("div", { class: "iso-cell" }, group.element, figure);
 }
 
 // ---------------------------------------------------------------------------

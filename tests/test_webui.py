@@ -416,6 +416,36 @@ class TestPicturesAndDownload:
         assert response.content_type.startswith("image/svg+xml")
         assert response.body.startswith(b"<svg")
 
+    def test_the_isometric_endpoint_returns_svg(self, app):
+        run_id = saved_run()
+        response = call(app, "GET", f"/api/runs/{run_id}/iso.svg")
+        assert response.status == 200
+        assert response.content_type.startswith("image/svg+xml")
+        assert response.body.startswith(b"<svg")
+
+    def test_the_isometric_angle_turns_the_picture_a_quarter_at_a_time(self, app):
+        run_id = saved_run()
+
+        def picture(angle):
+            return call(app, "GET", f"/api/runs/{run_id}/iso.svg?angle={angle}").body
+
+        assert picture(0) != picture(1)
+        assert picture(5) == picture(1)
+        # A missing, empty, or non-numeric angle is the default view.
+        plain = call(app, "GET", f"/api/runs/{run_id}/iso.svg").body
+        assert plain == picture(0)
+        assert picture("sideways") == picture(0)
+
+    def test_the_isometric_view_of_a_run_with_no_ride_is_an_empty_card(self, app):
+        values = settings.validate({"seed": 5}).values
+        run_id = runrecord.create_run(
+            seed=5, request=values, settings=settings.cli_args(values),
+            generations=values["generations"], pid=os.getpid(),
+        )
+        response = call(app, "GET", f"/api/runs/{run_id}/iso.svg")
+        assert response.status == 200
+        assert b"the track is empty" in response.body
+
     def test_download_returns_the_td6_bytes(self, app):
         run_id = saved_run()
         response = call(app, "GET", f"/api/runs/{run_id}/download")

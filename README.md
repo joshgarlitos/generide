@@ -47,12 +47,12 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Evolves a part-based genome as well as a flat one, so crossover cannot cut a lift hill in half, and carries the hill as a mandatory part rather than something the search has to stumble on.
 - Compares search methods through a benchmark harness at equal evaluation budgets, with a hard buildable-and-completed gate and reliability and diversity tracked alongside quality.
 - Builds a track piece by piece in a real headless OpenRCT2 and reads the game's own ratings back, so a benchmark run can be judged by the game rather than by our model of it.
-- Renders a track as a top-down SVG plan shaded by height, and an evolution run as a fitness curve, so a result can be looked at without loading the game.
+- Renders a track as an isometric picture with rails, ties, and supports that turns in quarter turns and runs a train around at the simulation's speeds, as a top-down SVG plan shaded by height, and an evolution run as a fitness curve, so a result can be looked at without loading the game.
 - Supports seeded runs so an interesting result or failure can be reproduced.
 - Draws a ride's side profile (height and speed along the track, lift and drops marked) from the same piece-by-piece walk the ride stats come from.
 - Saves every run, from the terminal or the web UI, to a run library with its request, progress, every improvement of the best ride, and what happened to the result.
 - Runs a local web UI for setting up requests, watching runs live, checking results in the headless game, installing them, and comparing runs side by side.
-- Has 652 passing tests, including regression tests against real OpenRCT2 exports.
+- Has 758 passing tests, including regression tests against real OpenRCT2 exports.
 
 Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. The physics fitness turns simulated ride stats into excitement, intensity, and nausea, and it can use either the old fitted weights or the transcribed calculation from OpenRCT2's source.
 
@@ -189,12 +189,13 @@ rct2/
   evolution.py      Population management and evolution loops
   benchmark.py      Method comparison at equal evaluation budgets
   oracle.py         Headless OpenRCT2 driver for the game's own ratings
-  render.py         SVG plan views, side profiles, and fitness curves
+  trackpath.py      One centerline per piece, shared by the isometric picture and its train
+  render.py         SVG isometric views, plan views, side profiles, and fitness curves
   runrecord.py      The run library shared by the CLI and the web UI
   settings.py       The web UI's settings table and validation
   openrct2_paths.py Game locations, the one-at-a-time game check, and install
   webui.py          The web UI's server and JSON API
-  webui_static/     The page: one HTML file, the design tokens, one stylesheet, one script
+  webui_static/     The page: one HTML file, the design tokens, one stylesheet, and two scripts (the page and the isometric view, which the in-browser page shares)
   demo.py           One run for the in-browser page, built the way the CLI builds it
 demo/                The in-browser page: the page, its Web Worker, and its browser tests
 tools/build_demo.py  Builds the in-browser page into _site/ (after `npm ci --prefix demo`)

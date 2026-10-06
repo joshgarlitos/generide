@@ -53,6 +53,7 @@ DEFAULT_COMMAND = (sys.executable, "-u", str(REPO_ROOT / "evolve_coaster.py"))
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/iso-view.js": ("iso-view.js", "text/javascript; charset=utf-8"),
     "/tokens.css": ("tokens.css", "text/css; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
@@ -510,6 +511,14 @@ class Supervisor:
 Route = Tuple[str, str]  # (method, pattern) where {id} marks a run id
 
 
+def _quarter_turns(raw: Optional[str]) -> int:
+    """The view angle a request asks for: a whole number, else the default view."""
+    try:
+        return int(raw) if raw is not None else 0
+    except ValueError:
+        return 0
+
+
 class App:
     def __init__(
         self,
@@ -629,6 +638,7 @@ class App:
                     ("GET", "name"): lambda: self.preview_name(run_id, query),
                     ("GET", "download"): lambda: self.download(run_id),
                     ("GET", "plan.svg"): lambda: self.svg(run_id, "plan"),
+                    ("GET", "iso.svg"): lambda: self.svg(run_id, "iso", query),
                     ("GET", "profile.svg"): lambda: self.svg(run_id, "profile"),
                     ("GET", "fitness.svg"): lambda: self.svg(run_id, "fitness"),
                 }.get((method, action[0]))
@@ -881,7 +891,7 @@ class App:
             "Content-Disposition": f'attachment; filename="{filename}.td6"',
         })
 
-    def svg(self, run_id: str, kind: str) -> Response:
+    def svg(self, run_id: str, kind: str, query: Optional[Dict[str, str]] = None) -> Response:
         run = runrecord.load_run(run_id)
         if kind == "fitness":
             body = render.render_fitness_history(
@@ -891,6 +901,10 @@ class App:
             segments = run.improvements[-1]["segments"] if run.improvements else []
             if kind == "plan":
                 body = render.render_track(segments, title="Top-down plan")
+            elif kind == "iso":
+                body = render.render_isometric(
+                    segments, angle=_quarter_turns((query or {}).get("angle")), title="Ride view",
+                )
             else:
                 body = render.render_profile(segments, title="Side profile")
         return Response(200, body.encode("utf-8"), "image/svg+xml; charset=utf-8")

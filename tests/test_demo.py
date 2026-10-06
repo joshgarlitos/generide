@@ -61,7 +61,12 @@ def test_progress_comes_once_per_generation_and_improvements_carry_a_ride():
     assert progress[-1]["fitness_svg"].startswith("<svg")
     assert best, "the first generation always sets a best ride"
     first = best[0]
-    assert first["plan_svg"].startswith("<svg")
+    assert "plan_svg" not in first
+    # One picture per quarter turn: the worker cannot answer a request mid-run,
+    # so every angle arrives with the ride.
+    assert len(first["iso_svgs"]) == 4
+    assert len(set(first["iso_svgs"])) == 4
+    assert all(svg.startswith("<svg") for svg in first["iso_svgs"])
     assert first["profile_svg"].startswith("<svg")
     assert first["summary"]["segments"] > 0
     assert final["generations_run"] == SMALL["generations"]

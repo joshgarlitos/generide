@@ -12,11 +12,14 @@ a dark page, and GitHub, and needs no stylesheet to follow a theme. The
 colours are the chart colours in `docs/design/README.md`.
 """
 
+import math
 from dataclasses import dataclass
-from typing import AbstractSet, Iterable, Optional, Sequence
+from typing import AbstractSet, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
+from rct2.construction import STATION_SEGMENTS
 from rct2.geometry import OccupiedTile, Position, occupied_tiles, track_bounds
 from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS, trace
+from rct2.trackpath import PiecePath, Point, track_path
 
 # The chart colours from docs/design/README.md, as the game's palette values
 # that rct2/webui_static/tokens.css names. Written straight onto each element
@@ -429,6 +432,273 @@ fill="{GRAPH["text_sec"]}">{round(ride.points[-1].distance_m)} m</text>
   <text class="ts" x="{left + plot_w / 2}" y="{h - 16}" text-anchor="middle" font-size="10" \
 fill="{GRAPH["text_sec"]}">distance along the ride</text>
 {chr(10).join("  " + layer for layer in layers)}
+</svg>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Isometric view
+
+# A 2:1 isometric projection like the game's own. A tile is a diamond
+# `tile_px` wide and half that tall. A height unit is a quarter tile, and in
+# this projection a tile's height is about 1.22 half-widths on screen, so one
+# height unit is a quarter of that.
+ISO_Z_PER_HALF_TILE = 0.306
+# The rails sit this far apart, in tiles.
+ISO_GAUGE = 0.36
+# Pieces at the viewer's side of the ride are painted last. The picture turns
+# in quarter turns, so there are four of them.
+ISO_ANGLES = 4
+# One lap of the animated train, however long the ride is.
+ISO_LAP_SECONDS = 20
+
+
+class IsoChunk(NamedTuple):
+    """A short run of track and what is painted with it, in paint order."""
+
+    piece: int
+    a: Point
+    b: Point
+    tile: Tuple[int, int]  # the tile the chunk sits in, in the turned view
+    z: float
+    support: bool  # a support column stands under this chunk's start
+    station: bool  # the chunk belongs to a station piece
+
+
+def _rotate(x: float, y: float, angle: int, cx: float, cy: float) -> Tuple[float, float]:
+    """World coordinates turned `angle` quarter turns about the ride's centre."""
+    u, v = x - cx, y - cy
+    for _ in range(angle % ISO_ANGLES):
+        u, v = v, -u
+    return u, v
+
+
+def iso_paint_order(
+    paths: Sequence[PiecePath], angle: int = 0, centre: Tuple[float, float] = (0.0, 0.0),
+) -> List[IsoChunk]:
+    """Every chunk of track, sorted back to front for one view.
+
+    Sorted by the tile a chunk sits in, far tiles first, and within a tile
+    low before high, so where a track passes over itself the upper piece
+    paints last. Sorting whole pieces would draw a long piece wholly in front
+    of or behind a piece it only partly overlaps.
+    """
+    cx, cy = centre
+    chunks: List[IsoChunk] = []
+    for path in paths:
+        points = path.points
+        for i in range(len(points) - 1):
+            a, b = points[i], points[i + 1]
+            mid_x, mid_y = _rotate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, angle, cx, cy)
+            # Tile indices are taken from the turned coordinates, so the tile a
+            # chunk counts as in follows the view.
+            tile_u, tile_v = math.floor(mid_x + 0.5), math.floor(mid_y + 0.5)
+            z = (a[2] + b[2]) / 2
+            chunks.append(IsoChunk(
+                piece=path.index, a=a, b=b,
+                tile=(tile_u, tile_v), z=z,
+                support=i == 0,
+                station=path.segment in STATION_SEGMENTS,
+            ))
+    # Larger u + v is farther from the viewer, so it paints first.
+    chunks.sort(key=lambda c: (-(c.tile[0] + c.tile[1]), c.z))
+    return chunks
+
+
+def render_isometric(
+    segments: Sequence[int],
+    angle: int = 0,
+    lift_indices: Optional[AbstractSet[int]] = None,
+    start: Optional[Position] = None,
+    title: str = "Ride view",
+    tile_px: int = 28,
+) -> str:
+    """An isometric picture of a track: rails, ties, and support columns.
+
+    Drawn back to front, like the game's own view, from one of four angles
+    (`angle` quarter turns). It shows generide's model of the ride, so a
+    piece's slope follows its definition, not the game's exact geometry.
+
+    A train laps the track, animated inside the picture. Its speed on each
+    piece is the one `physics.trace` gives, so it crawls up the lift and
+    races down the drops, and the lap takes `ISO_LAP_SECONDS` whatever the
+    ride's length. A train that stalls runs to the stall and stops there.
+    """
+    angle %= ISO_ANGLES
+    paths = track_path(segments, start)
+    if not paths:
+        return _empty_svg(title, "no tiles: the track is empty")
+
+    bounds = track_bounds(start if start is not None else Position(), segments)
+    cx = (bounds.min_x + bounds.max_x) // 2
+    cy = (bounds.min_y + bounds.max_y) // 2
+    half = tile_px / 2
+    z_px = ISO_Z_PER_HALF_TILE * half
+    ground_z = min(bounds.min_z, 0)
+
+    def project(x: float, y: float, z: float) -> Tuple[float, float]:
+        u, v = _rotate(x, y, angle, cx, cy)
+        return (u - v) * half, -(u + v) * half / 2 - z * z_px
+
+    def fmt(point: Tuple[float, float]) -> str:
+        return f"{point[0]:.1f},{point[1]:.1f}"
+
+    # Every drawn point, to size the picture before laying anything out.
+    xs: List[float] = []
+    ys: List[float] = []
+
+    def seen(point: Tuple[float, float]) -> Tuple[float, float]:
+        xs.append(point[0])
+        ys.append(point[1])
+        return point
+
+    layers: List[str] = []
+
+    # Ground grid: tile edges at the lowest level the ride reaches.
+    left, right = bounds.min_x - 0.5, bounds.max_x + 0.5
+    near, far = bounds.min_y - 0.5, bounds.max_y + 0.5
+    grid = []
+    for gx in range(bounds.min_x, bounds.max_x + 2):
+        a = seen(project(gx - 0.5, near, ground_z))
+        b = seen(project(gx - 0.5, far, ground_z))
+        grid.append(f"M{fmt(a)}L{fmt(b)}")
+    for gy in range(bounds.min_y, bounds.max_y + 2):
+        a = seen(project(left, gy - 0.5, ground_z))
+        b = seen(project(right, gy - 0.5, ground_z))
+        grid.append(f"M{fmt(a)}L{fmt(b)}")
+    layers.append(
+        f'<path class="ax" d="{"".join(grid)}" fill="none" stroke="{GRAPH["border"]}" stroke-width="0.6"/>'
+    )
+
+    # Station marker: every station piece's tile is outlined on the ground. A
+    # track with no station piece marks its first tile instead, so the picture
+    # still says where the ride starts.
+    marked = [path for path in paths if path.segment in STATION_SEGMENTS] or [paths[0]]
+    is_station = marked[0].segment in STATION_SEGMENTS
+    for path in marked:
+        mid = path.points[len(path.points) // 2]
+        sx, sy = round(mid[0]), round(mid[1])
+        corners = [
+            seen(project(sx + dx, sy + dy, ground_z))
+            for dx, dy in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
+        ]
+        tag = ' data-station="tile"' if is_station else ""
+        layers.append(
+            f'<path class="ac"{tag} d="M{"L".join(fmt(c) for c in corners)}Z" fill="none" '
+            f'stroke="{GRAPH["start"]}" stroke-width="2"/>'
+        )
+
+    for chunk in iso_paint_order(paths, angle, (cx, cy)):
+        a, b = chunk.a, chunk.b
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dy) or 1.0
+        # Rails sit either side of the centreline, level with each other.
+        ox, oy = -dy / length * ISO_GAUGE / 2, dx / length * ISO_GAUGE / 2
+        if chunk.support and a[2] - ground_z > 0.5:
+            top = seen(project(a[0], a[1], a[2]))
+            bottom = seen(project(a[0], a[1], ground_z))
+            layers.append(
+                f'<path class="ts" data-support="1" d="M{fmt(top)}L{fmt(bottom)}" fill="none" '
+                f'stroke="{GRAPH["text_sec"]}" stroke-opacity="0.3" stroke-width="1.5"/>'
+            )
+        tie_a = seen(project(a[0] + ox, a[1] + oy, a[2]))
+        tie_b = seen(project(a[0] - ox, a[1] - oy, a[2]))
+        layers.append(
+            f'<path class="ts" d="M{fmt(tie_a)}L{fmt(tie_b)}" fill="none" '
+            f'stroke="{GRAPH["text_sec"]}" stroke-width="1.2"/>'
+        )
+        rails = []
+        for side in (1, -1):
+            p = seen(project(a[0] + side * ox, a[1] + side * oy, a[2]))
+            q = seen(project(b[0] + side * ox, b[1] + side * oy, b[2]))
+            rails.append(f"M{fmt(p)}L{fmt(q)}")
+        rail_colour = GRAPH["start"] if chunk.station else GRAPH["height"]
+        tag = ' data-station="rail"' if chunk.station else ""
+        layers.append(
+            f'<path class="ac"{tag} d="{"".join(rails)}" fill="none" stroke="{rail_colour}" '
+            f'stroke-width="1.6" stroke-linecap="round"/>'
+        )
+
+    # The train rides the same centerlines the rails are drawn on, so it
+    # always runs on the track. Each piece is one stretch of the animation,
+    # timed by the simulation and placed by screen distance along the path.
+    ride = trace(list(segments), set(lift_indices) if lift_indices is not None else None)
+    driven = [p for p in ride.points if not p.stalled]
+    line: List[Tuple[float, float]] = []
+    key_points = [0.0]
+    key_times = [0.0]
+    travelled = 0.0
+    elapsed = 0.0
+    for point, path in zip(driven, paths):
+        for xyz in path.points:
+            screen = seen(project(*xyz))
+            if line:
+                if screen == line[-1] and xyz is path.points[0]:
+                    continue
+                travelled += math.hypot(screen[0] - line[-1][0], screen[1] - line[-1][1])
+            line.append(screen)
+        elapsed += point.time_s
+        key_points.append(travelled)
+        key_times.append(elapsed)
+
+    stall_at: Optional[Tuple[float, float]] = None
+    if not ride.completed:
+        stall_at = line[-1] if line else seen(project(*paths[0].points[0]))
+
+    if travelled > 0 and elapsed > 0:
+        points_attr = ";".join(f"{v / travelled:.4f}" for v in key_points)
+        times_attr = ";".join(f"{v / elapsed:.4f}" for v in key_times)
+        loop = 'repeatCount="indefinite"' if ride.completed else 'repeatCount="1" fill="freeze"'
+        cars = "".join(
+            f'<rect x="{x}" y="-3" width="6.5" height="6" rx="1.5" fill="{GRAPH["lift"]}" '
+            f'stroke="{GRAPH["bg"]}" stroke-width="0.8"/>'
+            for x in (-10, -3, 4)
+        )
+        path_attr = "M" + "L".join(fmt(pt) for pt in line)
+        layers.append(
+            f'<g class="ac" data-train="1">{cars}'
+            f'<animateMotion path="{path_attr}" dur="{ISO_LAP_SECONDS}s" {loop} '
+            f'calcMode="linear" rotate="auto" keyPoints="{points_attr}" keyTimes="{times_attr}"/></g>'
+        )
+    if stall_at is not None:
+        sx, sy = stall_at
+        layers.append(
+            f'<path class="tx" data-stall="1" d="M{sx - 5:.1f},{sy - 5:.1f}L{sx + 5:.1f},{sy + 5:.1f}'
+            f'M{sx - 5:.1f},{sy + 5:.1f}L{sx + 5:.1f},{sy - 5:.1f}" stroke="{GRAPH["stall"]}" '
+            f'stroke-width="2" fill="none"/>'
+        )
+        layers.append(
+            f'<text class="tx" x="{sx:.1f}" y="{sy + 18:.1f}" text-anchor="middle" '
+            f'font-size="10" fill="{GRAPH["stall"]}">stalls here</text>'
+        )
+
+    pad, label_h = 24, 46
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    footprint = f"{bounds.width} x {bounds.depth} tiles"
+    subtitle = f"{len(segments)} pieces, {footprint}, {bounds.height} height units of relief"
+    text_w = int(max(len(title) * 8.4, len(subtitle) * 6.2))
+    w = max(max_x - min_x, text_w) + pad * 2
+    h = (max_y - min_y) + pad * 2 + label_h
+    # The shift puts the picture's top-left corner at (pad, pad + label_h),
+    # centred when the heading is the wider of the two.
+    shift_x = pad + (w - pad * 2 - (max_x - min_x)) / 2 - min_x
+    shift_y = pad + label_h - min_y
+
+    return f"""<svg viewBox="0 0 {w:.0f} {h:.0f}" xmlns="http://www.w3.org/2000/svg" role="img" \
+style="width:100%;font-family:{FONT};background:{GRAPH["bg"]};">
+  <title>{_escape(title)}</title>
+  <desc>Isometric view of a roller coaster track, View {angle + 1} of {ISO_ANGLES}. \
+Two rails with ties and support columns, drawn from the back to the front. \
+{_escape(subtitle)}</desc>
+  <rect class="bg" x="0" y="0" width="{w:.0f}" height="{h:.0f}" fill="{GRAPH["bg"]}"/>
+  <text class="tx" x="{pad}" y="26" font-size="14" font-weight="600" \
+fill="{GRAPH["text"]}">{_escape(title)}</text>
+  <text class="ts" x="{pad}" y="44" font-size="11" fill="{GRAPH["text_sec"]}">\
+{_escape(subtitle)}</text>
+  <g transform="translate({shift_x:.1f} {shift_y:.1f})">
+{chr(10).join("    " + layer for layer in layers)}
+  </g>
 </svg>
 """
 

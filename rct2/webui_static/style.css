@@ -97,7 +97,7 @@ button:active:not(:disabled), .button[href]:active, .button[aria-current="page"]
   padding-top: var(--u);
   box-shadow: inset var(--u) var(--u) 0 var(--deep), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
 }
-button:disabled, .button[aria-disabled="true"] {
+button:disabled, button[aria-disabled="true"], .button[aria-disabled="true"] {
   cursor: not-allowed;
   color: var(--lo);
   text-shadow: 1px 1px 0 var(--hi);
@@ -249,6 +249,11 @@ details.more > .more-body { display: flex; flex-direction: column; gap: var(--sp
 }
 /* A long, narrow ride makes a tall plan; keep it to a readable size. */
 .pictures img, .compare-grid img { max-height: 440px; object-fit: contain; }
+.iso-cell { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.iso-controls { align-items: center; }
+.iso-label { color: var(--ink); min-width: 6.5em; }
+.iso-frame svg, .compare-grid .iso svg { display: block; width: 100%; height: auto; max-height: 440px; }
+.profile-slot { min-width: 0; }
 /* The score chart is drawn at the same size as the profile beside it. */
 .score-chart { max-width: 640px; }
 .pictures figcaption, figure.graph figcaption { font-size: var(--text-sm); color: var(--graph-axis); }

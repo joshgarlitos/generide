@@ -8,8 +8,8 @@ Usage:
 
 The site is three things side by side:
 
-- the page itself, from demo/ (plus the local web UI's tokens.css and
-  style.css, so both pages look the same)
+- the page itself, from demo/ (plus the local web UI's tokens.css, style.css,
+  and iso-view.js, so both pages look and draw the ride the same way)
 - the Pyodide runtime, copied from demo/node_modules/pyodide, so the page
   depends on no CDN (see the plan, KTD1)
 - the engine: every rct2/*.py module, evolve_coaster.py, and the Mine Train
@@ -32,6 +32,8 @@ DEMO = REPO / "demo"
 
 PAGE_FILES = ("index.html", "app.js", "worker.js", "demo.css")
 SHARED_CSS = ("tokens.css", "style.css")
+# The isometric ride view, drawn by the same script as in the local web UI.
+SHARED_JS = ("iso-view.js",)
 PYODIDE_FILES = (
     "pyodide.mjs",
     "pyodide.asm.mjs",
@@ -77,7 +79,7 @@ def build(out: Path, pyodide_dir: Path, repo: Path = REPO) -> Path:
 
     for name in PAGE_FILES:
         shutil.copy2(repo / "demo" / name, out / name)
-    for name in SHARED_CSS:
+    for name in SHARED_CSS + SHARED_JS:
         shutil.copy2(repo / "rct2" / "webui_static" / name, out / name)
 
     runtime = out / "pyodide"

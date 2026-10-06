@@ -18,8 +18,15 @@ test("a default run ends with a ride, its stats, a download, and the way to the 
   await expect(page.getByText(/^\d+ of \d+$/)).toBeVisible();
 
   await expect(page.getByRole("heading", { name: "Your ride", exact: true })).toBeVisible({ timeout: RUN_DONE });
-  await expect(page.getByRole("img", { name: "Top-down plan of the ride" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Isometric view of the ride" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Side profile of the ride" })).toBeVisible();
+  // The picture turns a quarter at a time, and each view is its own picture.
+  const view = page.locator(".iso-label");
+  await expect(view).toHaveText("View 1 of 4");
+  const before = await page.locator(".iso-frame svg desc").textContent();
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(view).toHaveText("View 2 of 4");
+  await expect(page.locator(".iso-frame svg desc")).not.toHaveText(before);
   await expect(page.getByRole("rowheader", { name: "Top speed" })).toBeVisible();
   const download = page.getByRole("link", { name: "Download the .td6" });
   await expect(download).toHaveAttribute("download", /^generide-mine-train-seed-\d+\.td6$/);
@@ -42,10 +49,14 @@ test("stop waits for the first ride, keeps it, and the next run keeps the settin
   const stop = page.getByRole("button", { name: "Stop and keep the best ride" });
   await expect(stop).toBeDisabled();
   await expect(stop).toBeEnabled({ timeout: 60_000 });
+  // The viewer's angle survives new best rides and the move to the result.
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
   await stop.click();
 
   await expect(page.getByRole("heading", { name: "Your ride (stopped early)" })).toBeVisible();
-  await expect(page.getByRole("img", { name: "Top-down plan of the ride" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Isometric view of the ride" })).toBeVisible();
+  await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
   await expect(page.locator(".code-line")).toContainText("python evolve_coaster.py");
 
   await page.getByRole("button", { name: "New run" }).click();
@@ -100,4 +111,36 @@ test("a failed engine reload after stop keeps the stopped ride on screen", async
   // The failure shows when the visitor asks for another run.
   await page.getByRole("button", { name: "New run" }).click();
   await expect(page.getByRole("heading", { name: "Something went wrong" })).toBeVisible();
+});
+
+test("with reduced motion the train waits, and Play lap runs a lap without losing focus", async ({ browser }) => {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await openSettings(page);
+  await page.getByRole("button", { name: "Go" }).click();
+  await expect(page.getByRole("heading", { name: "Your ride", exact: true })).toBeVisible({ timeout: RUN_DONE });
+
+  const picture = page.locator(".iso-frame svg");
+  const play = page.getByRole("button", { name: "Play lap" });
+  await expect(page.getByText(/reduce motion/)).toBeVisible();
+  await expect(play).toBeVisible();
+
+  // The train does not move on its own.
+  const first = (await picture.screenshot()).toString("base64");
+  await page.waitForTimeout(1500);
+  expect((await picture.screenshot()).toString("base64")).toBe(first);
+
+  // Pressing the button from the keyboard starts a lap and leaves focus on it.
+  await play.focus();
+  await page.keyboard.press("Enter");
+  await expect(play).toHaveAttribute("aria-disabled", "true");
+  await expect(play).toBeFocused();
+  await page.waitForTimeout(2000);
+  expect((await picture.screenshot()).toString("base64")).not.toBe(first);
+
+  // Turning the view ends the lap, puts the train back at rest, and re-enables the button.
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
+  await expect(play).toHaveAttribute("aria-disabled", "false");
+  await context.close();
 });
