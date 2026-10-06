@@ -13,6 +13,7 @@ const state = {
   refresh: null, // the current view's poll function, if it has one
   polling: false,
   viewToken: 0, // bumped on every navigation so late responses are dropped
+  isoAngle: 0, // the isometric view's quarter turn, kept as best rides arrive
 };
 
 // ---------------------------------------------------------------------------
@@ -160,6 +161,17 @@ function setView(...nodes) {
 function picture(src, caption, alt) {
   return h("figure", { class: "well well-graph graph" },
     h("img", { src, alt, loading: "lazy" }), caption && h("figcaption", {}, caption));
+}
+
+// The isometric ride picture is inline SVG that iso-view.js draws and turns.
+async function fetchSvg(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`The picture could not be loaded (${response.status}).`);
+  return response.text();
+}
+
+function isoGroup() {
+  return IsoView.createGroup(h, { angle: state.isoAngle, onAngle: (angle) => { state.isoAngle = angle; } });
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +466,11 @@ async function showRun(runId, tabParam) {
   const installBox = h("div", { class: "panel-stack" });
   let pictureVersion = null;
   let installBuilt = false;
+  // The isometric view keeps its buttons across new best rides, so keyboard
+  // focus stays where the viewer put it; only the pictures are replaced.
+  let iso = null;
+  let isoVersion = null;
+  const profileSlot = h("div", { class: "profile-slot" });
 
   // ---- tabs ----
   let current = RUN_TABS.some(([key]) => key === tabParam) ? tabParam : "overview";
@@ -662,13 +679,25 @@ async function showRun(runId, tabParam) {
     if (version === pictureVersion) return;
     pictureVersion = version;
     if (!run.improvements) {
+      iso = null;
       put(pictures, h("p", {}, "The first ride appears after the first generation."));
       return;
     }
     const label = run.status === "running" ? "Best ride so far" : "Result";
-    put(pictures,
-      picture(`${path}/plan.svg?v=${version}`, `${label}: top-down plan, lighter is higher.`, "Top-down plan of the ride"),
-      picture(`${path}/profile.svg?v=${version}`, `${label}: side profile. Solid line is height, dashed is speed, drops are numbered.`, "Side profile of the ride"));
+    isoVersion = version;
+    const profile = picture(`${path}/profile.svg?v=${version}`, `${label}: side profile. Solid line is height, dashed is speed, drops are numbered.`, "Side profile of the ride");
+    put(profileSlot, profile);
+    if (iso) {
+      iso.caption.textContent = `${label}: isometric view. The train runs a compressed lap.`;
+      iso.group.refresh();
+      return;
+    }
+    const group = isoGroup();
+    const figure = group.picture((angle) => fetchSvg(`${path}/iso.svg?angle=${angle}&v=${isoVersion}`), "Isometric view of the ride");
+    const caption = h("figcaption", {}, `${label}: isometric view. The train runs a compressed lap.`);
+    figure.append(caption);
+    iso = { group, caption };
+    put(pictures, h("div", { class: "iso-cell" }, group.element, figure), profileSlot);
   };
 
   const renderFitness = () => {
@@ -1030,13 +1059,15 @@ async function showCompare(ids) {
   const data = await api("GET", `/api/compare?ids=${ids.map(encodeURIComponent).join(",")}`);
   if (token !== state.viewToken) return;
   const cols = data.runs.length;
+  // One pair of turn buttons drives every picture, so the rides are always
+  // compared from the same side.
+  const compareIso = isoGroup();
 
   const columns = h("div", { class: "compare-grid", style: `--cols:${cols}` },
     data.runs.map((r, i) => win({ title: [h("a", { href: `#/run/${r.id}` }, r.name), i === 0 ? h("span", { class: "tag" }, "baseline") : null], level: 3 },
       h("div", { class: "meta" }, statusTag(r.status), h("span", {}, `Seed ${r.seed}`)),
       r.warnings.length ? banner("bad", h("ul", {}, r.warnings.map((w) => h("li", {}, w)))) : null,
-      h("figure", { class: "well well-graph graph" },
-        h("img", { src: `/api/runs/${r.id}/plan.svg`, alt: `Plan of ${r.name}`, loading: "lazy" })),
+      compareIso.picture((angle) => fetchSvg(`/api/runs/${r.id}/iso.svg?angle=${angle}`), `Isometric view of ${r.name}`),
       h("figure", { class: "well well-graph graph" },
         h("img", { src: `/api/runs/${r.id}/profile.svg`, alt: `Side profile of ${r.name}`, loading: "lazy" })))));
 
@@ -1062,6 +1093,7 @@ async function showCompare(ids) {
       h("p", {},
         changedCount ? `${changedCount} input${changedCount === 1 ? "" : "s"} differ, highlighted below. Changes in the stats are measured against the first run.`
           : "These runs have the same inputs."),
+      compareIso.element,
       columns),
     win({ page: "bordeaux", title: "Inputs", wide: true }, inputsTable),
     win({ page: "bordeaux", title: "Stats", wide: true },
