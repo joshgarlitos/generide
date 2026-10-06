@@ -132,7 +132,14 @@ def ride_result(segments: List[int], max_width: Optional[int], max_depth: Option
         # empty record is a page run's: never saved, never checked in the game.
         "stats_view": webui._stats_view(summary, {}),
         "warnings": webui._warnings(summary, {}),
-        "plan_svg": render.render_track(segments, title="Top-down plan"),
+        # One picture per quarter turn. The engine runs in a worker that cannot
+        # answer a request mid-run, so every view arrives with the ride.
+        "iso_svgs": [
+            render.render_isometric(
+                segments, angle, lift_indices=set(summary["lift_indices"]), title="Ride view",
+            )
+            for angle in range(render.ISO_ANGLES)
+        ],
         "profile_svg": render.render_profile(
             segments, lift_indices=set(summary["lift_indices"]), title="Side profile",
         ),

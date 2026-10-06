@@ -18,8 +18,15 @@ test("a default run ends with a ride, its stats, a download, and the way to the 
   await expect(page.getByText(/^\d+ of \d+$/)).toBeVisible();
 
   await expect(page.getByRole("heading", { name: "Your ride", exact: true })).toBeVisible({ timeout: RUN_DONE });
-  await expect(page.getByRole("img", { name: "Top-down plan of the ride" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Isometric view of the ride" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Side profile of the ride" })).toBeVisible();
+  // The picture turns a quarter at a time, and each view is its own picture.
+  const view = page.locator(".iso-label");
+  await expect(view).toHaveText("View 1 of 4");
+  const before = await page.locator(".iso-frame svg desc").textContent();
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(view).toHaveText("View 2 of 4");
+  await expect(page.locator(".iso-frame svg desc")).not.toHaveText(before);
   await expect(page.getByRole("rowheader", { name: "Top speed" })).toBeVisible();
   const download = page.getByRole("link", { name: "Download the .td6" });
   await expect(download).toHaveAttribute("download", /^generide-mine-train-seed-\d+\.td6$/);
@@ -45,7 +52,7 @@ test("stop waits for the first ride, keeps it, and the next run keeps the settin
   await stop.click();
 
   await expect(page.getByRole("heading", { name: "Your ride (stopped early)" })).toBeVisible();
-  await expect(page.getByRole("img", { name: "Top-down plan of the ride" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Isometric view of the ride" })).toBeVisible();
   await expect(page.locator(".code-line")).toContainText("python evolve_coaster.py");
 
   await page.getByRole("button", { name: "New run" }).click();

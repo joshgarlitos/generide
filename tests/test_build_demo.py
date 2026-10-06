@@ -30,7 +30,7 @@ def fake_pyodide(tmp_path):
 
 def test_build_writes_the_page_runtime_and_engine(tmp_path, fake_pyodide):
     out = build_demo.build(tmp_path / "site", fake_pyodide)
-    for name in build_demo.PAGE_FILES + build_demo.SHARED_CSS:
+    for name in build_demo.PAGE_FILES + build_demo.SHARED_CSS + build_demo.SHARED_JS:
         assert (out / name).is_file(), name
     for name in build_demo.PYODIDE_FILES:
         assert (out / "pyodide" / name).is_file(), name
