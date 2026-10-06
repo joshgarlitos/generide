@@ -22,7 +22,8 @@ from rct2.render import (
     render_profile,
     render_track,
 )
-from rct2.trackpath import PiecePath, track_path
+from rct2.construction import STATION_SEGMENTS
+from rct2.trackpath import STRAIGHT_STEPS, PiecePath, track_path
 
 FLAT_OVAL = [0x02, 0x01, 0x00, 0x00, 0x00]
 
@@ -279,3 +280,25 @@ def test_an_empty_track_renders_the_empty_card_in_isometric():
     svg = render_isometric([])
 
     assert "the track is empty" in svg
+
+
+def test_every_station_piece_is_marked_not_only_the_first():
+    segments = manic_miner_segments()
+    stations = sum(1 for s in segments if s in STATION_SEGMENTS)
+    assert stations > 1, "fixture is expected to have a multi-piece station"
+
+    svg = render_isometric(segments)
+
+    # Each station piece is cut into the same number of chunks, and the rails
+    # of every one of them carry the station colour.
+    marked_rails = svg.count('data-station="rail"')
+    assert marked_rails == stations * STRAIGHT_STEPS
+    assert svg.count('data-station="tile"') == stations
+    assert f'data-station="rail" d=' in svg
+    assert GRAPH["start"] in svg
+
+
+def test_a_track_with_no_station_piece_has_no_station_marks():
+    svg = render_isometric([0x00, 0x00, 0x2B, 0x00])
+
+    assert "data-station" not in svg

@@ -16,6 +16,7 @@ import math
 from dataclasses import dataclass
 from typing import AbstractSet, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
+from rct2.construction import STATION_SEGMENTS
 from rct2.geometry import OccupiedTile, Position, occupied_tiles, track_bounds
 from rct2.physics import HEIGHT_UNIT_M, MPH_PER_MS, trace
 from rct2.trackpath import PiecePath, Point, track_path
@@ -459,6 +460,7 @@ class IsoChunk(NamedTuple):
     tile: Tuple[int, int]  # the tile the chunk sits in, in the turned view
     z: float
     support: bool  # a support column stands under this chunk's start
+    station: bool  # the chunk belongs to a station piece
 
 
 def _rotate(x: float, y: float, angle: int, cx: float, cy: float) -> Tuple[float, float]:
@@ -495,6 +497,7 @@ def iso_paint_order(
                 piece=path.index, a=a, b=b,
                 tile=(tile_u, tile_v), z=z,
                 support=i == 0 or i == middle,
+                station=path.segment in STATION_SEGMENTS,
             ))
     # Larger u + v is farther from the viewer, so it paints first.
     chunks.sort(key=lambda c: (-(c.tile[0] + c.tile[1]), c.z))
@@ -560,17 +563,23 @@ def render_isometric(
         f'<path class="ax" d="{"".join(grid)}" fill="none" stroke="{GRAPH["border"]}" stroke-width="0.6"/>'
     )
 
-    # Station marker: the first tile outlined on the ground.
-    first = paths[0].points[0]
-    sx, sy = round(first[0] + 0.5 * 0), round(first[1])
-    corners = [
-        seen(project(sx + dx, sy + dy, ground_z))
-        for dx, dy in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
-    ]
-    layers.append(
-        f'<path class="ac" d="M{"L".join(fmt(c) for c in corners)}Z" fill="none" '
-        f'stroke="{GRAPH["start"]}" stroke-width="2"/>'
-    )
+    # Station marker: every station piece's tile is outlined on the ground. A
+    # track with no station piece marks its first tile instead, so the picture
+    # still says where the ride starts.
+    marked = [path for path in paths if path.segment in STATION_SEGMENTS] or [paths[0]]
+    is_station = marked[0].segment in STATION_SEGMENTS
+    for path in marked:
+        mid = path.points[len(path.points) // 2]
+        sx, sy = round(mid[0]), round(mid[1])
+        corners = [
+            seen(project(sx + dx, sy + dy, ground_z))
+            for dx, dy in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
+        ]
+        tag = ' data-station="tile"' if is_station else ""
+        layers.append(
+            f'<path class="ac"{tag} d="M{"L".join(fmt(c) for c in corners)}Z" fill="none" '
+            f'stroke="{GRAPH["start"]}" stroke-width="2"/>'
+        )
 
     for chunk in iso_paint_order(paths, angle, (cx, cy)):
         a, b = chunk.a, chunk.b
@@ -596,8 +605,10 @@ def render_isometric(
             p = seen(project(a[0] + side * ox, a[1] + side * oy, a[2]))
             q = seen(project(b[0] + side * ox, b[1] + side * oy, b[2]))
             rails.append(f"M{fmt(p)}L{fmt(q)}")
+        rail_colour = GRAPH["start"] if chunk.station else GRAPH["height"]
+        tag = ' data-station="rail"' if chunk.station else ""
         layers.append(
-            f'<path class="ac" d="{"".join(rails)}" fill="none" stroke="{GRAPH["height"]}" '
+            f'<path class="ac"{tag} d="{"".join(rails)}" fill="none" stroke="{rail_colour}" '
             f'stroke-width="1.6" stroke-linecap="round"/>'
         )
 

@@ -6,7 +6,14 @@
   <text class="ts" x="24" y="44" font-size="11" fill="#b7c3c3">89 pieces, 15 x 18 tiles, 22 height units of relief</text>
   <g transform="translate(262.0 189.0)">
     <path class="ax" d="M14.0,112.0L-238.0,-14.0M28.0,105.0L-224.0,-21.0M42.0,98.0L-210.0,-28.0M56.0,91.0L-196.0,-35.0M70.0,84.0L-182.0,-42.0M84.0,77.0L-168.0,-49.0M98.0,70.0L-154.0,-56.0M112.0,63.0L-140.0,-63.0M126.0,56.0L-126.0,-70.0M140.0,49.0L-112.0,-77.0M154.0,42.0L-98.0,-84.0M168.0,35.0L-84.0,-91.0M182.0,28.0L-70.0,-98.0M196.0,21.0L-56.0,-105.0M210.0,14.0L-42.0,-112.0M224.0,7.0L-28.0,-119.0M14.0,112.0L224.0,7.0M0.0,105.0L210.0,-0.0M-14.0,98.0L196.0,-7.0M-28.0,91.0L182.0,-14.0M-42.0,84.0L168.0,-21.0M-56.0,77.0L154.0,-28.0M-70.0,70.0L140.0,-35.0M-84.0,63.0L126.0,-42.0M-98.0,56.0L112.0,-49.0M-112.0,49.0L98.0,-56.0M-126.0,42.0L84.0,-63.0M-140.0,35.0L70.0,-70.0M-154.0,28.0L56.0,-77.0M-168.0,21.0L42.0,-84.0M-182.0,14.0L28.0,-91.0M-196.0,7.0L14.0,-98.0M-210.0,-0.0L0.0,-105.0M-224.0,-7.0L-14.0,-112.0M-238.0,-14.0L-28.0,-119.0" fill="none" stroke="#3f5353" stroke-width="0.6"/>
-    <path class="ac" d="M0.0,-21.0L14.0,-28.0L0.0,-35.0L-14.0,-28.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M0.0,-21.0L14.0,-28.0L0.0,-35.0L-14.0,-28.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M-28.0,-35.0L-14.0,-42.0L-28.0,-49.0L-42.0,-42.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M-42.0,-42.0L-28.0,-49.0L-42.0,-56.0L-56.0,-49.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M-56.0,-49.0L-42.0,-56.0L-56.0,-63.0L-70.0,-56.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M-70.0,-56.0L-56.0,-63.0L-70.0,-70.0L-84.0,-63.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M42.0,-0.0L56.0,-7.0L42.0,-14.0L28.0,-7.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M28.0,-7.0L42.0,-14.0L28.0,-21.0L14.0,-14.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
+    <path class="ac" data-station="tile" d="M14.0,-14.0L28.0,-21.0L14.0,-28.0L0.0,-21.0Z" fill="none" stroke="#ffe72f" stroke-width="2"/>
     <path class="ts" d="M-48.0,-101.6L-45.9,-98.2" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-48.0,-101.6L-38.7,-103.0M-45.9,-98.2L-36.6,-99.6" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-17.3,-103.0L-19.4,-99.6" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -119,13 +126,13 @@
     <path class="ts" d="M-118.9,-101.7L-112.6,-100.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-118.9,-101.7L-114.3,-105.4M-112.6,-100.0L-108.0,-103.7" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-65.5,-58.2L-60.5,-60.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-65.5,-58.2L-69.0,-60.0M-60.5,-60.8L-64.0,-62.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-65.5,-58.2L-69.0,-60.0M-60.5,-60.8L-64.0,-62.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-69.0,-60.0L-64.0,-62.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-69.0,-60.0L-72.5,-61.7M-64.0,-62.5L-67.5,-64.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-69.0,-60.0L-72.5,-61.7M-64.0,-62.5L-67.5,-64.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-72.5,-61.7L-67.5,-64.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-72.5,-61.7L-76.0,-63.5M-67.5,-64.3L-71.0,-66.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-72.5,-61.7L-76.0,-63.5M-67.5,-64.3L-71.0,-66.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-76.0,-63.5L-71.0,-66.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-76.0,-63.5L-79.5,-65.2M-71.0,-66.0L-74.5,-67.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-76.0,-63.5L-79.5,-65.2M-71.0,-66.0L-74.5,-67.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-116.2,-65.4L-121.8,-67.6" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-116.2,-65.4L-119.9,-63.1M-121.8,-67.6L-125.4,-65.4" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-119.6,-63.4L-125.8,-65.1" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -141,13 +148,13 @@
     <path class="ts" d="M-122.0,-97.2L-115.1,-96.2" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-122.0,-97.2L-119.1,-101.3M-115.1,-96.2L-112.3,-100.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-51.5,-51.2L-46.5,-53.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-51.5,-51.2L-55.0,-53.0M-46.5,-53.8L-50.0,-55.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-51.5,-51.2L-55.0,-53.0M-46.5,-53.8L-50.0,-55.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-55.0,-53.0L-50.0,-55.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-55.0,-53.0L-58.5,-54.7M-50.0,-55.5L-53.5,-57.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-55.0,-53.0L-58.5,-54.7M-50.0,-55.5L-53.5,-57.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-58.5,-54.7L-53.5,-57.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-58.5,-54.7L-62.0,-56.5M-53.5,-57.3L-57.0,-59.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-58.5,-54.7L-62.0,-56.5M-53.5,-57.3L-57.0,-59.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-62.0,-56.5L-57.0,-59.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-62.0,-56.5L-65.5,-58.2M-57.0,-59.0L-60.5,-60.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-62.0,-56.5L-65.5,-58.2M-57.0,-59.0L-60.5,-60.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M9.5,-58.2L4.5,-60.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M9.5,-58.2L6.0,-56.8M4.5,-60.8L1.0,-59.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M6.0,-56.8L1.0,-59.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -182,13 +189,13 @@
     <path class="ts" d="M-122.1,-87.9L-115.0,-88.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-122.1,-87.9L-123.0,-92.2M-115.0,-88.3L-116.0,-92.6" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-37.5,-44.2L-32.5,-46.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-37.5,-44.2L-41.0,-46.0M-32.5,-46.8L-36.0,-48.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-37.5,-44.2L-41.0,-46.0M-32.5,-46.8L-36.0,-48.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-41.0,-46.0L-36.0,-48.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-41.0,-46.0L-44.5,-47.7M-36.0,-48.5L-39.5,-50.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-41.0,-46.0L-44.5,-47.7M-36.0,-48.5L-39.5,-50.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-44.5,-47.7L-39.5,-50.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-44.5,-47.7L-48.0,-49.5M-39.5,-50.3L-43.0,-52.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-44.5,-47.7L-48.0,-49.5M-39.5,-50.3L-43.0,-52.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-48.0,-49.5L-43.0,-52.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-48.0,-49.5L-51.5,-51.2M-43.0,-52.0L-46.5,-53.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-48.0,-49.5L-51.5,-51.2M-43.0,-52.0L-46.5,-53.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-124.2,-56.2L-131.2,-55.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-124.2,-56.2L-123.6,-53.3M-131.2,-55.8L-130.7,-52.9" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-123.7,-53.6L-130.5,-52.6" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -241,13 +248,13 @@
     <path class="ts" d="M-119.1,-83.5L-112.3,-84.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-119.1,-83.5L-122.0,-87.6M-112.3,-84.5L-115.1,-88.6" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-23.5,-37.2L-18.5,-39.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-23.5,-37.2L-27.0,-39.0M-18.5,-39.8L-22.0,-41.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-23.5,-37.2L-27.0,-39.0M-18.5,-39.8L-22.0,-41.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-27.0,-39.0L-22.0,-41.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-27.0,-39.0L-30.5,-40.7M-22.0,-41.5L-25.5,-43.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-27.0,-39.0L-30.5,-40.7M-22.0,-41.5L-25.5,-43.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-30.5,-40.7L-25.5,-43.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-30.5,-40.7L-34.0,-42.5M-25.5,-43.3L-29.0,-45.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-30.5,-40.7L-34.0,-42.5M-25.5,-43.3L-29.0,-45.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-34.0,-42.5L-29.0,-45.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-34.0,-42.5L-37.5,-44.2M-29.0,-45.0L-32.5,-46.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-34.0,-42.5L-37.5,-44.2M-29.0,-45.0L-32.5,-46.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-116.5,-46.8L-121.5,-44.2" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-116.5,-46.8L-113.0,-45.3M-121.5,-44.2L-118.0,-42.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M60.5,-37.2L65.5,-39.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -377,13 +384,13 @@
     <path class="ts" d="M-32.7,-80.0L-37.3,-82.7" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-32.7,-80.0L-40.2,-76.3M-37.3,-82.7L-44.8,-79.1" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M4.5,-23.2L9.5,-25.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M4.5,-23.2L1.0,-25.0M9.5,-25.8L6.0,-27.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M4.5,-23.2L1.0,-25.0M9.5,-25.8L6.0,-27.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M1.0,-25.0L6.0,-27.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M1.0,-25.0L-2.5,-26.7M6.0,-27.5L2.5,-29.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M1.0,-25.0L-2.5,-26.7M6.0,-27.5L2.5,-29.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-2.5,-26.7L2.5,-29.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-2.5,-26.7L-6.0,-28.5M2.5,-29.3L-1.0,-31.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-2.5,-26.7L-6.0,-28.5M2.5,-29.3L-1.0,-31.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-6.0,-28.5L-1.0,-31.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M-6.0,-28.5L-9.5,-30.2M-1.0,-31.0L-4.5,-32.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M-6.0,-28.5L-9.5,-30.2M-1.0,-31.0L-4.5,-32.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M78.0,-34.9L83.0,-37.4" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M78.0,-34.9L74.5,-34.5M83.0,-37.4L79.5,-37.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M118.0,-33.9L113.0,-31.4" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -429,13 +436,13 @@
     <path class="ts" d="M-50.0,-73.2L-52.1,-76.6" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-50.0,-73.2L-59.3,-71.3M-52.1,-76.6L-61.4,-74.7" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M18.5,-16.2L23.5,-18.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M18.5,-16.2L15.0,-18.0M23.5,-18.8L20.0,-20.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M18.5,-16.2L15.0,-18.0M23.5,-18.8L20.0,-20.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M15.0,-18.0L20.0,-20.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M15.0,-18.0L11.5,-19.7M20.0,-20.5L16.5,-22.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M15.0,-18.0L11.5,-19.7M20.0,-20.5L16.5,-22.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M11.5,-19.7L16.5,-22.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M11.5,-19.7L8.0,-21.5M16.5,-22.3L13.0,-24.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M11.5,-19.7L8.0,-21.5M16.5,-22.3L13.0,-24.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M8.0,-21.5L13.0,-24.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M8.0,-21.5L4.5,-23.2M13.0,-24.0L9.5,-25.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M8.0,-21.5L4.5,-23.2M13.0,-24.0L9.5,-25.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M132.0,-20.8L127.0,-18.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M132.0,-20.8L135.5,-18.8M127.0,-18.3L130.5,-16.2" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M128.5,-23.3L123.5,-20.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
@@ -489,13 +496,13 @@
     <path class="ts" d="M142.3,-14.6L136.0,-12.9" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M142.3,-14.6L146.9,-10.3M136.0,-12.9L140.6,-8.6" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M32.5,-9.2L37.5,-11.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M32.5,-9.2L29.0,-11.0M37.5,-11.8L34.0,-13.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M32.5,-9.2L29.0,-11.0M37.5,-11.8L34.0,-13.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M29.0,-11.0L34.0,-13.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M29.0,-11.0L25.5,-12.7M34.0,-13.5L30.5,-15.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M29.0,-11.0L25.5,-12.7M34.0,-13.5L30.5,-15.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M25.5,-12.7L30.5,-15.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M25.5,-12.7L22.0,-14.5M30.5,-15.3L27.0,-17.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M25.5,-12.7L22.0,-14.5M30.5,-15.3L27.0,-17.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M22.0,-14.5L27.0,-17.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M22.0,-14.5L18.5,-16.2M27.0,-17.0L23.5,-18.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M22.0,-14.5L18.5,-16.2M27.0,-17.0L23.5,-18.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M-35.0,-34.6L-35.0,-17.5" fill="none" stroke="#b7c3c3" stroke-opacity="0.45" stroke-width="1.5"/>
     <path class="ts" d="M-32.7,-36.0L-37.3,-33.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M-32.7,-36.0L-28.2,-34.2M-37.3,-33.3L-32.8,-31.4" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
@@ -537,13 +544,13 @@
     <path class="ts" d="M147.1,-10.0L140.3,-9.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M147.1,-10.0L150.0,-5.3M140.3,-9.0L143.1,-4.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M46.5,-2.2L51.5,-4.8" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M46.5,-2.2L43.0,-4.0M51.5,-4.8L48.0,-6.5" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M46.5,-2.2L43.0,-4.0M51.5,-4.8L48.0,-6.5" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M43.0,-4.0L48.0,-6.5" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M43.0,-4.0L39.5,-5.7M48.0,-6.5L44.5,-8.3" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M43.0,-4.0L39.5,-5.7M48.0,-6.5L44.5,-8.3" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M39.5,-5.7L44.5,-8.3" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M39.5,-5.7L36.0,-7.5M44.5,-8.3L41.0,-10.0" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M39.5,-5.7L36.0,-7.5M44.5,-8.3L41.0,-10.0" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M36.0,-7.5L41.0,-10.0" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
-    <path class="ac" d="M36.0,-7.5L32.5,-9.2M41.0,-10.0L37.5,-11.8" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="ac" data-station="rail" d="M36.0,-7.5L32.5,-9.2M41.0,-10.0L37.5,-11.8" fill="none" stroke="#ffe72f" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M120.0,-39.4L125.0,-41.9" fill="none" stroke="#b7c3c3" stroke-width="1.2"/>
     <path class="ac" d="M120.0,-39.4L116.5,-39.2M125.0,-41.9L121.5,-41.7" fill="none" stroke="#afdbc3" stroke-width="1.6" stroke-linecap="round"/>
     <path class="ts" d="M126.0,-40.2L126.0,-7.0" fill="none" stroke="#b7c3c3" stroke-opacity="0.45" stroke-width="1.5"/>
