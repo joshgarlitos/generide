@@ -27,7 +27,7 @@ async function fetchEngine() {
   const manifest = await (await fetch(new URL("./engine.json", import.meta.url), { cache: "no-cache" })).json();
   const response = await fetch(new URL(`./${manifest.archive}`, import.meta.url));
   if (!response.ok) throw new Error(`The engine download failed (${response.status}).`);
-  return response.arrayBuffer();
+  return { archive: await response.arrayBuffer(), page: manifest.page };
 }
 
 async function boot() {
@@ -38,13 +38,16 @@ async function boot() {
   py = await loadPyodide({ indexURL: new URL("./pyodide/", import.meta.url).href });
 
   post({ type: "loading", step: 2, steps: 3, text: "Downloading generide" });
-  py.unpackArchive(await engine, "zip", { extractDir: ENGINE_DIR });
+  const { archive, page } = await engine;
+  py.unpackArchive(archive, "zip", { extractDir: ENGINE_DIR });
 
   post({ type: "loading", step: 3, steps: 3, text: "Starting generide" });
   py.runPython(`import sys\nsys.path.insert(0, "${ENGINE_DIR}")`);
   demo = py.pyimport("rct2.demo");
   const view = demo.settings_view();
-  post({ type: "ready", view: toJs(view) });
+  // The page version the build stamped into the manifest; the page checks it
+  // against its own.
+  post({ type: "ready", view: toJs(view), page });
   view.destroy();
 }
 

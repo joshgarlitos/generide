@@ -11,6 +11,11 @@
 const REPO = "https://github.com/joshgarlitos/generide";
 const LOCAL_SETUP = `${REPO}#use-the-web-ui`;
 
+// The build replaces this placeholder with a hash of the page's files and
+// writes the same hash into engine.json. A browser holding an old copy of the
+// page's script next to a new engine would otherwise run them mismatched.
+const PAGE_VERSION = "__PAGE_VERSION__";
+
 const state = {
   screen: "loading", // which view is showing
   worker: null,
@@ -144,6 +149,16 @@ function onMessage(worker, message) {
       if (!state.view) showLoading(message);
       break;
     case "ready":
+      // An unbuilt page (no stamped version) has nothing to compare.
+      if (!PAGE_VERSION.startsWith("__") && message.page !== PAGE_VERSION) {
+        // A ride on screen stays; the prompt shows when the visitor starts a new run.
+        if (state.screen === "result") {
+          state.loadError = { where: "load", message: "This page was updated, so reload it to start a new run." };
+        } else {
+          showStale();
+        }
+        break;
+      }
       state.ready = true;
       state.view = message.view;
       // A replacement engine can finish loading while the visitor reads a
@@ -201,6 +216,20 @@ function showLoading(message) {
 function endRun() {
   if (state.run) state.run.finish();
   state.run = null;
+}
+
+// The page's own script and the engine come from different deploys, so the
+// parts do not match. This happens when a browser keeps an old copy of the
+// page for a few minutes after a deploy.
+function showStale() {
+  endRun();
+  releasePictures();
+  if (state.worker) state.worker.terminate();
+  state.worker = null;
+  setView("stale", win({ colour: "bordeaux", title: "Reload to get the latest version", level: 1 },
+    h("p", {}, "This page was updated while your browser still held an older copy of it, so its parts no longer match."),
+    h("p", {}, "Reload the page to get the matching copy. If this message comes back, wait a minute and reload again."),
+    h("div", { class: "actions" }, h("button", { type: "button", class: "primary", onclick: () => location.reload() }, "Reload"))));
 }
 
 function showError(message) {
