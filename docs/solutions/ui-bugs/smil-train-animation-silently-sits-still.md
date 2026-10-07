@@ -18,7 +18,7 @@ tags: [svg, smil, animatemotion, inline-svg, intersectionobserver, headless-chro
 
 ## Problem
 
-The isometric ride view (pull request #74, still open) animates a train around the track with an SVG `animateMotion` element. The train needs to run at the simulation's speed on each piece, and the page needs to pause it, restart it, and replay a lap. Two separate mistakes each left the train sitting still, and neither raised an error.
+The isometric ride view (pull request #74) animates a train around the track with an SVG `animateMotion` element. The train needs to run at the simulation's speed on each piece, and the page needs to pause it, restart it, and replay a lap. Two separate mistakes each left the train sitting still, and neither raised an error.
 
 ## Symptoms
 
@@ -44,6 +44,8 @@ SMIL timing in an SVG inserted by script depends on layout having happened, and 
 - When an animation carries timing in `keyTimes` or `keyPoints`, set `calcMode="linear"` and assert it in a test.
 - For any script-inserted SVG with SMIL, test movement over time in a visible and in a hidden container, and never accept the animation clock as proof the picture is moving.
 - A button that starts something and then disables itself takes keyboard focus away from a keyboard user. In the same work, Play lap uses `aria-disabled` and an early return in place of the `disabled` property, and the demo's browser test presses it with the keyboard and checks it keeps focus.
+- A Pause train button hits the same trap from the other side. Resume train calls `unpauseAnimations()` only on a picture whose train has already started. A picture drawn while paused has never started, so Resume sends it through the visible-start path. The observer also checks the paused flag, so a picture that becomes visible after the viewer paused stays at rest.
+- When a browser test presses Enter to toggle a button after clicking something else with the mouse, focus is on the other control. Focus the button first, or the key press does the wrong thing.
 
 ## Related
 

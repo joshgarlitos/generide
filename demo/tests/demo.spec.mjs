@@ -1,5 +1,6 @@
 // The page's states and acceptance examples (plan U3), in a real browser
 // running the real engine through Pyodide.
+import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 const RUN_DONE = 180_000;
@@ -143,6 +144,38 @@ test("with reduced motion the train waits, and Play lap runs a lap without losin
   await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
   await expect(play).toHaveAttribute("aria-disabled", "false");
   await context.close();
+});
+
+test("Pause train stops the train on the result and Resume train starts it again", async ({ page }) => {
+  await openSettings(page);
+  await page.getByRole("button", { name: "Go" }).click();
+  await expect(page.getByRole("heading", { name: "Your ride", exact: true })).toBeVisible({ timeout: RUN_DONE });
+
+  const picture = page.locator(".iso-frame svg");
+  const look = async () => createHash("sha1").update(await picture.screenshot()).digest("hex");
+  const pause = page.getByRole("button", { name: "Pause train" });
+  await expect(pause).toHaveAttribute("aria-pressed", "false");
+  await pause.focus();
+  await page.keyboard.press("Enter");
+  const resume = page.getByRole("button", { name: "Resume train" });
+  await expect(resume).toHaveAttribute("aria-pressed", "true");
+  await expect(resume).toBeFocused();
+  const still = await look();
+  await page.waitForTimeout(1500);
+  expect(await look()).toBe(still);
+
+  // The paused state survives a turn, and the new picture waits at rest.
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
+  await expect(resume).toHaveAttribute("aria-pressed", "true");
+  const turned = await look();
+  await page.waitForTimeout(1500);
+  expect(await look()).toBe(turned);
+
+  await resume.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Pause train" })).toBeFocused();
+  await expect.poll(look).not.toBe(turned);
 });
 
 test("a page and an engine from different deploys ask for a reload instead of running mismatched", async ({ page }) => {

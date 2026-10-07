@@ -92,7 +92,7 @@ button, .button {
   box-shadow: inset var(--u) var(--u) 0 var(--hi), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--lo);
 }
 button:hover:not(:disabled), .button[href]:hover { background: var(--hover); }
-button:active:not(:disabled), .button[href]:active, .button[aria-current="page"] {
+button:active:not(:disabled), button[aria-pressed="true"], .button[href]:active, .button[aria-current="page"] {
   background: var(--hover);
   padding-top: var(--u);
   box-shadow: inset var(--u) var(--u) 0 var(--deep), inset calc(-1 * var(--u)) calc(-1 * var(--u)) 0 var(--hi);
