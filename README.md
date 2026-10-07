@@ -47,12 +47,12 @@ The result has to make sense at every layer. A high fitness score is not useful 
 - Evolves a part-based genome as well as a flat one, so crossover cannot cut a lift hill in half, and carries the hill as a mandatory part rather than something the search has to stumble on.
 - Compares search methods through a benchmark harness at equal evaluation budgets, with a hard buildable-and-completed gate and reliability and diversity tracked alongside quality.
 - Builds a track piece by piece in a real headless OpenRCT2 and reads the game's own ratings back, so a benchmark run can be judged by the game rather than by our model of it.
-- Renders a track as an isometric picture with rails, ties, and supports that turns in quarter turns and runs a train around at the simulation's speeds, as a top-down SVG plan shaded by height, and an evolution run as a fitness curve, so a result can be looked at without loading the game.
+- Renders a track without loading the game: an isometric picture with rails, ties, and supports that turns in quarter turns and runs a train around at the simulation's speeds, a top-down SVG plan shaded by height, and a fitness curve for an evolution run.
 - Supports seeded runs so an interesting result or failure can be reproduced.
 - Draws a ride's side profile (height and speed along the track, lift and drops marked) from the same piece-by-piece walk the ride stats come from.
 - Saves every run, from the terminal or the web UI, to a run library with its request, progress, every improvement of the best ride, and what happened to the result.
 - Runs a local web UI for setting up requests, watching runs live, checking results in the headless game, installing them, and comparing runs side by side.
-- Has 758 passing tests, including regression tests against real OpenRCT2 exports.
+- Has 760 passing tests, including regression tests against real OpenRCT2 exports.
 
 Generated and evolved tracks have been placed and run in OpenRCT2. The default fitness still scores geometric proxies such as length, elevation changes, turn balance, and segment variety. The physics fitness turns simulated ride stats into excitement, intensity, and nausea, and it can use either the old fitted weights or the transcribed calculation from OpenRCT2's source.
 
@@ -85,8 +85,8 @@ python generide_web.py
 It opens `http://127.0.0.1:8765/` in your browser (add `--no-browser` to just print the address, or `--port N` to use another port). It only listens on your own machine. The page has four screens:
 
 - **New run.** Every setting the page supports, each with a plain explanation, its default, and its allowed range. The settings that shape the ride are up front; the rest sit under Advanced settings. Mistakes are pointed out beside the field before anything starts. Rating windows aim at generide's own estimates, not the game's real ratings.
-- **The run.** While a run is going: the generation, time elapsed and time left, the best ride so far as a plan and a side profile, the best score by generation, and a notice when the score has stopped improving. Stop ends the run and keeps its best ride. Only one run goes at a time.
-- **The result.** The plan, the side profile, and the ride stats, with every number from generide's own model labeled as an estimate. A ride that fails construction checks or whose train does not finish the circuit is flagged, and installing it asks first. From here you can check the ride in the real game (it builds the ride in a headless OpenRCT2 and shows the game's ratings next to ours), install it into OpenRCT2 under a name you type or a naming template like `{name} {date} {time}`, or download the `.td6`. Installing never overwrites an existing design without asking. If OpenRCT2 is already open, restart it to see a newly installed design.
+- **The run.** While a run is going: the generation, time elapsed and time left, the best ride so far as an isometric view (turn it in quarter turns, and replay the train's lap) and a side profile, the best score by generation, and a notice when the score has stopped improving. Stop ends the run and keeps its best ride. Only one run goes at a time.
+- **The result.** The isometric view, the side profile, and the ride stats, with every number from generide's own model labeled as an estimate. A ride that fails construction checks or whose train does not finish the circuit is flagged, and installing it asks first. From here you can check the ride in the real game (it builds the ride in a headless OpenRCT2 and shows the game's ratings next to ours), install it into OpenRCT2 under a name you type or a naming template like `{name} {date} {time}`, or download the `.td6`. Installing never overwrites an existing design without asking. If OpenRCT2 is already open, restart it to see a newly installed design.
 - **Library.** Every saved run, newest first, including runs started from the terminal. Open one, rerun it with changes (every input, the seed included, starts out the same as the source run, so your change is the only difference), delete it, or tick two or three and compare them: changed inputs are highlighted, and the pictures and stats sit side by side.
 
 The run library lives in `~/.generide/runs/`, one folder per run. It is generide's own folder, separate from the game: you can clear it, or delete runs from the page, without touching rides already installed in OpenRCT2. Naming templates are saved in `~/.generide/settings.json`.
@@ -189,6 +189,8 @@ rct2/
   evolution.py      Population management and evolution loops
   benchmark.py      Method comparison at equal evaluation budgets
   oracle.py         Headless OpenRCT2 driver for the game's own ratings
+  calibration.py    Ratings and stats extracted from real track designs, for calibration
+  calibration_log.py  The log of tracks sampled through the oracle during a run
   trackpath.py      One centerline per piece, shared by the isometric picture and its train
   render.py         SVG isometric views, plan views, side profiles, and fitness curves
   runrecord.py      The run library shared by the CLI and the web UI

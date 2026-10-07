@@ -4,6 +4,14 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-07: A refresh of the knowledge docs after the isometric view
+
+I read `STRATEGY.md`, `CONCEPTS.md`, the README, the roadmap, and the two notes in `docs/solutions/` against the code after the isometric view merged, and fixed what had gone out of date. Nothing in the strategy's purpose, positioning, boundaries, or track rationale changed. I only corrected two facts: the Rendering and fit track now names the isometric view and where it shows, and the oracle metric now says the web UI and `--oracle-calibrate` can reach the oracle even though no number is tracked.
+
+`CONCEPTS.md` gained entries for the isometric view, view angle, train, track path, page version, and ride bar. The genome bloat note still said `ideal_length` is 80 and that PR 58 was open, and it cited line numbers that had moved, so it now says the value was 80 then and is 100 in the code (the 2026-09-13 entry), and points at functions instead of lines. The train animation note called PR 74 open. The README test count is 760, from `python3 -m pytest -q` (75 seconds), and its screen descriptions say isometric view where they said plan, since the page no longer shows the plan.
+
+---
+
 ## 2026-10-06: An isometric view of a ride, with a train
 
 The best ride so far now draws as an isometric picture, from any of four quarter-turn angles, with a train that laps the track at the simulation's speeds. It replaces the top-down plan on the local web UI's run and compare screens and on the in-browser page. The plan is `docs/plans/2026-10-04-1519-feat-isometric-ride-view-plan.md`, and the work is in [#74](https://github.com/joshgarlitos/generide/pull/74).
