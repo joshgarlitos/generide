@@ -4,6 +4,22 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-07: A browser test for the local UI's isometric view, and a pause button
+
+Two gaps from the isometric view were open: only the in-browser page had a Playwright test, and a train that loops for longer than five seconds had no pause control for viewers without a reduced-motion setting.
+
+**The local UI test.** `demo/playwright.config.mjs` now starts two servers: the demo's static server, and `python3 generide_web.py` on port 8778 (`WEBUI_PORT` overrides it). `demo/tools/seed_webui_library.py` clears a throwaway `GENERIDE_HOME` and writes two finished runs from `manic_miner_test.td6`, built the way `saved_run` in `tests/test_webui.py` builds one, so no evolution runs. `demo/tests/webui.spec.mjs` covers turning, a moving train, reduced motion with Play lap and keyboard focus, and the compare screen's single control pair. Movement is judged by hashing a screenshot of the svg 1.5 seconds apart, not by the animation clock. I checked the tests can fail by commenting out `unpauseAnimations()` in `run()`: the moving-train and Play lap tests failed and the turning and compare tests still passed, as they should. `.github/workflows/demo.yml` needed no change because it already runs `npx playwright test` from `demo/` after the build, and Playwright starts both servers.
+
+**The pause button.** For viewers without reduced motion, `iso-view.js` adds a Pause train / Resume train button (`aria-pressed`, always mounted so focus stays on it). Reduced-motion viewers keep Play lap. Two choices I made and the owner can change: the paused state lasts for the screen, and turning the view or a new best ride draws the new picture at rest while the button still says Resume train. Resume carries on from where the train stopped, except for a picture that never started, which starts from the station. The button is its own commit, so dropping the feature is one revert. One wording risk: the label changes and `aria-pressed` changes too, so a screen reader may announce "Resume train, pressed". I followed the brief; a fixed label with only `aria-pressed` would avoid that.
+
+What I measured and what I assumed:
+
+- **Measured.** `pytest`: 760 passed in 73.5 s. The demo's new pause test took 22.6 s including the engine run. The full `npx playwright test` run before the last test edit took 2.9 minutes for 19 tests.
+- **Assumed.** Only Chromium again. Reduced motion is emulated. I did not run the two-server setup on GitHub's runner, so the first CI run is its real test.
+- **Not done.** The subagent-based simplify and review skills could not dispatch reviewers here, so I read the diff myself looking for faults instead.
+
+---
+
 ## 2026-10-06: An isometric view of a ride, with a train
 
 The best ride so far now draws as an isometric picture, from any of four quarter-turn angles, with a train that laps the track at the simulation's speeds. It replaces the top-down plan on the local web UI's run and compare screens and on the in-browser page. The plan is `docs/plans/2026-10-04-1519-feat-isometric-ride-view-plan.md`, and the work is in [#74](https://github.com/joshgarlitos/generide/pull/74).
