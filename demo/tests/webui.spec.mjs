@@ -107,3 +107,59 @@ test("the compare screen has one pair of turn buttons, and one press turns every
     return after.length === 2 && after.every((text, i) => text !== before[i]);
   }).toBe(true);
 });
+
+test("Pause train stops the train, Resume train starts it again, and the button keeps keyboard focus", async ({ page, request }) => {
+  const picture = await openGraphs(page, request);
+  const pause = page.getByRole("button", { name: "Pause train" });
+  await expect(pause).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Play lap" })).toHaveCount(0);
+
+  await pause.focus();
+  await page.keyboard.press("Enter");
+  const resume = page.getByRole("button", { name: "Resume train" });
+  await expect(resume).toHaveAttribute("aria-pressed", "true");
+  await expect(resume).toBeFocused();
+  const still = await look(picture);
+  await page.waitForTimeout(1500);
+  expect(await look(picture)).toBe(still);
+
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Pause train" })).toBeFocused();
+  await expect.poll(() => look(picture)).not.toBe(still);
+});
+
+test("turning the view while paused keeps the train paused, and the new picture is at rest", async ({ page, request }) => {
+  const picture = await openGraphs(page, request);
+  await page.getByRole("button", { name: "Pause train" }).click();
+  const first = await picture.locator("desc").textContent();
+  await page.getByRole("button", { name: "Turn left" }).click();
+  await expect(page.locator(".iso-label")).toHaveText("View 2 of 4");
+  await expect(picture.locator("desc")).not.toHaveText(first);
+
+  await expect(page.getByRole("button", { name: "Resume train" })).toHaveAttribute("aria-pressed", "true");
+  expect(await picture.evaluate((svg) => svg.getCurrentTime())).toBe(0);
+  const still = await look(picture);
+  await page.waitForTimeout(1500);
+  expect(await look(picture)).toBe(still);
+});
+
+test("with reduced motion there is no pause button, only Play lap", async ({ browser, request }) => {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await openGraphs(page, request);
+  await expect(page.getByRole("button", { name: "Play lap" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /train$/ })).toHaveCount(0);
+  await context.close();
+});
+
+test("on the compare screen one Pause train button stops every train", async ({ page, request }) => {
+  const ids = await seededIds(request);
+  await page.goto(`${UI}/#/compare?ids=${ids.join(",")}`);
+  const pictures = page.locator(".compare-grid .iso svg");
+  await expect(pictures).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Pause train" })).toHaveCount(1);
+  await page.getByRole("button", { name: "Pause train" }).click();
+  const still = [await look(pictures.nth(0)), await look(pictures.nth(1))];
+  await page.waitForTimeout(1500);
+  expect([await look(pictures.nth(0)), await look(pictures.nth(1))]).toEqual(still);
+});

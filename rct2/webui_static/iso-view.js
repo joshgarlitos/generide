@@ -39,6 +39,13 @@
     let current = ((angle % ANGLES) + ANGLES) % ANGLES;
     let turns = 0;
     let lapTimer = null;
+    // Set by the Pause train button. It outlasts turns and new best rides:
+    // a picture drawn while paused appears at rest. Never set when the
+    // viewer prefers reduced motion, who get Play lap instead.
+    let paused = false;
+    // The pictures whose train has started, so Resume train can carry on
+    // from where it stopped and start only the ones that never did.
+    const started = new WeakSet();
 
     const label = h("span", { class: "iso-label small", "aria-live": "polite" });
     const setLabel = () => { label.textContent = `View ${current + 1} of ${ANGLES}`; };
@@ -49,11 +56,12 @@
     const left = h("button", { type: "button", onclick: () => turn(1) }, "Turn left");
     const right = h("button", { type: "button", onclick: () => turn(-1) }, "Turn right");
     const play = reduced ? h("button", { type: "button", onclick: playLap }, "Play lap") : null;
+    const pause = reduced ? null : h("button", { type: "button", "aria-pressed": "false", onclick: togglePause }, "Pause train");
     const note = reduced
       ? h("span", { class: "muted small" },
         "Your device is set to reduce motion, so the train waits at the station until you play a lap.")
       : null;
-    const element = h("div", { class: "iso-controls actions" }, left, right, label, play, note);
+    const element = h("div", { class: "iso-controls actions" }, left, right, label, play, pause, note);
 
     function stopLap() {
       if (lapTimer !== null) clearTimeout(lapTimer);
@@ -71,6 +79,7 @@
     // it has been laid out and then restarted this way, so every start goes
     // through here.
     function run(svg) {
+      started.add(svg);
       svg.pauseAnimations();
       svg.setCurrentTime(0);
       svg.unpauseAnimations();
@@ -83,13 +92,31 @@
         run(entry.svg);
         return;
       }
+      if (entry.watch) entry.watch.disconnect();
       entry.watch = new IntersectionObserver((seen) => {
         if (!seen.some((item) => item.isIntersecting)) return;
         entry.watch.disconnect();
         entry.watch = null;
-        run(entry.svg);
+        // Paused while the picture was waiting to show: leave it at rest.
+        if (paused) rest(entry.svg);
+        else run(entry.svg);
       });
       entry.watch.observe(entry.svg);
+    }
+
+    // The button stays mounted and keeps its focus; only its label and
+    // aria-pressed change.
+    function togglePause() {
+      paused = !paused;
+      pause.setAttribute("aria-pressed", String(paused));
+      pause.textContent = paused ? "Resume train" : "Pause train";
+      for (const entry of pictures) {
+        const svg = entry.svg;
+        if (!svg) continue;
+        if (paused) svg.pauseAnimations();
+        else if (started.has(svg)) svg.unpauseAnimations();
+        else runWhenVisible(entry);
+      }
     }
 
     // The button is marked disabled rather than being disabled, so a keyboard
@@ -159,7 +186,7 @@
           if (entry.watch) entry.watch.disconnect();
           frame.replaceChildren(svg);
           entry.svg = svg;
-          if (reduced) rest(svg);
+          if (reduced || paused) rest(svg);
           else runWhenVisible(entry);
         },
       };
