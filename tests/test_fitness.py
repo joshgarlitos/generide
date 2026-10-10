@@ -304,3 +304,43 @@ def test_padding_past_ideal_length_earns_no_elevation_turn_or_variety_reward():
     assert fitness_fn.evaluate(prefix + flat_padding) == fitness_fn.evaluate(
         prefix + hilly_padding
     )
+
+
+class TestNoSiteIsUnchanged:
+    """Covers AE3: with no site, scoring and a seeded run match the code before sites existed.
+
+    The expected values were recorded from the commit before the site work,
+    not computed from the code under test.
+    """
+
+    def test_default_proxy_and_physics_scores_on_the_fixture(self):
+        segments, _ = load_fixture()
+
+        assert ProxyFitness().evaluate(segments) == 521.0
+        assert ProxyFitness(max_width=10, max_depth=10).evaluate(segments) == -9609.0
+        assert PhysicsFitness().evaluate(segments) == pytest.approx(61.55684431164997)
+        assert PhysicsFitness(max_width=12, max_depth=12).evaluate(segments) == pytest.approx(
+            11.556844311649968
+        )
+
+    @pytest.mark.parametrize(
+        "make_fitness, best_fitness, length",
+        [
+            (ProxyFitness, 235.0, 58),
+            (PhysicsFitness, 50.853068924145916, 54),
+        ],
+    )
+    def test_a_seeded_run_finds_the_same_best_ride(self, make_fitness, best_fitness, length):
+        from rct2.evolution import evolve_parts
+        from rct2.generate import create_hill_circuit
+
+        stats = evolve_parts(
+            create_hill_circuit(),
+            random.Random(3),
+            fitness_fn=make_fitness(),
+            generations=6,
+            population_size=12,
+        )
+
+        assert stats.best_fitness == pytest.approx(best_fitness)
+        assert len(stats.best_individual.segments) == length
