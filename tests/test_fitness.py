@@ -344,3 +344,160 @@ class TestNoSiteIsUnchanged:
 
         assert stats.best_fitness == pytest.approx(best_fitness)
         assert len(stats.best_individual.segments) == length
+
+
+def _site_for(segments, margin=2, blocked=(), heading=None):
+    """An open site that holds `segments` with room to spare, with the given world tiles blocked."""
+    from rct2.geometry import Heading, occupied_tiles
+    from rct2.site import Site, site_coords
+
+    heading = Heading.NORTH if heading is None else heading
+    tiles = [(t.x, t.y) for t in occupied_tiles(Position(), segments)]
+    tiles += [(-1, 0), (1, 0)]
+    # Pick the anchor so that every tile lands at a non-negative site position.
+    probe = [site_coords((0, 0), heading, x, y) for x, y in tiles]
+    anchor = (margin - min(x for x, _ in probe), margin - min(y for _, y in probe))
+    placed = [site_coords(anchor, heading, x, y) for x, y in tiles]
+    width = max(x for x, _ in placed) + margin + 1
+    depth = max(y for _, y in placed) + margin + 1
+    rows = [["."] * width for _ in range(depth)]
+    for x, y in blocked:
+        rows[y][x] = "#"
+    return Site.from_rows(["".join(r) for r in rows], anchor=anchor), anchor
+
+
+def _ride_world_tiles(segments, anchor, heading=None):
+    from rct2.geometry import Heading, occupied_tiles
+    from rct2.site import site_coords
+
+    heading = Heading.NORTH if heading is None else heading
+    return sorted({site_coords(anchor, heading, t.x, t.y) for t in occupied_tiles(Position(), segments)})
+
+
+class TestSiteFitness:
+    def test_a_ride_that_spills_past_the_old_rectangle_but_fits_the_site_is_not_invalid(self):
+        # The fixture is wider than 10 tiles, so the old rectangle rejects it outright.
+        segments, _ = load_fixture()
+        site, _ = _site_for(segments)
+
+        assert ProxyFitness(max_width=10, max_depth=10).evaluate(segments) == -9609.0
+        assert ProxyFitness(max_width=10, max_depth=10, site=site).evaluate(segments) == 521.0
+        assert PhysicsFitness(max_width=12, max_depth=12, site=site).evaluate(
+            segments
+        ) == pytest.approx(61.55684431164997)
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_a_ride_with_more_blocked_tiles_scores_lower(self, make):
+        segments, _ = load_fixture()
+        open_site, anchor = _site_for(segments)
+        tiles = _ride_world_tiles(segments, anchor)
+        few, _ = _site_for(segments, blocked=tiles[:2])
+        many, _ = _site_for(segments, blocked=tiles[:12])
+
+        assert (
+            make(site=open_site).evaluate(segments)
+            > make(site=few).evaluate(segments)
+            > make(site=many).evaluate(segments)
+        )
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_penalties_stop_growing_past_the_cap(self, make):
+        segments, _ = load_fixture()
+        open_site, anchor = _site_for(segments)
+        tiles = _ride_world_tiles(segments, anchor)
+        enough, _ = _site_for(segments, blocked=tiles[:120])
+        everything, _ = _site_for(segments, blocked=tiles)
+        assert len(tiles) > 120
+
+        assert make(site=everything).evaluate(segments) == pytest.approx(
+            make(site=enough).evaluate(segments)
+        )
+
+    def test_a_fitting_ride_beats_a_longer_better_ride_that_heavily_violates_the_site(self):
+        from rct2.generate import create_hill_circuit
+
+        long_ride, _ = load_fixture()
+        short_ride = create_hill_circuit()
+        _, anchor = _site_for(long_ride)
+        blocked_site, _ = _site_for(long_ride, blocked=_ride_world_tiles(long_ride, anchor))
+        fitting_site, _ = _site_for(short_ride)
+        fitness_blocked = ProxyFitness(site=blocked_site)
+        fitness_fitting = ProxyFitness(site=fitting_site)
+
+        assert fitness_fitting.evaluate(short_ride) > fitness_blocked.evaluate(long_ride)
+
+    def test_a_ride_that_fits_only_when_turned_east_takes_no_site_penalty(self):
+        from rct2.geometry import Heading
+
+        segments, _ = load_fixture()
+        open_site, _ = _site_for(segments)
+        east_site, east_anchor = _site_for(segments, heading=Heading.EAST)
+        # Shrink the east site to exactly what the ride needs when it faces east.
+        needed = set(_ride_world_tiles(segments, east_anchor, Heading.EAST))
+        needed |= {(east_anchor[0], east_anchor[1] + 1), (east_anchor[0], east_anchor[1] - 1)}
+        rows = [
+            "".join(
+                "." if (x, y) in needed else "#" for x in range(east_site.width)
+            )
+            for y in range(east_site.depth)
+        ]
+        from rct2.site import Site, best_fit
+
+        tight = Site.from_rows(rows, anchor=east_anchor)
+
+        assert best_fit(tight, segments).heading == Heading.EAST
+        assert ProxyFitness(site=tight).evaluate(segments) == ProxyFitness(
+            site=open_site
+        ).evaluate(segments)
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_covers_ae2_a_short_run_loops_around_a_blocked_block(self, make):
+        from rct2.evolution import evolve_parts
+        from rct2.generate import create_hill_circuit
+        from rct2.site import Site, best_fit
+
+        seed = create_hill_circuit()
+        base, anchor = _site_for(seed, margin=8)
+        rows = [list(r) for r in base.rows]
+        # A 2 by 2 block the seed ride would cross: two tiles along from the station, one over.
+        ax, ay = anchor
+        for dx in (2, 3):
+            for dy in (4, 5):
+                rows[ay + dy][ax + dx] = "#"
+        site = Site.from_rows(["".join(r) for r in rows], anchor=anchor)
+        assert best_fit(site, seed).blocked > 0
+
+        stats = evolve_parts(
+            seed,
+            random.Random(3),
+            fitness_fn=make(site=site),
+            generations=25,
+            population_size=20,
+        )
+
+        assert best_fit(site, stats.best_individual.segments).blocked == 0
+
+    def test_a_small_site_does_not_make_genomes_grow(self):
+        from rct2.evolution import evolve_parts
+        from rct2.generate import create_hill_circuit
+
+        seed = create_hill_circuit()
+        site, _ = _site_for(seed, margin=1)
+        fitness = ProxyFitness(site=site)
+
+        stats = evolve_parts(
+            seed, random.Random(5), fitness_fn=fitness, generations=15, population_size=20
+        )
+
+        assert len(stats.best_individual.segments) <= fitness.ideal_length + 20
+
+    def test_the_site_penalty_cap_is_above_the_largest_reward(self):
+        fitness = ProxyFitness()
+        largest_reward = fitness.ideal_length * (
+            fitness.length_weight
+            + fitness.elevation_weight
+            + fitness.variety_weight
+            + fitness.turn_balance_weight / 2
+        )
+
+        assert fitness.site_penalty_cap_per_kind > largest_reward

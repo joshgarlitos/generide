@@ -17,7 +17,7 @@ from pathlib import Path
 from rct2 import physics, render, runrecord, settings, td6
 from rct2.construction import default_lift_indices, validate_construction
 from rct2.evolution import evolve, evolve_parts
-from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
+from rct2.fitness import NO_MINIMUM_ELEVATION, CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
     BEGIN_STATION,
     DEFAULT_STATION_LENGTH,
@@ -28,6 +28,7 @@ from rct2.generate import (
     create_hill_circuit,
     create_simple_circuit,
 )
+from rct2.site import Site, SiteError
 from rct2.td6 import Entrance, Ride, TrackElement
 
 
@@ -164,6 +165,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="Maximum track footprint depth in tiles (default: 30)",
+    )
+    parser.add_argument(
+        "--site",
+        type=str,
+        default=None,
+        help=(
+            "Path to a site file (JSON): the space the ride has to fit, with "
+            "blocked tiles, ground height and an anchor for the first station "
+            "piece. When given, it replaces --max-width and --max-depth, and "
+            "all four headings are tried."
+        ),
     )
     parser.add_argument(
         "--target-excitement",
@@ -348,9 +360,18 @@ def main():
         low, _, high = raw.partition(":")
         return (float(low), float(high))
 
+    site = None
+    if args.site:
+        try:
+            site = Site.load(Path(args.site).expanduser())
+        except SiteError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     request = CoasterRequest(
         max_width=args.max_width,
         max_depth=args.max_depth,
+        site=site,
         excitement=parse_window(args.target_excitement),
         intensity=parse_window(args.target_intensity),
         nausea=parse_window(args.target_nausea),
@@ -359,7 +380,9 @@ def main():
     if args.fitness == "physics":
         fitness_fn = PhysicsFitness.from_request(request)
     else:
-        fitness_fn = ProxyFitness(max_width=request.max_width, max_depth=request.max_depth)
+        fitness_fn = ProxyFitness(
+            max_width=request.max_width, max_depth=request.max_depth, site=request.site
+        )
 
     # Every run is saved to the library unless asked not to, so the web UI
     # can show terminal runs alongside its own.
@@ -506,9 +529,13 @@ def main():
         )
 
     # Validate the best track
-    result = validate_construction(
-        best.segments, max_width=args.max_width, max_depth=args.max_depth,
-    )
+    if site is None:
+        result = validate_construction(
+            best.segments, max_width=args.max_width, max_depth=args.max_depth,
+        )
+    else:
+        # The site, not the rectangle, says whether the ride is too big or too low.
+        result = validate_construction(best.segments, min_elevation=NO_MINIMUM_ELEVATION)
     if result.valid:
         print("  Validation: PASSED")
     else:
