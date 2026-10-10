@@ -9,14 +9,11 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, Set, Tuple
 
 from rct2 import construction, physics
+from rct2.construction import NO_MINIMUM_ELEVATION
 from rct2 import ratings as ported_ratings_module
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
 from rct2.site import Site, best_fit, site_penalty
-
-# With a site, the site decides what is too low, so construction validation
-# gets a floor no ride reaches.
-NO_MINIMUM_ELEVATION = -10**9
 
 
 def count_slope_violations(segments: list[int]) -> int:

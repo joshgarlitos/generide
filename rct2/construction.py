@@ -507,6 +507,10 @@ def estimate_energy_violations(
     return len(_energy_issues(segments, resolved)), check_first_hill_has_lift(segments, resolved)
 
 
+# A floor no ride reaches, for when a site, not the flat datum, decides what is too low.
+NO_MINIMUM_ELEVATION = -10**9
+
+
 def validate_construction(
     segments: list[int],
     *,

@@ -274,14 +274,17 @@ def save_site(run_id: str, site) -> None:
     """
     path = run_dir(run_id) / SITE_FILE
     site.save(path)
-    update_record(run_id, lambda r: r.setdefault("request", {}).__setitem__("site", str(path)))
+
+    def point_at_copy(record):
+        record.setdefault("request", {})["site"] = str(path)
+
+    update_record(run_id, point_at_copy)
 
 
-def site_from_request(request: Dict[str, Any]):
-    """The site a stored request names, or None when it names none or cannot be read."""
+def site_from_path(path: Optional[str]):
+    """The site saved at `path`, or None when there is no path or it cannot be read."""
     from rct2.site import Site, SiteError
 
-    path = (request or {}).get("site")
     if not path:
         return None
     try:
@@ -657,7 +660,6 @@ def ride_summary(
     must fit, and the summary says whether it does (`site`).
     """
     from rct2 import construction, physics, render
-    from rct2.fitness import NO_MINIMUM_ELEVATION
 
     if site is None:
         validation = construction.validate_construction(
@@ -665,7 +667,7 @@ def ride_summary(
         )
     else:
         validation = construction.validate_construction(
-            segments, min_elevation=NO_MINIMUM_ELEVATION,
+            segments, min_elevation=construction.NO_MINIMUM_ELEVATION,
         )
     lifts = set(validation.lift_indices)
     stats = physics.simulate(segments, lift_indices=lifts)

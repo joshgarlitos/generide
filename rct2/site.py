@@ -176,33 +176,42 @@ def _entrance_side_violations(
     return outside, blocked
 
 
-def fit_at(site: Site, segments: Iterable[int], heading: Heading) -> SiteFit:
+def _footprint(segments: List[int]) -> List[Tuple[int, int, int]]:
+    """The ride's tiles as (x, y, z), built once however many headings are tried."""
+    return [(t.x, t.y, t.z) for t in occupied_tiles(Position(), segments)]
+
+
+def _fit_tiles(
+    site: Site, tiles: Sequence[Tuple[int, int, int]], station: int, heading: Heading
+) -> SiteFit:
     """Count where a ride's tiles break the site when it faces `heading`.
 
     The entrance and exit go on whichever side of the station the game
     chooses from track geometry alone, so both sides are tried and the ride
     is charged only for the better one.
     """
-    segments = list(segments)
-    anchor_ground = site.ground(*site.anchor)
+    forward_x, forward_y, right_x, right_y = _AXES[heading]
+    anchor_x, anchor_y = site.anchor
+    width, depth = site.width, site.depth
+    anchor_ground = site.heights[anchor_y][anchor_x]
 
     outside_tiles = set()
     blocked_tiles = set()
     below_ground = 0
-    for tile in occupied_tiles(Position(), segments):
-        wx, wy = site_coords(site.anchor, heading, tile.x, tile.y)
-        if not site.inside(wx, wy):
+    for x, y, z in tiles:
+        wx = anchor_x + x * right_x + y * forward_x
+        wy = anchor_y + x * right_y + y * forward_y
+        if not (0 <= wx < width and 0 <= wy < depth):
             outside_tiles.add((wx, wy))
-        elif site.blocked(wx, wy):
+        elif site.rows[wy][wx] == BLOCKED:
             blocked_tiles.add((wx, wy))
-        elif anchor_ground + tile.z < site.ground(wx, wy):
+        elif anchor_ground + z < site.heights[wy][wx]:
             below_ground += 1
 
     outside, blocked = len(outside_tiles), len(blocked_tiles)
-    length = construction.station_length(segments)
-    if length:
-        east = _entrance_side_violations(site, heading, 1, length)
-        west = _entrance_side_violations(site, heading, -1, length)
+    if station:
+        east = _entrance_side_violations(site, heading, 1, station)
+        west = _entrance_side_violations(site, heading, -1, station)
         better = min(east, west, key=sum)
         outside += better[0]
         blocked += better[1]
@@ -210,13 +219,30 @@ def fit_at(site: Site, segments: Iterable[int], heading: Heading) -> SiteFit:
     return SiteFit(heading=heading, outside=outside, blocked=blocked, below_ground=below_ground)
 
 
+def fit_at(site: Site, segments: Iterable[int], heading: Heading) -> SiteFit:
+    """Count where a ride's tiles break the site when it faces `heading`."""
+    segments = list(segments)
+    return _fit_tiles(site, _footprint(segments), construction.station_length(segments), heading)
+
+
 def best_fit(site: Site, segments: Iterable[int]) -> SiteFit:
     """The fit at whichever of the four headings breaks the site least.
 
-    A tie goes to the first of north, east, south, west.
+    A tie goes to the first of north, east, south, west, so once a heading
+    fits exactly, the rest cannot beat it and are skipped. This runs on every
+    individual in a search, so the ride's tiles are built once.
     """
     segments = list(segments)
-    return min((fit_at(site, segments, heading) for heading in HEADINGS), key=lambda f: f.total)
+    tiles = _footprint(segments)
+    station = construction.station_length(segments)
+    best = None
+    for heading in HEADINGS:
+        fit = _fit_tiles(site, tiles, station, heading)
+        if best is None or fit.total < best.total:
+            best = fit
+        if best.total == 0:
+            break
+    return best
 
 
 def site_penalty(fit: SiteFit, per_tile: float, cap_per_kind: float) -> float:

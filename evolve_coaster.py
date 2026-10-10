@@ -15,9 +15,9 @@ from datetime import datetime
 from pathlib import Path
 
 from rct2 import physics, render, runrecord, settings, td6
-from rct2.construction import default_lift_indices, validate_construction
+from rct2.construction import NO_MINIMUM_ELEVATION, default_lift_indices, validate_construction
 from rct2.evolution import evolve, evolve_parts
-from rct2.fitness import NO_MINIMUM_ELEVATION, CoasterRequest, PhysicsFitness, ProxyFitness
+from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
     BEGIN_STATION,
     DEFAULT_STATION_LENGTH,

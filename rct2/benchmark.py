@@ -170,10 +170,8 @@ def evaluate_result(
             segments, max_width=max_width, max_depth=max_depth,
         )
     else:
-        from rct2.fitness import NO_MINIMUM_ELEVATION
-
         check = construction.validate_construction(
-            segments, min_elevation=NO_MINIMUM_ELEVATION,
+            segments, min_elevation=construction.NO_MINIMUM_ELEVATION,
         )
     fit = None if site is None else best_fit(site, segments)
     stats = physics.simulate(segments)
@@ -200,7 +198,7 @@ def evaluate_result(
         ported_excitement=excitement,
         ported_intensity=intensity,
         ported_nausea=nausea,
-        site=site_name if site is not None else None,
+        site=site_name,
         fits_site=None if fit is None else fit.fits,
         site_violations=None if fit is None else fit.total,
     )
@@ -239,17 +237,18 @@ def canned_sites() -> dict[str, Site]:
     - `downhill`: a 22 by 30 field whose ground falls away ahead of the anchor.
     """
     width, depth = 22, 30
+    l_width = 20
 
-    l_rows = []
-    for y in range(depth):
-        l_rows.append("".join("#" if (x >= 12 and y >= 14) else "." for x in range(20)))
+    l_rows = [
+        "".join("#" if (x >= 12 and y >= 14) else "." for x in range(l_width))
+        for y in range(depth)
+    ]
     l_shape = Site.from_rows(l_rows, anchor=(6, 6))
 
-    centre_rows = []
-    for y in range(depth):
-        centre_rows.append("".join(
-            "#" if (9 <= x < 13 and 13 <= y < 17) else "." for x in range(width)
-        ))
+    centre_rows = [
+        "".join("#" if (9 <= x < 13 and 13 <= y < 17) else "." for x in range(width))
+        for y in range(depth)
+    ]
     blocked_centre = Site.from_rows(centre_rows, anchor=(8, 6))
 
     heights = [[max(0, 6 - y // 4) for _ in range(width)] for y in range(depth)]

@@ -502,9 +502,9 @@ class TestStoringASite:
         stored = runrecord.run_dir(run_id) / "site.json"
         assert record["request"]["site"] == str(stored)
         original.unlink()  # the copy survives the original going away
-        assert runrecord.site_from_request(record["request"]) == site
+        assert runrecord.site_from_path(record["request"]["site"]) == site
 
     def test_a_missing_or_unreadable_site_is_none_not_an_error(self, tmp_path):
-        assert runrecord.site_from_request({}) is None
-        assert runrecord.site_from_request({"site": None}) is None
-        assert runrecord.site_from_request({"site": str(tmp_path / "gone.json")}) is None
+        assert runrecord.site_from_path(None) is None
+        assert runrecord.site_from_path("") is None
+        assert runrecord.site_from_path(str(tmp_path / "gone.json")) is None

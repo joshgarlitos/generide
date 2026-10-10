@@ -154,7 +154,7 @@ def _summary(
     max_depth: Optional[int],
     site_path: Optional[str] = None,
 ):
-    site = runrecord.site_from_request({"site": site_path})
+    site = runrecord.site_from_path(site_path)
     return runrecord.ride_summary(list(segments), max_width, max_depth, site=site)
 
 
