@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from rct2.construction import DEFAULT_STATION_LENGTH, MIN_STATION_LENGTH
+from rct2.site import Site, SiteError
 
 ESTIMATE_NOTE = (
     "Targets aim at generide's own rating estimates, not the game's real "
@@ -44,6 +45,7 @@ class Setting:
     choices: Tuple[str, ...] = ()
     unit: str = ""
     note: str = ""
+    suffix: str = ".td6"  # for a "path" setting: the file type it must be
 
     @property
     def dest(self) -> str:
@@ -164,6 +166,16 @@ SETTINGS: Tuple[Setting, ...] = (
         help=(
             "A saved design file to start from instead of a generated loop. "
             "Enter the full path of a file ending in .td6."
+        ),
+        default=None, cli_default=None,
+    ),
+    Setting(
+        key="site", flag="--site", kind="path", group="advanced", suffix=".json",
+        label="Site file",
+        help=(
+            "A saved site to fit the ride into: which tiles are free, how high the "
+            "ground is, and where the first station piece goes. It replaces the "
+            "footprint width and depth. Enter the full path of a file ending in .json."
         ),
         default=None, cli_default=None,
     ),
@@ -310,12 +322,17 @@ def validate(raw_values: Dict[str, Any]) -> Validation:
         elif s.kind == "path":
             value, err = str(raw).strip(), None
             path = Path(value).expanduser()
-            if path.suffix.lower() != ".td6" or not path.is_file():
-                err = f"{s.label} must be an existing .td6 file; {value} is not one."
+            if path.suffix.lower() != s.suffix or not path.is_file():
+                err = f"{s.label} must be an existing {s.suffix} file; {value} is not one."
             else:
                 # Absolute, because a run started from the page executes in
                 # its own run folder, where a relative path means nothing.
                 value = str(path.resolve())
+                if s.key == "site":
+                    try:
+                        Site.load(path)
+                    except SiteError as exc:
+                        err = str(exc)
         else:  # pragma: no cover - table entries are fixed above
             raise ValueError(f"unknown setting kind {s.kind}")
         if err:

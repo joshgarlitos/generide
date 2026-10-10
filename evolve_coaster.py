@@ -402,6 +402,8 @@ def main():
         except FileExistsError:
             print(f"Error: a saved run already has the id {args.run_id}", file=sys.stderr)
             sys.exit(1)
+        if site is not None:
+            runrecord.save_site(run_id, site)
         print(f"Run record: {runrecord.run_dir(run_id)}")
 
     best_logged = []
@@ -545,7 +547,9 @@ def main():
 
     summary = None
     if run_id is not None:
-        summary = runrecord.ride_summary(best.segments, args.max_width, args.max_depth)
+        summary = runrecord.ride_summary(
+            best.segments, args.max_width, args.max_depth, site=site,
+        )
         summary.update(
             fitness=best.fitness,
             stopped_early=bool(stop_requested),

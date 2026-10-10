@@ -148,8 +148,14 @@ def _json_response(status: int, payload: Any) -> Response:
 
 
 @lru_cache(maxsize=256)
-def _summary(segments: Tuple[int, ...], max_width: Optional[int], max_depth: Optional[int]):
-    return runrecord.ride_summary(list(segments), max_width, max_depth)
+def _summary(
+    segments: Tuple[int, ...],
+    max_width: Optional[int],
+    max_depth: Optional[int],
+    site_path: Optional[str] = None,
+):
+    site = runrecord.site_from_request({"site": site_path})
+    return runrecord.ride_summary(list(segments), max_width, max_depth, site=site)
 
 
 def _epoch(stamp: Optional[str]) -> Optional[float]:
@@ -198,6 +204,7 @@ def _best_summary(run: runrecord.Run) -> Optional[Dict[str, Any]]:
     latest = run.improvements[-1]
     summary = dict(_summary(
         tuple(latest["segments"]), request.get("max_width"), request.get("max_depth"),
+        request.get("site"),
     ))
     summary["fitness"] = latest.get("fitness")
     summary["generation"] = latest.get("generation")
@@ -230,6 +237,12 @@ def _warnings(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> List[st
     if not best.get("valid", True):
         issues = "; ".join(i["message"] for i in best.get("issues") or [])
         out.append(f"This ride fails construction checks: {issues}.")
+    site = best.get("site")
+    if site and not site.get("fits"):
+        out.append(
+            f"This ride does not fit the site: {site['outside']} tiles outside it, "
+            f"{site['blocked']} on blocked tiles, {site['below_ground']} under the ground."
+        )
     if not best.get("completed", True):
         index = best.get("stall_index")
         where = f" on piece {index + 1}" if isinstance(index, int) else ""
@@ -256,7 +269,8 @@ def _stats_view(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[
         index = st.get("stall_index")
         circuit = f"No, it stalls on piece {index + 1}" if isinstance(index, int) else "No"
     footprint = f"{fp.get('width')} x {fp.get('depth')} tiles"
-    if fp.get("max_width") is not None:
+    site = best.get("site")
+    if site is None and fp.get("max_width") is not None:
         footprint += f" (allowed {fp.get('max_width')} x {fp.get('max_depth')})"
     simulated = [
         ("Top speed", f"{st['max_speed'] * MPH_PER_MS:.0f} mph"),
@@ -271,6 +285,15 @@ def _stats_view(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[
         ("Completes the circuit", circuit),
         ("Footprint", footprint),
     ]
+    if site is not None:
+        left_out = ", ".join(site.get("not_checked") or [])
+        simulated.append((
+            "Fits the site",
+            f"Yes (tiles only; not checked: {left_out})" if site["fits"]
+            else f"No (not checked either way: {left_out})",
+        ))
+        if site.get("place_at"):
+            simulated.append(("Place at", site["place_at"]["text"]))
     game = _game_ratings(record)
     estimated = best.get("estimated") or {}
     ratings = []
