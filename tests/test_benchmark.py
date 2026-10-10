@@ -300,3 +300,127 @@ def test_a_scorer_that_drops_a_track_is_an_error_not_a_silent_shift():
 
     with pytest.raises(ValueError, match="1 judgements for 2 tracks"):
         judge_results(results, scorer=lambda tracks: [_FakeJudged(6.0)])
+
+
+class TestSiteBenchmark:
+    """Fit rate on canned sites, so ways of supplying or searching a site compare on one number."""
+
+    def test_there_are_three_canned_sites_that_hold_the_default_hill_circuit(self):
+        from rct2.benchmark import canned_sites
+        from rct2.generate import create_hill_circuit
+        from rct2.site import best_fit
+
+        sites = canned_sites()
+
+        assert set(sites) == {"l-shape", "blocked-centre", "downhill"}
+        # The hill circuit seed is what the parts search starts from; the
+        # blocked centre is deliberately in its way, the others are not.
+        assert best_fit(sites["l-shape"], create_hill_circuit()).fits
+        assert best_fit(sites["downhill"], create_hill_circuit()).fits
+        assert not best_fit(sites["blocked-centre"], create_hill_circuit()).fits
+
+    def test_a_site_run_records_the_site_and_whether_the_ride_fits(self, real_segments):
+        from rct2.site import Site
+
+        open_site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+        shut_site = Site.from_rows(["#" * 40] * 40, anchor=(10, 10))
+
+        fits = evaluate_result("m", 1, real_segments, 10, site=open_site, site_name="open")
+        shut = evaluate_result("m", 1, real_segments, 10, site=shut_site, site_name="shut")
+        plain = evaluate_result("m", 1, real_segments, 10)
+
+        assert (fits.site, fits.fits_site, fits.site_violations) == ("open", True, 0)
+        assert shut.fits_site is False and shut.site_violations > 0
+        assert (plain.site, plain.fits_site, plain.site_violations) == (None, None, None)
+
+    def test_a_ride_bigger_than_the_old_rectangle_is_valid_against_a_site(self, real_segments):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+
+        result = evaluate_result("m", 1, real_segments, 10, max_width=2, max_depth=2, site=site)
+
+        assert result.valid is True
+
+    def test_the_site_reaches_the_search_fitness(self, monkeypatch):
+        import rct2.benchmark as benchmark
+        from rct2.site import Site
+
+        seen = []
+        real = benchmark._search_fitness
+        monkeypatch.setattr(
+            benchmark, "_search_fitness", lambda site=None: seen.append(site) or real(site)
+        )
+        site = Site.from_rows(["." * 30] * 30, anchor=(8, 8))
+
+        benchmark.run_site_benchmark({"random": method_random}, {"s": site}, [1], 3)
+
+        assert seen == [site]
+
+    def test_a_site_row_differs_from_the_same_seeds_without_the_site(self):
+        from rct2.site import Site
+
+        shut = Site.from_rows(["#" * 30] * 30, anchor=(8, 8))
+
+        with_site = run_benchmark({"random": method_random}, [1, 2], 5)
+        on_site = benchmark_run({"random": method_random}, {"shut": shut}, [1, 2], 5)
+
+        assert all(r.fits_site is None for r in with_site)
+        assert all(r.fits_site is False and r.site == "shut" for r in on_site)
+
+    def test_a_site_nothing_fits_reports_a_fit_rate_of_zero(self):
+        from rct2.benchmark import summarize_sites
+        from rct2.site import Site
+
+        shut = Site.from_rows(["#" * 30] * 30, anchor=(8, 8))
+
+        rows = summarize_sites(benchmark_run({"random": method_random}, {"shut": shut}, [1, 2, 3], 4))
+
+        assert [(r.site, r.method, r.runs, r.fit_rate, r.usable_fit_rate) for r in rows] == [
+            ("shut", "random", 3, 0.0, 0.0)
+        ]
+
+    def test_one_row_per_canned_site_and_method(self):
+        from rct2.benchmark import canned_sites, summarize_sites
+
+        rows = summarize_sites(benchmark_run({"random": method_random}, canned_sites(), [1], 3))
+
+        assert sorted(r.site for r in rows) == ["blocked-centre", "downhill", "l-shape"]
+
+    def test_the_same_seeds_give_the_same_fit_rate_twice(self):
+        from rct2.benchmark import canned_sites, summarize_sites
+
+        def rates():
+            rows = summarize_sites(
+                benchmark_run({"random": method_random}, canned_sites(), [1, 2], 4)
+            )
+            return [(r.site, r.fit_rate, r.usable_fit_rate) for r in rows]
+
+        assert rates() == rates()
+
+    def test_site_runs_do_not_leak_into_the_open_field_summary(self, real_segments):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+        open_run = evaluate_result("m", 1, real_segments, 10)
+        site_run = evaluate_result("m", 1, real_segments, 10, site=site, site_name="open")
+
+        (row,) = summarize([open_run, site_run])
+
+        assert row.runs == 1
+
+    def test_site_fields_survive_a_save_and_load(self, tmp_path, real_segments):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+        result = evaluate_result("m", 1, real_segments, 10, site=site, site_name="open")
+
+        save_results([result], tmp_path / "r.json")
+
+        assert load_results(tmp_path / "r.json") == [result]
+
+
+def benchmark_run(methods, sites, seeds, evaluations):
+    from rct2.benchmark import run_site_benchmark
+
+    return run_site_benchmark(methods, sites, seeds, evaluations)

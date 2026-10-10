@@ -18,7 +18,8 @@ import argparse
 from pathlib import Path
 
 from rct2.benchmark import (
-    METHODS, judge_results, rescore, run_benchmark, save_results, summarize,
+    METHODS, canned_sites, judge_results, rescore, run_benchmark, run_site_benchmark,
+    save_results, summarize, summarize_sites,
 )
 
 
@@ -73,6 +74,14 @@ def main():
     )
 
     parser.add_argument(
+        "--sites",
+        action="store_true",
+        help="Also run every method against the canned sites (an L, a blocked "
+             "centre, a downhill slope) and report how often the best ride fits "
+             "each. Fit here is the tile check alone: station flatness, paths and "
+             "clearance above ground are not checked.",
+    )
+    parser.add_argument(
         "--oracle",
         action="store_true",
         help="After the run, judge the winning tracks in a real headless OpenRCT2 "
@@ -126,11 +135,27 @@ def main():
     if args.oracle:
         print("Judging the results in a real headless OpenRCT2...")
         results = judge_results(results, top_n=args.oracle_top)
+    site_results = []
+    if args.sites:
+        print("Running the canned sites...")
+        site_results = run_site_benchmark(methods, canned_sites(), seeds, args.evaluations)
+        results = results + site_results
     save_results(results, args.output)
     print(f"Saved {len(results)} results to {args.output}")
     print()
 
     print_summary(results)
+    if site_results:
+        print()
+        print_site_summary(site_results)
+
+
+def print_site_summary(results):
+    """How often each method's best ride fits each canned site."""
+    print(f"{'site':<16} {'method':<10} {'runs':>5} {'fits':>7} {'fits + usable':>14}")
+    for row in summarize_sites(results):
+        print(f"{row.site:<16} {row.method:<10} {row.runs:>5} {row.fit_rate:>7.0%} "
+              f"{row.usable_fit_rate:>14.0%}")
 
 
 def print_summary(results):

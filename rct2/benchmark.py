@@ -23,11 +23,13 @@ import json
 import random
 import statistics
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Callable, Optional
 
 from rct2 import construction, physics, ratings
 from rct2.geometry import Position, track_bounds
+from rct2.site import Site, best_fit
 
 
 @dataclass
@@ -57,6 +59,11 @@ class RunResult:
     real_excitement: Optional[float] = None
     real_intensity: Optional[float] = None
     real_nausea: Optional[float] = None
+    # Set only for runs against a site. `fits_site` is the tile check alone:
+    # station flatness, paths and clearance above ground are not checked.
+    site: Optional[str] = None
+    fits_site: Optional[bool] = None
+    site_violations: Optional[int] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -69,7 +76,7 @@ class RunResult:
 MethodFn = Callable[[random.Random, int], list[int]]
 
 
-def _search_fitness():
+def _search_fitness(site: Optional[Site] = None):
     """The in-loop scorer every method searches against.
 
     Ported ratings, per docs/devlog.md (2026-08-08): scoring evolution with
@@ -79,16 +86,18 @@ def _search_fitness():
     is not a method that produces better rides.
     """
     from rct2.fitness import PhysicsFitness
-    return PhysicsFitness(ported_ratings=True)
+    return PhysicsFitness(ported_ratings=True, site=site)
 
 
-def method_random(rng: random.Random, max_evaluations: int) -> list[int]:
+def method_random(
+    rng: random.Random, max_evaluations: int, site: Optional[Site] = None,
+) -> list[int]:
     """Rung 0: random legal tracks, keep the best. The baseline every other
     method has to clear -- if a method can't beat this, that's the finding.
     """
     from rct2.mutations import generate_random_track
 
-    fitness_fn = _search_fitness()
+    fitness_fn = _search_fitness(site)
     best_segments = generate_random_track(rng)
     best_score = fitness_fn.evaluate(best_segments)
     for _ in range(max_evaluations - 1):
@@ -102,6 +111,7 @@ def method_random(rng: random.Random, max_evaluations: int) -> list[int]:
 
 def method_ga(
     rng: random.Random, max_evaluations: int, population_size: int = 40,
+    site: Optional[Site] = None,
 ) -> list[int]:
     """Rung 1: the current genetic algorithm. The baseline to beat."""
     from rct2.evolution import evolve
@@ -109,7 +119,7 @@ def method_ga(
 
     generations = max(1, (max_evaluations - population_size) // population_size)
     stats = evolve(
-        create_simple_circuit(), rng, fitness_fn=_search_fitness(),
+        create_simple_circuit(), rng, fitness_fn=_search_fitness(site),
         population_size=population_size, generations=generations,
     )
     return stats.best_individual.segments
@@ -117,6 +127,7 @@ def method_ga(
 
 def method_ga_parts(
     rng: random.Random, max_evaluations: int, population_size: int = 40,
+    site: Optional[Site] = None,
 ) -> list[int]:
     """Rung 2: the genetic algorithm with a part-based genome, so crossover
     can never slice a slope run or banked turn in half (see
@@ -129,7 +140,7 @@ def method_ga_parts(
 
     generations = max(1, (max_evaluations - population_size) // population_size)
     stats = evolve_parts(
-        create_hill_circuit(), rng, fitness_fn=_search_fitness(),
+        create_hill_circuit(), rng, fitness_fn=_search_fitness(site),
         population_size=population_size, generations=generations,
     )
     return stats.best_individual.segments
@@ -145,6 +156,7 @@ METHODS: dict[str, MethodFn] = {
 def evaluate_result(
     method: str, seed: int, segments: list[int], evaluations_used: int,
     max_width: int = 30, max_depth: int = 30,
+    site: Optional[Site] = None, site_name: Optional[str] = None,
 ) -> RunResult:
     """Score a finished track the same way regardless of which method produced it.
 
@@ -153,9 +165,17 @@ def evaluate_result(
     circuit. Physical stats (drop count, speed, length) are recorded either
     way, since they're useful for diagnosing *why* a method failed.
     """
-    check = construction.validate_construction(
-        segments, max_width=max_width, max_depth=max_depth,
-    )
+    if site is None:
+        check = construction.validate_construction(
+            segments, max_width=max_width, max_depth=max_depth,
+        )
+    else:
+        from rct2.fitness import NO_MINIMUM_ELEVATION
+
+        check = construction.validate_construction(
+            segments, min_elevation=NO_MINIMUM_ELEVATION,
+        )
+    fit = None if site is None else best_fit(site, segments)
     stats = physics.simulate(segments)
     bounds = track_bounds(Position(), segments)
 
@@ -180,6 +200,9 @@ def evaluate_result(
         ported_excitement=excitement,
         ported_intensity=intensity,
         ported_nausea=nausea,
+        site=site_name if site is not None else None,
+        fits_site=None if fit is None else fit.fits,
+        site_violations=None if fit is None else fit.total,
     )
 
 
@@ -206,6 +229,91 @@ def run_benchmark(
                 evaluate_result(name, seed, segments, max_evaluations, max_width, max_depth)
             )
     return results
+
+
+def canned_sites() -> dict[str, Site]:
+    """Three sites to compare methods on, each sized for rides the default budget builds.
+
+    - `l-shape`: a 20 by 30 field with its far right corner cut away.
+    - `blocked-centre`: a 22 by 30 field with a 4 by 4 block in the middle.
+    - `downhill`: a 22 by 30 field whose ground falls away ahead of the anchor.
+    """
+    width, depth = 22, 30
+
+    l_rows = []
+    for y in range(depth):
+        l_rows.append("".join("#" if (x >= 12 and y >= 14) else "." for x in range(20)))
+    l_shape = Site.from_rows(l_rows, anchor=(6, 6))
+
+    centre_rows = []
+    for y in range(depth):
+        centre_rows.append("".join(
+            "#" if (9 <= x < 13 and 13 <= y < 17) else "." for x in range(width)
+        ))
+    blocked_centre = Site.from_rows(centre_rows, anchor=(8, 6))
+
+    heights = [[max(0, 6 - y // 4) for _ in range(width)] for y in range(depth)]
+    downhill = Site.from_rows(["." * width] * depth, anchor=(8, 2), heights=heights)
+
+    return {"l-shape": l_shape, "blocked-centre": blocked_centre, "downhill": downhill}
+
+
+def run_site_benchmark(
+    methods: dict[str, MethodFn],
+    sites: dict[str, Site],
+    seeds: list[int],
+    max_evaluations: int,
+) -> list[RunResult]:
+    """Run every method against every canned site and seed at one evaluation budget.
+
+    Each method is handed the site, so the search is scored against it (the
+    benchmark builds its fitness directly, not through a request). Results
+    carry the site's name and whether the best ride fits it.
+    """
+    results = []
+    for site_name, site in sites.items():
+        for name, method_fn in methods.items():
+            bound = partial(method_fn, site=site)
+            for seed in seeds:
+                rng = random.Random(seed)
+                segments = bound(rng, max_evaluations)
+                results.append(evaluate_result(
+                    name, seed, segments, max_evaluations,
+                    site=site, site_name=site_name,
+                ))
+    return results
+
+
+@dataclass
+class SiteSummary:
+    site: str
+    method: str
+    runs: int
+    # Share of runs whose best ride passes the tile check. Not a promise the
+    # ride can be built there: flatness and paths are not checked.
+    fit_rate: float
+    # Share that also pass construction and complete the circuit.
+    usable_fit_rate: float
+
+
+def summarize_sites(results: list[RunResult]) -> list[SiteSummary]:
+    """One row per site and method: how often the search found a ride that fits."""
+    groups: dict[tuple[str, str], list[RunResult]] = {}
+    for r in results:
+        if r.site is not None:
+            groups.setdefault((r.site, r.method), []).append(r)
+    rows = []
+    for (site, method), rs in groups.items():
+        rows.append(SiteSummary(
+            site=site,
+            method=method,
+            runs=len(rs),
+            fit_rate=sum(1 for r in rs if r.fits_site) / len(rs),
+            usable_fit_rate=sum(
+                1 for r in rs if r.fits_site and r.valid and r.completed
+            ) / len(rs),
+        ))
+    return rows
 
 
 def save_results(results: list[RunResult], path: Path) -> None:
@@ -273,6 +381,8 @@ def summarize(results: list[RunResult]) -> list[MethodSummary]:
     """
     by_method: dict[str, list[RunResult]] = {}
     for r in results:
+        if r.site is not None:
+            continue  # site runs are reported by summarize_sites, never mixed in here
         by_method.setdefault(r.method, []).append(r)
 
     summaries = []

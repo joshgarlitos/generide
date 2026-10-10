@@ -97,6 +97,10 @@ Stores immutable geometry for the Mine Train segment types currently supported. 
 
 Provides position advancement, complete-track tracing, occupancy, bounds, collision reporting, and `validate_track()`. Validation returns structured issue codes rather than a bare boolean.
 
+### `rct2/site.py`
+
+The space a ride has to fit, and the one check that says whether it does. A `Site` is a grid of usable and blocked tiles, a ground height per tile, and an anchor tile for the ride's first station piece, saved as a small JSON file. `fit_at` maps a ride's tiles onto it through the anchor and a heading and counts tiles outside the site, on blocked tiles, and under the local ground; the station's entrance and exit count too, on whichever side suits better. `best_fit` tries all four headings and takes the one that breaks the site least. It checks tiles only: station flatness, the path to the entrance and clearance above ground are not checked, and every verdict says so. Fitness, the run's result summary and the benchmark all call this module, the way they call `construction.py` for buildability.
+
 ### `rct2/trackpath.py`
 
 Turns a segment list into one centerline per piece, in tile coordinates for x and y and height units for z. A piece runs from the midpoint of its entry edge to the midpoint of the next piece's entry edge. Turns are circular arcs, with the radii `physics.segment_length` uses, and a slope transition bends from the gradient before it to the gradient after it. The isometric picture draws its rails along these lines and the train runs on them, so the train is always on the track it is drawn on.
@@ -117,7 +121,7 @@ It also holds the part-based genome (`segments_to_parts`, `mutate_parts`, `cross
 
 ### `rct2/fitness.py`
 
-Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus the proxy and physics fitness classes. `WeightedProxyFitness` holds the entire proxy scoring implementation with every reward and penalty exposed as a constructor weight, and `ProxyFitness` is that class with the tuned defaults, so there is only one copy of the scoring rules to keep correct. The proxy rewards geometric qualities and penalizes tracks that are invalid, impractical, or would stall. It does not reproduce OpenRCT2 ride ratings; `PhysicsFitness` scores approximate ones from `physics.py`, but those weights are uncalibrated.
+Contains reusable checks for slope state, bank state, turns, elevation, and estimated energy, plus the proxy and physics fitness classes. `WeightedProxyFitness` holds the entire proxy scoring implementation with every reward and penalty exposed as a constructor weight, and `ProxyFitness` is that class with the tuned defaults, so there is only one copy of the scoring rules to keep correct. The proxy rewards geometric qualities and penalizes tracks that are invalid, impractical, or would stall. It does not reproduce OpenRCT2 ride ratings; `PhysicsFitness` scores approximate ones from `physics.py`, but those weights are uncalibrated. Both fitness classes take an optional `Site` (carried by `CoasterRequest`). With one, the width, depth and minimum-height checks are replaced by capped, graded penalties for site violations; with none, the old path runs unchanged. See "A site replaces the footprint" below.
 
 ### `rct2/physics.py`
 
@@ -170,6 +174,8 @@ Extracts stats and game-assigned ratings from real, player-made `.td6` files, fo
 So completability lives outside `.valid`. `rct2/physics.py` is the authority — it walks real arc lengths per segment. `construction.energy_stall_index` is a cheap conservative screen carrying the same energy accounting in RCT2 height units, for callers like `ProxyFitness` that must stay physics-free. The screen exists to be pessimistic in the safe direction: over a corpus of evolved, random, and fixture tracks it never passed a track the simulation stalls, at the cost of rejecting a few the simulation completes.
 
 The two models cannot import each other (`physics` depends on `construction`), so a test pins the shared constants across the boundary rather than letting them drift.
+
+**A site replaces the footprint.** The footprint rectangle was always a stand-in for "the space this ride has to fit". A site says it directly: which tiles are free, how high the ground is, where the station starts. The penalties are graded and capped, not hard rules, for the same reason the footprint's are: a hard rule gives evolution nothing to climb on a tight site, and an uncapped penalty on a hard site reproduces the genome bloat in `docs/solutions/performance-issues/genome-bloat-from-uncapped-fitness-rewards.md`. Each cap sits above the most a ride can earn from its rewards, so a ride that fits always beats an equally good one that does not. The user picks the anchor and the tool tries all four headings, because a poor heading guess would make a workable site look unfit. The first source of a site is a file; reading one from a saved park is a spike (`docs/park-read-spike.md`).
 
 ## Known limitations
 
