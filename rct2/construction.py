@@ -507,6 +507,10 @@ def estimate_energy_violations(
     return len(_energy_issues(segments, resolved)), check_first_hill_has_lift(segments, resolved)
 
 
+# A floor no ride reaches, for when a site, not the flat datum, decides what is too low.
+NO_MINIMUM_ELEVATION = -10**9
+
+
 def validate_construction(
     segments: list[int],
     *,
@@ -532,3 +536,21 @@ def validate_construction(
     issues.extend(_lift_steepness_issues(segments, resolved))
     issues.extend(_energy_issues(segments, resolved))
     return ConstructionResult(tuple(issues), geometry, frozenset(resolved))
+
+
+def validate_for_request(
+    segments: list[int],
+    *,
+    site=None,
+    max_width: Optional[int] = None,
+    max_depth: Optional[int] = None,
+) -> ConstructionResult:
+    """Construction validity for a request: the site's space, or the footprint rectangle.
+
+    With a site, the site decides what is too big or too low, so the width,
+    depth and minimum-elevation checks are left out. Without one, this is
+    `validate_construction` with the rectangle, unchanged.
+    """
+    if site is None:
+        return validate_construction(segments, max_width=max_width, max_depth=max_depth)
+    return validate_construction(segments, min_elevation=NO_MINIMUM_ELEVATION)

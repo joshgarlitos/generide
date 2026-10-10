@@ -419,3 +419,92 @@ class TestStagnation:
 
     def test_empty_progress_is_not_stagnant(self):
         assert stagnation([], 60) is None
+
+
+class TestSiteInTheSummary:
+    """The result view says whether a ride fits its site, and where to put it."""
+
+    def _ride(self):
+        from rct2.generate import create_simple_circuit
+
+        return create_simple_circuit()
+
+    def _site(self, rows=None, anchor=(3, 4)):
+        from rct2.site import Site
+
+        return Site.from_rows(rows or ["." * 10] * 14, anchor=anchor)
+
+    def test_a_ride_that_fits_says_so_and_where_to_place_it(self):
+        summary = runrecord.ride_summary(self._ride(), site=self._site())
+
+        site = summary["site"]
+        assert site["fits"] is True
+        assert (site["outside"], site["blocked"], site["below_ground"]) == (0, 0, 0)
+        assert site["place_at"]["tile"] == [3, 4]
+        assert site["place_at"]["heading"] == "north"
+        assert "facing north" in site["place_at"]["text"]
+
+    def test_the_verdict_names_what_it_did_not_check(self):
+        site = runrecord.ride_summary(self._ride(), site=self._site())["site"]
+
+        assert "station flatness" in site["not_checked"]
+        assert "path connection" in site["not_checked"]
+        assert "clearance above ground" in site["not_checked"]
+
+    def test_a_ride_that_does_not_fit_has_counts_and_no_place_at(self):
+        # Covers AE4: every tile blocked.
+        site = runrecord.ride_summary(self._ride(), site=self._site(["#" * 10] * 14))["site"]
+
+        assert site["fits"] is False
+        assert site["blocked"] > 0
+        assert site["place_at"] is None
+
+    def test_the_heading_that_fits_is_reported(self):
+        from rct2.geometry import Heading
+        from rct2.site import site_coords
+
+        ride = self._ride()
+        needed = {site_coords((2, 6), Heading.EAST, x, y) for x in range(-1, 4) for y in range(-2, 8)}
+        width = max(x for x, _ in needed) + 2
+        depth = max(y for _, y in needed) + 2
+        rows = ["".join("." if (x, y) in needed else "#" for x in range(width)) for y in range(depth)]
+
+        site = runrecord.ride_summary(ride, site=self._site(rows, anchor=(2, 6)))["site"]
+
+        assert site["fits"] is True
+        assert site["place_at"]["heading"] == "east"
+
+    def test_a_ride_bigger_than_the_old_rectangle_is_valid_when_it_fits_the_site(self):
+        summary = runrecord.ride_summary(
+            self._ride(), max_width=2, max_depth=2, site=self._site()
+        )
+
+        assert summary["valid"] is True
+
+    def test_without_a_site_the_summary_has_no_site_entry(self):
+        assert "site" not in runrecord.ride_summary(self._ride())
+
+
+class TestStoringASite:
+    def test_the_site_is_copied_into_the_run_and_the_request_points_at_the_copy(self, tmp_path):
+        from rct2.site import Site
+
+        site = Site.from_rows(["..", ".."], anchor=(0, 0))
+        original = tmp_path / "mine.json"
+        site.save(original)
+        run_id = create_run(
+            seed=1, request={"site": str(original)}, settings=[], generations=1, now=CLOCK
+        )
+
+        runrecord.save_site(run_id, site)
+
+        record = load_run(run_id).record
+        stored = runrecord.run_dir(run_id) / "site.json"
+        assert record["request"]["site"] == str(stored)
+        original.unlink()  # the copy survives the original going away
+        assert runrecord.site_from_path(record["request"]["site"]) == site
+
+    def test_a_missing_or_unreadable_site_is_none_not_an_error(self, tmp_path):
+        assert runrecord.site_from_path(None) is None
+        assert runrecord.site_from_path("") is None
+        assert runrecord.site_from_path(str(tmp_path / "gone.json")) is None

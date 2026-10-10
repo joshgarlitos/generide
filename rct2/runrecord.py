@@ -42,6 +42,7 @@ PROGRESS_FILE = "progress.jsonl"
 IMPROVEMENTS_FILE = "improvements.jsonl"
 BEST_TD6 = "best.td6"
 NAME_FILE = "name.txt"
+SITE_FILE = "site.json"
 
 # Runs are named the way the game names a new ride: the ride type and the
 # lowest number not already taken. generide only builds Mine Trains.
@@ -263,6 +264,33 @@ def append_progress(run_id: str, entry: Dict[str, Any]) -> None:
 
 def append_improvement(run_id: str, entry: Dict[str, Any]) -> None:
     _append_line(run_dir(run_id) / IMPROVEMENTS_FILE, entry)
+
+
+def save_site(run_id: str, site) -> None:
+    """Keep a copy of the run's site in its folder and point the request at it.
+
+    The copy is what a rerun starts from, so the run stays repeatable even if
+    the file it was given is edited or deleted.
+    """
+    path = run_dir(run_id) / SITE_FILE
+    site.save(path)
+
+    def point_at_copy(record):
+        record.setdefault("request", {})["site"] = str(path)
+
+    update_record(run_id, point_at_copy)
+
+
+def site_from_path(path: Optional[str]):
+    """The site saved at `path`, or None when there is no path or it cannot be read."""
+    from rct2.site import Site, SiteError
+
+    if not path:
+        return None
+    try:
+        return Site.load(Path(path))
+    except SiteError:
+        return None
 
 
 def update_record(run_id: str, change) -> Dict[str, Any]:
@@ -588,27 +616,59 @@ def display_name(record: Dict[str, Any]) -> str:
     return f"{stamp}, seed {record.get('seed')}"
 
 
+# What the fit verdict leaves out. The site check counts tiles only.
+SITE_NOT_CHECKED = ("station flatness", "path connection", "clearance above ground")
+
+
+def _site_verdict(site, segments: List[int]) -> Dict[str, Any]:
+    from rct2.site import best_fit
+
+    fit = best_fit(site, segments)
+    heading = fit.heading.name.lower()
+    place_at = None
+    if fit.fits:
+        x, y = site.anchor
+        place_at = {
+            "tile": [x, y],
+            "heading": heading,
+            "text": f"Place the first station piece on tile {x}, {y}, facing {heading}.",
+        }
+    return {
+        "fits": fit.fits,
+        "heading": heading,
+        "outside": fit.outside,
+        "blocked": fit.blocked,
+        "below_ground": fit.below_ground,
+        "place_at": place_at,
+        "not_checked": list(SITE_NOT_CHECKED),
+    }
+
+
 def ride_summary(
     segments: List[int],
     max_width: Optional[int] = None,
     max_depth: Optional[int] = None,
+    site=None,
 ) -> Dict[str, Any]:
     """What the result view shows for a track: validity, stats, estimates.
 
     Everything here is generide's own model, which is not calibrated against
     the game, so every rating lands under "estimated" and never beside a
     game-checked number without that label.
+
+    With a site, the site replaces the width and depth as the space the ride
+    must fit, and the summary says whether it does (`site`).
     """
     from rct2 import construction, physics, render
 
-    validation = construction.validate_construction(
-        segments, max_width=max_width, max_depth=max_depth,
+    validation = construction.validate_for_request(
+        segments, site=site, max_width=max_width, max_depth=max_depth,
     )
     lifts = set(validation.lift_indices)
     stats = physics.simulate(segments, lift_indices=lifts)
     ratings = physics.rate(stats)
     plan = render.plan_track(segments)
-    return {
+    summary = {
         "segments": len(segments),
         "valid": validation.valid,
         "issues": [{"code": i.code, "message": i.message} for i in validation.issues],
@@ -624,6 +684,9 @@ def ride_summary(
             "max_depth": max_depth,
         },
     }
+    if site is not None:
+        summary["site"] = _site_verdict(site, segments)
+    return summary
 
 
 def time_remaining(progress: List[Dict[str, Any]], generations_planned: int) -> Optional[float]:

@@ -189,6 +189,42 @@ class TestRunRecord:
         assert result["stats"]["ride_length"] > 0
         assert str(run.directory) in capsys.readouterr().out
 
+    def test_a_run_with_a_site_keeps_a_copy_and_says_whether_the_ride_fits(
+        self, monkeypatch, tmp_path
+    ):
+        from rct2.site import Site
+
+        given = tmp_path / "given.json"
+        Site.from_rows(["." * 24] * 34, anchor=(6, 8)).save(given)
+
+        _real_cli(monkeypatch, tmp_path, "-g", "3", "-p", "6", "--rng-seed", "4",
+                  "--site", str(given))
+
+        run = _only_run()
+        stored = run.directory / "site.json"
+        assert run.record["request"]["site"] == str(stored)
+        assert Site.load(stored) == Site.load(given)
+        given.unlink()  # the copy keeps the run repeatable
+        assert Site.load(stored)
+        verdict = run.record["result"]["site"]
+        assert set(verdict) >= {"fits", "heading", "outside", "blocked", "below_ground", "place_at"}
+
+    def test_covers_ae4_a_site_nothing_fits_says_so_and_gives_no_place_at(
+        self, monkeypatch, tmp_path
+    ):
+        from rct2.site import Site
+
+        given = tmp_path / "nothing.json"
+        Site.from_rows(["#" * 24] * 34, anchor=(6, 8)).save(given)
+
+        _real_cli(monkeypatch, tmp_path, "-g", "3", "-p", "6", "--rng-seed", "4",
+                  "--site", str(given))
+
+        verdict = _only_run().record["result"]["site"]
+        assert verdict["fits"] is False
+        assert verdict["blocked"] > 0
+        assert verdict["place_at"] is None
+
     def test_a_blank_seed_is_recorded_as_the_one_used(self, monkeypatch, tmp_path, capsys):
         _real_cli(monkeypatch, tmp_path, "-g", "2", "-p", "4")
         out = capsys.readouterr().out
@@ -327,3 +363,61 @@ class TestRunRecord:
         assert run_.improvements
         assert not (run_.directory / "best.td6").exists()
         assert not (tmp_path / "out.td6").exists()
+
+
+class TestSiteFlag:
+    """A site given on the command line reaches whichever fitness class --fitness selects."""
+
+    def _write_site(self, tmp_path):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 12] * 20, anchor=(4, 4))
+        path = tmp_path / "site.json"
+        site.save(path)
+        return site, path
+
+    @pytest.mark.parametrize("fitness_args", [[], ["--fitness", "physics"]])
+    def test_the_site_reaches_the_fitness_function(self, monkeypatch, tmp_path, fitness_args):
+        site, path = self._write_site(tmp_path)
+
+        captured, _ = _run_cli(
+            monkeypatch, tmp_path, ["--genome", "parts", "--site", str(path), *fitness_args]
+        )
+
+        assert captured["fitness_fn"].site == site
+
+    def test_without_the_flag_no_site_is_applied(self, monkeypatch, tmp_path):
+        captured, _ = _run_cli(monkeypatch, tmp_path, ["--genome", "parts"])
+
+        assert captured["fitness_fn"].site is None
+
+    def test_a_ride_bigger_than_the_old_rectangle_is_still_exported_when_it_fits_the_site(
+        self, monkeypatch, tmp_path
+    ):
+        # The default rectangle is 30 by 30; the hill circuit is far smaller, so shrink it.
+        site, path = self._write_site(tmp_path)
+
+        captured, output_path = _run_cli(
+            monkeypatch,
+            tmp_path,
+            ["--genome", "parts", "--site", str(path), "--max-width", "2", "--max-depth", "2"],
+        )
+
+        assert output_path.exists()
+
+    def test_a_missing_site_file_stops_before_evolving(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit) as exit_info:
+            _run_cli(monkeypatch, tmp_path, ["--site", str(tmp_path / "nope.json")])
+
+        assert exit_info.value.code == 1
+        assert "site file could not be read" in capsys.readouterr().err
+
+    def test_a_malformed_site_file_is_named_before_a_run_starts(self, monkeypatch, tmp_path, capsys):
+        path = tmp_path / "bad.json"
+        path.write_text('{"version": 1, "rows": [".."], "anchor": [9, 9]}')
+        captured = {}
+
+        with pytest.raises(SystemExit):
+            _run_cli(monkeypatch, tmp_path, ["--site", str(path)])
+
+        assert "anchor" in capsys.readouterr().err

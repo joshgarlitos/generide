@@ -191,3 +191,49 @@ class TestSeedTrackPaths:
         assert values["seed_track"] == str(tmp_path / "seed.td6")
         stored = request_from_args(_parser().parse_args(["--seed", "seed.td6"]))
         assert stored["seed_track"] == str(tmp_path / "seed.td6")
+
+
+class TestSiteSetting:
+    def _site_file(self, tmp_path, rows=None):
+        from rct2.site import Site
+
+        path = tmp_path / "site.json"
+        Site.from_rows(rows or ["." * 8] * 10, anchor=(2, 2)).save(path)
+        return path
+
+    def test_a_valid_site_file_is_stored_absolute_and_reaches_the_cli(self, tmp_path):
+        path = self._site_file(tmp_path)
+
+        values = _valid(site=str(path))
+
+        assert values["site"] == str(path.resolve())
+        parsed = _parser().parse_args(cli_args(values))
+        assert parsed.site == str(path.resolve())
+
+    def test_no_site_is_left_out_of_the_cli_arguments(self):
+        assert "--site" not in cli_args(_valid())
+
+    @pytest.mark.parametrize("name", ["gone.json", "notes.txt"])
+    def test_the_site_must_be_an_existing_json_file(self, name, tmp_path):
+        if name.endswith(".txt"):
+            (tmp_path / name).write_text("x")
+
+        errors = validate({"site": str(tmp_path / name)}).errors
+
+        assert "site" in errors and ".json" in errors["site"]
+
+    def test_a_malformed_site_is_rejected_naming_the_problem(self, tmp_path):
+        path = tmp_path / "site.json"
+        path.write_text('{"version": 1, "rows": [".."], "anchor": [9, 9]}')
+
+        errors = validate({"site": str(path)}).errors
+
+        assert "anchor" in errors["site"]
+
+    def test_a_stored_site_round_trips_through_a_rerun(self, tmp_path):
+        path = self._site_file(tmp_path)
+        original = _valid(site=str(path), seed=5)
+        stored = request_from_args(_parser().parse_args(cli_args(original)))
+
+        assert stored["site"] == str(path.resolve())
+        assert cli_args(validate(form_values(stored)).values) == cli_args(original)

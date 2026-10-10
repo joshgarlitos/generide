@@ -744,3 +744,133 @@ class TestRobustness:
         finally:
             server.shutdown()
             server.server_close()
+
+
+def saved_run_with_site(site, seed=6):
+    """A finished run that was given a site, as the CLI leaves it."""
+    ride = td6.load(MANIC_MINER)
+    segments = [e.segment_type for e in ride.elements]
+    home = runrecord.generide_home()
+    home.mkdir(parents=True, exist_ok=True)
+    original = home / "given-site.json"
+    site.save(original)
+    values = settings.validate({"seed": seed, "site": str(original)}).values
+    run_id = runrecord.create_run(
+        seed=seed, request=values, settings=settings.cli_args(values),
+        generations=values["generations"], pid=_dead_pid(),
+    )
+    runrecord.save_site(run_id, site)
+    runrecord.append_improvement(run_id, {"generation": 1, "time": time.time(), "fitness": 1.0,
+                                          "segments": segments})
+    summary = runrecord.ride_summary(segments, values["max_width"], values["max_depth"], site=site)
+    summary.update(fitness=1.0, stopped_early=False, exported=True)
+    (runrecord.run_dir(run_id) / "best.td6").write_bytes(MANIC_MINER.read_bytes())
+    runrecord.finish_run(run_id, "completed", generations_run=4, result=summary)
+    return run_id
+
+
+def _site_holding_the_fixture(blocked_everywhere=False):
+    from rct2.geometry import Position, occupied_tiles
+    from rct2.site import Site
+
+    ride = td6.load(MANIC_MINER)
+    segments = [e.segment_type for e in ride.elements]
+    tiles = [(t.x, t.y) for t in occupied_tiles(Position(), segments)] + [(-1, 0), (1, 0)]
+    ox = 2 - min(x for x, _ in tiles)
+    oy = 2 - min(y for _, y in tiles)
+    width = max(x for x, _ in tiles) + ox + 3
+    depth = max(y for _, y in tiles) + oy + 3
+    mark = "#" if blocked_everywhere else "."
+    return Site.from_rows([mark * width] * depth, anchor=(ox, oy))
+
+
+class TestSiteInTheResult:
+    def test_a_ride_that_fits_shows_the_verdict_and_where_to_place_it(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture())
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["best"]["site"]["fits"] is True
+        rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
+        assert rows["Fits the site"].startswith("Yes")
+        assert "station flatness" in rows["Fits the site"]
+        assert rows["Place at"].startswith("Place the first station piece on tile")
+        assert not any("does not fit" in w for w in run["warnings"])
+
+    def test_a_ride_that_does_not_fit_warns_and_offers_no_place_at(self, app):
+        # Covers AE4.
+        run_id = saved_run_with_site(_site_holding_the_fixture(blocked_everywhere=True))
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
+        assert rows["Fits the site"].startswith("No")
+        assert "Place at" not in rows
+        assert any("does not fit the site" in w and "blocked" in w for w in run["warnings"])
+
+    def test_the_footprint_row_does_not_claim_an_allowed_rectangle_with_a_site(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture())
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
+        assert "allowed" not in rows["Footprint"]
+
+    def test_a_run_without_a_site_shows_no_fit_rows(self, app):
+        run_id = saved_run(seed=9)
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        labels = [r["label"] for r in run["stats_view"]["simulated"]]
+        assert "Fits the site" not in labels and "Place at" not in labels
+
+    def test_a_rerun_carries_the_stored_site(self, app):
+        site = _site_holding_the_fixture()
+        run_id = saved_run_with_site(site)
+
+        rerun = call(app, "GET", f"/api/runs/{run_id}/rerun").json()
+
+        stored = Path(rerun["values"]["site"])
+        assert stored.name == "site.json" and stored.parent.name == run_id
+        from rct2.site import Site
+
+        assert Site.load(stored) == site
+
+
+class TestSiteInALiveRun:
+    """A run still going, or ended without a stored result, builds its verdict from its best ride so far."""
+
+    def _live_run(self, site):
+        ride = td6.load(MANIC_MINER)
+        segments = [e.segment_type for e in ride.elements]
+        home = runrecord.generide_home()
+        home.mkdir(parents=True, exist_ok=True)
+        given = home / "given-site.json"
+        site.save(given)
+        values = settings.validate({"seed": 8, "site": str(given)}).values
+        run_id = runrecord.create_run(
+            seed=8, request=values, settings=settings.cli_args(values),
+            generations=values["generations"], pid=_dead_pid(),
+        )
+        runrecord.save_site(run_id, site)
+        runrecord.append_improvement(
+            run_id, {"generation": 1, "time": time.time(), "fitness": 1.0, "segments": segments}
+        )
+        return run_id
+
+    def test_the_best_ride_so_far_shows_the_fit_verdict(self, app):
+        run_id = self._live_run(_site_holding_the_fixture())
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["best"]["site"]["fits"] is True
+        rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
+        assert rows["Fits the site"].startswith("Yes")
+
+    def test_a_site_file_that_cannot_be_read_is_said_not_silently_dropped(self, app):
+        run_id = self._live_run(_site_holding_the_fixture())
+        (runrecord.run_dir(run_id) / "site.json").unlink()
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert any("site file could not be read" in w for w in run["warnings"])
