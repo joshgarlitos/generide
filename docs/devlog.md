@@ -4,6 +4,34 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-10: Designing a ride to fit a space, phase 1
+
+I wanted to point at a space in a park and get a ride that fits it, so the request now carries a site: which tiles are free, how high the ground is, and where the first station piece goes. The plan is `docs/plans/2026-10-09-0326-feat-site-aware-ride-fit-plan.md` and the tracking issue is #78. This is phase 1 of three: the core, plus a spike I have written but not run.
+
+What changed:
+
+- `rct2/site.py` holds the site and the one check for whether a ride fits it: tiles outside the site, on blocked tiles, or under the local ground, with the station's entrance and exit counted on whichever side suits better. The tool tries all four headings and reports the best, so a poor guess at which way the ride faces cannot make a workable space look unfit.
+- Both fitness classes take a site. With one, the width, depth and minimum-height checks are replaced by graded penalties, each kind capped above the most a ride can earn from its rewards. The cap is there for the reason in the genome-bloat note: an uncapped penalty on a hard site would keep rewarding longer rides that try to dodge it.
+- The command line has `--site`, the web form has a Site file setting, the run keeps its own copy of the site, and the result says whether the ride fits, how many tiles broke it, and where to place it. It states what it did not check: station flatness, the path to the entrance, and clearance above ground.
+- With no site, nothing changed. I recorded the fitness scores and a seeded run before touching `fitness.py` and pinned them in tests, and the existing byte-for-byte output digests still pass.
+
+The first fit-rate measurement, from `python run_benchmark.py --sites --methods random ga_parts --seeds 5 --evaluations 800`. "Fits" is the tile check alone; "fits and usable" also needs the ride to build and complete.
+
+| site | method | fits | fits and usable |
+|---|---|---|---|
+| L shape | random | 80% | 0% |
+| L shape | ga_parts | 100% | 100% |
+| blocked centre | random | 80% | 0% |
+| blocked centre | ga_parts | 40% | 40% |
+| downhill | random | 20% | 0% |
+| downhill | ga_parts | 100% | 100% |
+
+Random search "fits" often only because its tracks are tiny, and none of them are usable, so the usable column is the honest one. The weak spot is the blocked centre: the part-based search starts from a hill circuit that runs straight through the block, and 40% over five seeds at 800 evaluations is a low floor. Five seeds per cell is a small sample. The plan has the owner set the floor for this number before phase 2, and a tuning pass (population, generations) comes first if it is too low.
+
+What I have not done: the park-read probe (`tools/park_probe.js`) and its write-up (`docs/park-read-spike.md`) exist, but nothing has run against the real game, so every finding in that document says not run. Whether a saved park can supply a site at all is still the biggest open question, and the place-at wording ("facing east") has not been checked in the game. 834 tests pass.
+
+---
+
 ## 2026-10-06: An isometric view of a ride, with a train
 
 The best ride so far now draws as an isometric picture, from any of four quarter-turn angles, with a train that laps the track at the simulation's speeds. It replaces the top-down plan on the local web UI's run and compare screens and on the in-browser page. The plan is `docs/plans/2026-10-04-1519-feat-isometric-ride-view-plan.md`, and the work is in [#74](https://github.com/joshgarlitos/generide/pull/74).
