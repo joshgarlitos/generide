@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rct2 import physics, render, runrecord, settings, td6
-from rct2.construction import NO_MINIMUM_ELEVATION, default_lift_indices, validate_construction
+from rct2.construction import default_lift_indices, validate_for_request
 from rct2.evolution import evolve, evolve_parts
 from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
@@ -531,13 +531,9 @@ def main():
         )
 
     # Validate the best track
-    if site is None:
-        result = validate_construction(
-            best.segments, max_width=args.max_width, max_depth=args.max_depth,
-        )
-    else:
-        # The site, not the rectangle, says whether the ride is too big or too low.
-        result = validate_construction(best.segments, min_elevation=NO_MINIMUM_ELEVATION)
+    result = validate_for_request(
+        best.segments, site=site, max_width=args.max_width, max_depth=args.max_depth,
+    )
     if result.valid:
         print("  Validation: PASSED")
     else:

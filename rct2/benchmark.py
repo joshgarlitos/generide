@@ -165,14 +165,9 @@ def evaluate_result(
     circuit. Physical stats (drop count, speed, length) are recorded either
     way, since they're useful for diagnosing *why* a method failed.
     """
-    if site is None:
-        check = construction.validate_construction(
-            segments, max_width=max_width, max_depth=max_depth,
-        )
-    else:
-        check = construction.validate_construction(
-            segments, min_elevation=construction.NO_MINIMUM_ELEVATION,
-        )
+    check = construction.validate_for_request(
+        segments, site=site, max_width=max_width, max_depth=max_depth,
+    )
     fit = None if site is None else best_fit(site, segments)
     stats = physics.simulate(segments)
     bounds = track_bounds(Position(), segments)

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, Set, Tuple
 
 from rct2 import construction, physics
-from rct2.construction import NO_MINIMUM_ELEVATION
 from rct2 import ratings as ported_ratings_module
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
@@ -219,17 +218,9 @@ class WeightedProxyFitness:
             Fitness score (higher is better)
         """
         score = 0.0
-        if self.site is None:
-            construction_result = construction.validate_construction(
-                segments,
-                max_width=self.max_width,
-                max_depth=self.max_depth,
-            )
-        else:
-            # The site, not the rectangle, says what is too big or too low.
-            construction_result = construction.validate_construction(
-                segments, min_elevation=NO_MINIMUM_ELEVATION
-            )
+        construction_result = construction.validate_for_request(
+            segments, site=self.site, max_width=self.max_width, max_depth=self.max_depth,
+        )
         if not construction_result.valid:
             score -= self.invalid_construction_penalty
 
@@ -469,6 +460,10 @@ class PhysicsFitness:
         self.site_penalty_per_tile = (
             site_penalty_per_tile if site_penalty_per_tile is not None else validity_weight
         )
+        # The rating reward is excitement * rating_weight, about 100 for a very
+        # exciting ride (excitement near 10), so 20 * validity_weight = 1000
+        # stays an order of magnitude above it. test_fitness pins that a fitting
+        # ride still beats a violating one.
         self.site_penalty_cap_per_kind = (
             site_penalty_cap_per_kind
             if site_penalty_cap_per_kind is not None
@@ -492,16 +487,9 @@ class PhysicsFitness:
     def evaluate(self, segments: list[int]) -> float:
         score = 0.0
 
-        if self.site is None:
-            result = construction.validate_construction(
-                segments,
-                max_width=self.max_width,
-                max_depth=self.max_depth,
-            )
-        else:
-            result = construction.validate_construction(
-                segments, min_elevation=NO_MINIMUM_ELEVATION
-            )
+        result = construction.validate_for_request(
+            segments, site=self.site, max_width=self.max_width, max_depth=self.max_depth,
+        )
         score -= self.validity_weight * len(result.issues)
         if self.site is not None:
             score -= site_penalty(

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from rct2 import construction
+from rct2.generate import calculate_entrance_positions
 from rct2.geometry import _AXES, Heading, Position, occupied_tiles
 
 SITE_VERSION = 1
@@ -36,6 +37,11 @@ HEADINGS: Tuple[Heading, ...] = (Heading.NORTH, Heading.EAST, Heading.SOUTH, Hea
 
 class SiteError(ValueError):
     """A site file or description that cannot be used."""
+
+
+def _is_whole(value: Any) -> bool:
+    """A whole number as JSON writes it: an int, but not a bool, a float or text."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 @dataclass(frozen=True)
@@ -76,15 +82,14 @@ class Site:
         else:
             if len(heights) != len(rows) or any(len(r) != width for r in heights):
                 raise SiteError("The heights must be a grid the same size as the rows.")
-            try:
-                grid = tuple(tuple(int(h) for h in r) for r in heights)
-            except (TypeError, ValueError):
-                raise SiteError("The heights must be whole numbers.") from None
+            if not all(_is_whole(h) for r in heights for h in r):
+                raise SiteError("The heights must be whole numbers.")
+            grid = tuple(tuple(r) for r in heights)
 
-        try:
-            ax, ay = int(anchor[0]), int(anchor[1])
-        except (TypeError, ValueError, IndexError):
-            raise SiteError("The anchor must be two whole numbers, x then y.") from None
+        if not (isinstance(anchor, (list, tuple)) and len(anchor) == 2
+                and all(_is_whole(v) for v in anchor)):
+            raise SiteError("The anchor must be two whole numbers, x then y.")
+        ax, ay = anchor
         if not (0 <= ax < width and 0 <= ay < len(rows)):
             raise SiteError("The anchor must be a tile inside the site.")
         return cls(rows=rows, anchor=(ax, ay), heights=grid)
@@ -162,7 +167,21 @@ def site_coords(anchor: Tuple[int, int], heading: Heading, x: int, y: int) -> Tu
     )
 
 
-def _entrance_side_violations(
+def _entrance_side(segments: List[int]) -> Optional[int]:
+    """Which side of the station the exported ride puts its entrance and exit on.
+
+    +1 is to the right of the ride, -1 to the left. The export picks the side
+    from track geometry alone (`generate.calculate_entrance_positions`), so the
+    check scores that side, not the better of the two: a ride must not be
+    reported as fitting while its entrance lands on a blocked tile.
+    """
+    if not construction.station_length(segments):
+        return None
+    entrance, _ = calculate_entrance_positions(segments)
+    return entrance.x // 32
+
+
+def _entrance_violations(
     site: Site, heading: Heading, side: int, length: int
 ) -> Tuple[int, int]:
     """Outside and blocked counts for the entrance and exit tiles on one side of the station."""
@@ -182,13 +201,16 @@ def _footprint(segments: List[int]) -> List[Tuple[int, int, int]]:
 
 
 def _fit_tiles(
-    site: Site, tiles: Sequence[Tuple[int, int, int]], station: int, heading: Heading
+    site: Site,
+    tiles: Sequence[Tuple[int, int, int]],
+    station: int,
+    side: Optional[int],
+    heading: Heading,
 ) -> SiteFit:
     """Count where a ride's tiles break the site when it faces `heading`.
 
-    The entrance and exit go on whichever side of the station the game
-    chooses from track geometry alone, so both sides are tried and the ride
-    is charged only for the better one.
+    The inline mapping below is `site_coords` unrolled for speed; a test pins
+    the two together.
     """
     forward_x, forward_y, right_x, right_y = _AXES[heading]
     anchor_x, anchor_y = site.anchor
@@ -209,12 +231,10 @@ def _fit_tiles(
             below_ground += 1
 
     outside, blocked = len(outside_tiles), len(blocked_tiles)
-    if station:
-        east = _entrance_side_violations(site, heading, 1, station)
-        west = _entrance_side_violations(site, heading, -1, station)
-        better = min(east, west, key=sum)
-        outside += better[0]
-        blocked += better[1]
+    if side is not None:
+        entrance_outside, entrance_blocked = _entrance_violations(site, heading, side, station)
+        outside += entrance_outside
+        blocked += entrance_blocked
 
     return SiteFit(heading=heading, outside=outside, blocked=blocked, below_ground=below_ground)
 
@@ -222,7 +242,10 @@ def _fit_tiles(
 def fit_at(site: Site, segments: Iterable[int], heading: Heading) -> SiteFit:
     """Count where a ride's tiles break the site when it faces `heading`."""
     segments = list(segments)
-    return _fit_tiles(site, _footprint(segments), construction.station_length(segments), heading)
+    return _fit_tiles(
+        site, _footprint(segments), construction.station_length(segments),
+        _entrance_side(segments), heading,
+    )
 
 
 def best_fit(site: Site, segments: Iterable[int]) -> SiteFit:
@@ -230,14 +253,15 @@ def best_fit(site: Site, segments: Iterable[int]) -> SiteFit:
 
     A tie goes to the first of north, east, south, west, so once a heading
     fits exactly, the rest cannot beat it and are skipped. This runs on every
-    individual in a search, so the ride's tiles are built once.
+    individual in a search, so the ride's tiles and entrance side are found once.
     """
     segments = list(segments)
     tiles = _footprint(segments)
     station = construction.station_length(segments)
+    side = _entrance_side(segments)
     best = None
     for heading in HEADINGS:
-        fit = _fit_tiles(site, tiles, station, heading)
+        fit = _fit_tiles(site, tiles, station, side, heading)
         if best is None or fit.total < best.total:
             best = fit
         if best.total == 0:

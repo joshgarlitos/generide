@@ -150,7 +150,7 @@ flowchart TB
 - **Approach:**
   - Represent tile state (usable, blocked) and ground height per tile and an anchor, with a stable saved form (KTD1).
   - The check maps track-relative tiles into site coordinates through the anchor and a heading (KTD4), then reports violation counts by kind: outside the site, on a blocked tile, below local ground. A second function tries all four headings and returns the one with the fewest violations, taking the first of north, east, south, west on a tie. That is four cheap checks per evaluation.
-  - Include the station's entrance and exit tiles. `calculate_entrance_positions` in `rct2/generate.py` chooses a side from track geometry alone, so the check evaluates both sides and reports a violation only when neither is usable. It computes the entrance once per evaluation, because that helper runs a flood fill.
+  - Include the station's entrance and exit tiles on the side the export puts them. `calculate_entrance_positions` in `rct2/generate.py` chooses that side from track geometry alone, and the written file follows it, so the check scores that side and not the better of the two; otherwise a ride could be reported as fitting while its entrance lands on a blocked tile. The side is found once per evaluation, because that helper runs a flood fill. Making the export choose a free side is deferred.
   - Site heights are absolute and in the same units as track height. The ride's start sits at the anchor tile's ground height (KTD4). Converting from the game's map units waits for U7.
 - **Patterns to follow:** `rct2/construction.py` for the single-answer shape, `ValidationIssue` in `rct2/geometry.py` for violation records.
 - **Test scenarios:**
@@ -159,7 +159,8 @@ flowchart TB
   - A tile on a blocked cell is counted as blocked, once per tile.
   - Track at height 2 over ground of height 4 counts as below ground; the same track over ground of height 0 does not.
   - On a sloped site whose anchor tile has ground height 6, a ride at relative height 0 is level with its anchor and reports no below-ground violation on tiles of height 6 or less.
-  - If the east entrance side is blocked and the west side is free, the ride reports no entrance violation; it reports one when both sides are blocked.
+  - A blocked tile on the side the export uses for the entrance counts as a violation; a blocked tile on the other side does not.
+  - The entrance and exit the export writes sit on tiles the check approved.
   - A heading of east maps the same track to rotated tiles and gives the expected tile set.
   - A ride that fits only when turned east reports no violations and the heading east from the try-all-four function; a ride that fits at no heading reports the heading with the fewest violations.
   - The station entrance tile off the site counts as a violation.

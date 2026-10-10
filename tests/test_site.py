@@ -11,7 +11,7 @@ import pytest
 
 from rct2.generate import create_simple_circuit
 from rct2.geometry import Heading, Position, occupied_tiles
-from rct2.site import Site, SiteError, best_fit, fit_at, site_coords
+from rct2.site import Site, SiteError, SiteFit, best_fit, fit_at, site_coords, site_penalty
 
 RIDE = create_simple_circuit()
 RIDE_TILES = {(t.x, t.y) for t in occupied_tiles(Position(), RIDE)}
@@ -97,20 +97,55 @@ def test_the_ride_starts_at_the_anchor_tiles_ground_height():
     assert fit_at(taller, RIDE, Heading.NORTH).below_ground >= 1
 
 
-def test_a_blocked_entrance_side_is_fine_while_the_other_side_is_free():
-    # West is the side the game would pick; block it. East stays free.
+def test_a_blocked_tile_on_the_side_the_export_uses_is_a_violation():
+    # The export puts this ride's entrance and exit on the west side (x -1), so
+    # a blocked west tile counts even though the east side is free.
     blocked_west = [world(t) for t in ENTRANCE_TILES]
     site = site_around_ride(extra_blocked=blocked_west)
+
+    assert fit_at(site, RIDE, Heading.NORTH).blocked == 2
+
+
+def test_a_blocked_tile_on_the_side_the_export_does_not_use_is_fine():
+    # East of the first and last station tile is free of track; the export does not use it.
+    unused_side = [world((1, 0)), world((1, 5))]
+    site = site_around_ride(extra_blocked=unused_side)
 
     assert fit_at(site, RIDE, Heading.NORTH).total == 0
 
 
-def test_both_entrance_sides_blocked_is_a_violation():
-    # West entrance tiles plus the east ones, one tile either side of the station.
-    both = [world(t) for t in ENTRANCE_TILES] + [world((1, 0)), world((1, 5))]
-    site = site_around_ride(extra_blocked=both)
+def test_the_entrance_and_exit_the_export_writes_sit_on_tiles_the_check_approved():
+    from rct2.generate import calculate_entrance_positions
 
-    assert fit_at(site, RIDE, Heading.NORTH).total > 0
+    entrance, exit_ = calculate_entrance_positions(RIDE)
+    site = site_around_ride()
+    fit = best_fit(site, RIDE)
+
+    assert fit.fits
+    for structure in (entrance, exit_):
+        tile = (structure.x // 32, structure.y // 32)
+        wx, wy = site_coords(site.anchor, fit.heading, *tile)
+        assert site.inside(wx, wy) and not site.blocked(wx, wy)
+
+
+@pytest.mark.parametrize("heading", list(Heading))
+def test_the_inline_tile_mapping_agrees_with_site_coords(heading):
+    # _fit_tiles unrolls site_coords for speed; count the same ride the slow way.
+    site = site_around_ride(extra_blocked=[world((0, 3)), world((0, 1))], width=6, depth=8)
+    expected_outside = set()
+    expected_blocked = set()
+    for tile in occupied_tiles(Position(), RIDE):
+        wx, wy = site_coords(site.anchor, heading, tile.x, tile.y)
+        if not site.inside(wx, wy):
+            expected_outside.add((wx, wy))
+        elif site.blocked(wx, wy):
+            expected_blocked.add((wx, wy))
+
+    fit = fit_at(site, RIDE, heading)
+
+    # Entrance and exit tiles add to these counts, never subtract.
+    assert fit.outside >= len(expected_outside)
+    assert fit.blocked >= len(expected_blocked)
 
 
 def test_site_coords_rotate_with_the_heading():
@@ -179,6 +214,11 @@ def test_a_saved_site_round_trips(tmp_path):
         ({"version": 1, "rows": [".."], "anchor": [0, 0], "heights": [[0]]}, "heights"),
         ({"version": 2, "rows": [".."], "anchor": [0, 0]}, "version"),
         ({"rows": [".."]}, "anchor"),
+        ({"version": 1, "rows": [".."], "anchor": ["1", "0"]}, "anchor"),
+        ({"version": 1, "rows": [".."], "anchor": "10"}, "anchor"),
+        ({"version": 1, "rows": [".."], "anchor": [True, 0]}, "anchor"),
+        ({"version": 1, "rows": [".."], "anchor": [0, 0], "heights": [[1.9, 0]]}, "heights"),
+        ({"version": 1, "rows": [".."], "anchor": [0, 0], "heights": [["1", 0]]}, "heights"),
     ],
 )
 def test_a_malformed_site_is_rejected_with_a_message(data, message):
@@ -192,3 +232,11 @@ def test_a_site_file_that_is_not_json_is_rejected(tmp_path):
 
     with pytest.raises(SiteError, match="not valid JSON"):
         Site.load(path)
+
+
+def test_site_penalty_adds_each_kind_and_caps_each_kind_separately():
+    fit = SiteFit(heading=Heading.NORTH, outside=2, blocked=3, below_ground=4)
+
+    # 2 * 10 = 20 (under the cap), 3 * 10 = 30 -> 25, 4 * 10 = 40 -> 25
+    assert site_penalty(fit, per_tile=10, cap_per_kind=25) == 70
+    assert site_penalty(SiteFit(Heading.NORTH, 0, 0, 0), per_tile=10, cap_per_kind=25) == 0

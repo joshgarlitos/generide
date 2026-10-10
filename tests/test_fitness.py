@@ -501,3 +501,63 @@ class TestSiteFitness:
         )
 
         assert fitness.site_penalty_cap_per_kind > largest_reward
+
+
+class TestEveryKindOfSiteViolationIsCharged:
+    """Outside and below-ground tiles cost points at the fitness level, not only blocked ones."""
+
+    @staticmethod
+    def _cropped(segments, columns):
+        from rct2.site import Site
+
+        site, anchor = _site_for(segments)
+        return Site.from_rows([row[:-columns] for row in site.rows], anchor=anchor)
+
+    @staticmethod
+    def _raised(segments, tile_count):
+        from rct2.site import Site
+
+        site, anchor = _site_for(segments)
+        tiles = _ride_world_tiles(segments, anchor)[:tile_count]
+        heights = [[0] * site.width for _ in range(site.depth)]
+        for x, y in tiles:
+            heights[y][x] = 9
+        # Keep the anchor tile's own ground at 0 so the ride starts level with it.
+        heights[anchor[1]][anchor[0]] = 0
+        return Site.from_rows(site.rows, anchor=anchor, heights=heights)
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_more_tiles_outside_the_site_score_lower(self, make):
+        segments, _ = load_fixture()
+        open_site, _ = _site_for(segments)
+
+        scores = [
+            make(site=site).evaluate(segments)
+            for site in (open_site, self._cropped(segments, 3), self._cropped(segments, 5))
+        ]
+
+        assert scores[0] > scores[1] > scores[2]
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_more_tiles_under_the_ground_score_lower(self, make):
+        segments, _ = load_fixture()
+        open_site, _ = _site_for(segments)
+
+        scores = [
+            make(site=site).evaluate(segments)
+            for site in (open_site, self._raised(segments, 12), self._raised(segments, 40))
+        ]
+
+        assert scores[0] > scores[1] > scores[2]
+
+    @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
+    def test_a_fitting_ride_beats_a_longer_one_that_violates_a_hard_site(self, make):
+        from rct2.generate import create_hill_circuit
+
+        long_ride, _ = load_fixture()
+        short_ride = create_hill_circuit()
+        _, anchor = _site_for(long_ride)
+        shut, _ = _site_for(long_ride, blocked=_ride_world_tiles(long_ride, anchor))
+        fitting, _ = _site_for(short_ride)
+
+        assert make(site=fitting).evaluate(short_ride) > make(site=shut).evaluate(long_ride)

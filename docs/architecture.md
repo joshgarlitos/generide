@@ -99,7 +99,7 @@ Provides position advancement, complete-track tracing, occupancy, bounds, collis
 
 ### `rct2/site.py`
 
-The space a ride has to fit, and the one check that says whether it does. A `Site` is a grid of usable and blocked tiles, a ground height per tile, and an anchor tile for the ride's first station piece, saved as a small JSON file. `fit_at` maps a ride's tiles onto it through the anchor and a heading and counts tiles outside the site, on blocked tiles, and under the local ground; the station's entrance and exit count too, on whichever side suits better. `best_fit` tries all four headings and takes the one that breaks the site least. It checks tiles only: station flatness, the path to the entrance and clearance above ground are not checked, and every verdict says so. Fitness, the run's result summary and the benchmark all call this module, the way they call `construction.py` for buildability.
+The space a ride has to fit, and the one check that says whether it does. A `Site` is a grid of usable and blocked tiles, a ground height per tile, and an anchor tile for the ride's first station piece, saved as a small JSON file. `fit_at` maps a ride's tiles onto it through the anchor and a heading and counts tiles outside the site, on blocked tiles, and under the local ground; the station's entrance and exit count too, on the side the export puts them. `best_fit` tries all four headings and takes the one that breaks the site least. It checks tiles only: station flatness, the path to the entrance and clearance above ground are not checked, and every verdict says so. Fitness, the run's result summary and the benchmark all call this module, the way they call `construction.py` for buildability.
 
 ### `rct2/trackpath.py`
 

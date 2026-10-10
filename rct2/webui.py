@@ -237,6 +237,10 @@ def _warnings(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> List[st
     if not best.get("valid", True):
         issues = "; ".join(i["message"] for i in best.get("issues") or [])
         out.append(f"This ride fails construction checks: {issues}.")
+    if (record.get("request") or {}).get("site") and "site" not in best:
+        out.append(
+            "This run's site file could not be read, so whether the ride fits was not checked."
+        )
     site = best.get("site")
     if site and not site.get("fits"):
         out.append(

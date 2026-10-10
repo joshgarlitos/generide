@@ -661,14 +661,9 @@ def ride_summary(
     """
     from rct2 import construction, physics, render
 
-    if site is None:
-        validation = construction.validate_construction(
-            segments, max_width=max_width, max_depth=max_depth,
-        )
-    else:
-        validation = construction.validate_construction(
-            segments, min_elevation=construction.NO_MINIMUM_ELEVATION,
-        )
+    validation = construction.validate_for_request(
+        segments, site=site, max_width=max_width, max_depth=max_depth,
+    )
     lifts = set(validation.lift_indices)
     stats = physics.simulate(segments, lift_indices=lifts)
     ratings = physics.rate(stats)

@@ -835,3 +835,42 @@ class TestSiteInTheResult:
         from rct2.site import Site
 
         assert Site.load(stored) == site
+
+
+class TestSiteInALiveRun:
+    """A run still going, or ended without a stored result, builds its verdict from its best ride so far."""
+
+    def _live_run(self, site):
+        ride = td6.load(MANIC_MINER)
+        segments = [e.segment_type for e in ride.elements]
+        home = runrecord.generide_home()
+        home.mkdir(parents=True, exist_ok=True)
+        given = home / "given-site.json"
+        site.save(given)
+        values = settings.validate({"seed": 8, "site": str(given)}).values
+        run_id = runrecord.create_run(
+            seed=8, request=values, settings=settings.cli_args(values),
+            generations=values["generations"], pid=_dead_pid(),
+        )
+        runrecord.save_site(run_id, site)
+        runrecord.append_improvement(
+            run_id, {"generation": 1, "time": time.time(), "fitness": 1.0, "segments": segments}
+        )
+        return run_id
+
+    def test_the_best_ride_so_far_shows_the_fit_verdict(self, app):
+        run_id = self._live_run(_site_holding_the_fixture())
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["best"]["site"]["fits"] is True
+        rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
+        assert rows["Fits the site"].startswith("Yes")
+
+    def test_a_site_file_that_cannot_be_read_is_said_not_silently_dropped(self, app):
+        run_id = self._live_run(_site_holding_the_fixture())
+        (runrecord.run_dir(run_id) / "site.json").unlink()
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert any("site file could not be read" in w for w in run["warnings"])
