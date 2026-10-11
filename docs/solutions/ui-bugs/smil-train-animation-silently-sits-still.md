@@ -18,7 +18,7 @@ tags: [svg, smil, animatemotion, inline-svg, intersectionobserver, headless-chro
 
 ## Problem
 
-The isometric ride view (pull request #74, still open) animates a train around the track with an SVG `animateMotion` element. The train needs to run at the simulation's speed on each piece, and the page needs to pause it, restart it, and replay a lap. Two separate mistakes each left the train sitting still, and neither raised an error.
+The isometric ride view ([PR 74](https://github.com/joshgarlitos/generide/pull/74)) animates a train around the track with an SVG `animateMotion` element. The train needs to run at the simulation's speed on each piece, and the page needs to pause it, restart it, and replay a lap. Two separate mistakes each left the train sitting still, and neither raised an error.
 
 ## Symptoms
 
