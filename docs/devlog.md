@@ -4,13 +4,6 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
-<<<<<<< HEAD
-## 2026-10-07: A refresh of the knowledge docs after the isometric view
-
-I read `STRATEGY.md`, `CONCEPTS.md`, the README, the roadmap, and the two notes in `docs/solutions/` against the code after the isometric view merged, and fixed what had gone out of date. Nothing in the strategy's purpose, positioning, boundaries, or track rationale changed. I only corrected two facts: the Rendering and fit track now names the isometric view and where it shows, and the oracle metric now says the web UI and `--oracle-calibrate` can reach the oracle even though no number is tracked.
-
-`CONCEPTS.md` gained entries for the isometric view, view angle, train, track path, page version, and ride bar. The genome bloat note still said `ideal_length` is 80 and that PR 58 was open, and it cited line numbers that had moved, so it now says the value was 80 then and is 100 in the code (the 2026-09-13 entry), and points at functions instead of lines. The train animation note called PR 74 open. The README test count is 760, from `python3 -m pytest -q` (75 seconds), and its screen descriptions say isometric view where they said plan, since the page no longer shows the plan.
-=======
 ## 2026-10-10: Designing a ride to fit a space, phase 1
 
 I wanted to point at a space in a park and get a ride that fits it, so the request now carries a site: which tiles are free, how high the ground is, and where the first station piece goes. The plan is `docs/plans/2026-10-09-0326-feat-site-aware-ride-fit-plan.md` and the tracking issue is #78. This is phase 1 of three: the core, plus a spike I have written but not run.
@@ -36,7 +29,14 @@ The first fit-rate measurement, from `python run_benchmark.py --sites --methods 
 Random search "fits" often only because its tracks are tiny, and none of them are usable, so the usable column is the honest one. The weak spot is the blocked centre: the part-based search starts from a hill circuit that runs straight through the block, and 40% over five seeds at 800 evaluations is a low floor. Five seeds per cell is a small sample. The plan has the owner set the floor for this number before phase 2, and a tuning pass (population, generations) comes first if it is too low.
 
 What I have not done: the park-read probe (`tools/park_probe.js`) and its write-up (`docs/park-read-spike.md`) exist, but nothing has run against the real game, so every finding in that document says not run. Whether a saved park can supply a site at all is still the biggest open question, and the place-at wording ("facing east") has not been checked in the game. 834 tests pass.
->>>>>>> origin/main
+
+---
+
+## 2026-10-07: A refresh of the knowledge docs after the isometric view
+
+I read `STRATEGY.md`, `CONCEPTS.md`, the README, the roadmap, and the two notes in `docs/solutions/` against the code after the isometric view merged, and fixed what had gone out of date. Nothing in the strategy's purpose, positioning, boundaries, or track rationale changed. I only corrected two facts: the Rendering and fit track now names the isometric view and where it shows, and the oracle metric now says the web UI and `--oracle-calibrate` can reach the oracle even though no number is tracked.
+
+`CONCEPTS.md` gained entries for the isometric view, view angle, train, track path, page version, and ride bar. The genome bloat note still said `ideal_length` is 80 and that PR 58 was open, and it cited line numbers that had moved, so it now says the value was 80 then and is 100 in the code (the 2026-09-13 entry), and points at functions instead of lines. The train animation note called PR 74 open. The README test count is 760, from `python3 -m pytest -q` (75 seconds), and its screen descriptions say isometric view where they said plan, since the page no longer shows the plan.
 
 ---
 
