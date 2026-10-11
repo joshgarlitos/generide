@@ -12,6 +12,7 @@ from rct2 import construction, physics
 from rct2 import ratings as ported_ratings_module
 from rct2.geometry import Position, is_closed_circuit, occupied_tiles, overlapping_tiles, track_bounds
 from rct2.segments import SEGMENTS
+from rct2.site import Site, best_fit, site_penalty
 
 
 def count_slope_violations(segments: list[int]) -> int:
@@ -168,6 +169,10 @@ class WeightedProxyFitness:
         missing_lift_penalty: float = 200.0,
         stall_penalty: float = 500.0,
         short_penalty_per_segment: float = 20.0,
+        # Site fit. Used only when a site is given; see `evaluate`.
+        site: Optional[Site] = None,
+        site_penalty_per_tile: float = 25.0,
+        site_penalty_cap_per_kind: Optional[float] = None,
     ) -> None:
         self.max_width = max_width
         self.max_depth = max_depth
@@ -189,6 +194,19 @@ class WeightedProxyFitness:
         self.missing_lift_penalty = missing_lift_penalty
         self.stall_penalty = stall_penalty
         self.short_penalty_per_segment = short_penalty_per_segment
+        self.site = site
+        self.site_penalty_per_tile = site_penalty_per_tile
+        # Each kind of site violation is capped above the most a ride can earn
+        # from its rewards, so a ride that fits always beats an equally good one
+        # that does not, and the cap still stops a hard site from rewarding ever
+        # longer rides (docs/solutions/performance-issues/genome-bloat-*).
+        self.site_penalty_cap_per_kind = (
+            site_penalty_cap_per_kind
+            if site_penalty_cap_per_kind is not None
+            else ideal_length
+            * (length_weight + elevation_weight + variety_weight + turn_balance_weight / 2)
+            + 1.0
+        )
 
     def evaluate(self, segments: list[int]) -> float:
         """Evaluate fitness of a track segment sequence.
@@ -200,10 +218,8 @@ class WeightedProxyFitness:
             Fitness score (higher is better)
         """
         score = 0.0
-        construction_result = construction.validate_construction(
-            segments,
-            max_width=self.max_width,
-            max_depth=self.max_depth,
+        construction_result = construction.validate_for_request(
+            segments, site=self.site, max_width=self.max_width, max_depth=self.max_depth,
         )
         if not construction_result.valid:
             score -= self.invalid_construction_penalty
@@ -243,20 +259,29 @@ class WeightedProxyFitness:
         if not is_closed_circuit(Position(), segments):
             score -= self.open_circuit_penalty  # Heavy penalty for open circuits
 
-        bounds = track_bounds(Position(), segments)
-        if bounds.width > self.max_width or bounds.depth > self.max_depth:
-            excess_width = max(0, bounds.width - self.max_width)
-            excess_depth = max(0, bounds.depth - self.max_depth)
-            score -= (excess_width + excess_depth) * self.bounds_penalty_per_tile
+        if self.site is None:
+            bounds = track_bounds(Position(), segments)
+            if bounds.width > self.max_width or bounds.depth > self.max_depth:
+                excess_width = max(0, bounds.width - self.max_width)
+                excess_depth = max(0, bounds.depth - self.max_depth)
+                score -= (excess_width + excess_depth) * self.bounds_penalty_per_tile
 
         # Penalty for collisions (self-intersection)
         tiles = occupied_tiles(Position(), segments)
         overlaps = overlapping_tiles(tiles)
         score -= len(overlaps) * self.collision_penalty_per_tile
 
-        # Penalty for going below ground
-        if bounds.min_z < 0:
-            score -= abs(bounds.min_z) * self.underground_penalty_per_unit
+        if self.site is None:
+            # Penalty for going below ground
+            if bounds.min_z < 0:
+                score -= abs(bounds.min_z) * self.underground_penalty_per_unit
+        else:
+            # Blocked, outside and below-ground tiles, at the heading that suits best.
+            score -= site_penalty(
+                best_fit(self.site, segments),
+                self.site_penalty_per_tile,
+                self.site_penalty_cap_per_kind,
+            )
 
         # Penalty for invalid slope transitions
         slope_violations = count_slope_violations(segments)
@@ -306,12 +331,14 @@ class ProxyFitness(WeightedProxyFitness):
         max_depth: int = 30,
         ideal_length: int = 100,
         stall_penalty: float = 500.0,
+        site: Optional[Site] = None,
     ) -> None:
         super().__init__(
             max_width=max_width,
             max_depth=max_depth,
             ideal_length=ideal_length,
             stall_penalty=stall_penalty,
+            site=site,
         )
 
 
@@ -350,6 +377,8 @@ class CoasterRequest:
     intensity: Optional[Tuple[float, float]] = None
     nausea: Optional[Tuple[float, float]] = None
     cost: Optional[Tuple[float, float]] = None
+    # When set, the site replaces the width and depth as the space the ride must fit.
+    site: Optional[Site] = None
 
     def rating_targets(self) -> Optional["RatingTargets"]:
         """The RatingTargets PhysicsFitness expects, or None if nothing is set."""
@@ -411,6 +440,9 @@ class PhysicsFitness:
         max_depth: int = 30,
         ported_ratings: bool = False,
         rating_weight: float = 10.0,
+        site: Optional[Site] = None,
+        site_penalty_per_tile: Optional[float] = None,
+        site_penalty_cap_per_kind: Optional[float] = None,
     ) -> None:
         self.targets = targets
         self.validity_weight = validity_weight
@@ -422,6 +454,21 @@ class PhysicsFitness:
         self.max_depth = max_depth
         self.ported_ratings = ported_ratings
         self.rating_weight = rating_weight
+        self.site = site
+        # A violated tile costs as much as any other construction issue, and the
+        # cap sits well above the most the rating reward can add.
+        self.site_penalty_per_tile = (
+            site_penalty_per_tile if site_penalty_per_tile is not None else validity_weight
+        )
+        # The rating reward is excitement * rating_weight, about 100 for a very
+        # exciting ride (excitement near 10), so 20 * validity_weight = 1000
+        # stays an order of magnitude above it. test_fitness pins that a fitting
+        # ride still beats a violating one.
+        self.site_penalty_cap_per_kind = (
+            site_penalty_cap_per_kind
+            if site_penalty_cap_per_kind is not None
+            else validity_weight * 20
+        )
 
     @classmethod
     def from_request(cls, request: CoasterRequest, **kwargs) -> "PhysicsFitness":
@@ -433,18 +480,23 @@ class PhysicsFitness:
             targets=request.rating_targets(),
             max_width=request.max_width,
             max_depth=request.max_depth,
+            site=request.site,
             **kwargs,
         )
 
     def evaluate(self, segments: list[int]) -> float:
         score = 0.0
 
-        result = construction.validate_construction(
-            segments,
-            max_width=self.max_width,
-            max_depth=self.max_depth,
+        result = construction.validate_for_request(
+            segments, site=self.site, max_width=self.max_width, max_depth=self.max_depth,
         )
         score -= self.validity_weight * len(result.issues)
+        if self.site is not None:
+            score -= site_penalty(
+                best_fit(self.site, segments),
+                self.site_penalty_per_tile,
+                self.site_penalty_cap_per_kind,
+            )
 
         # An open circuit is categorically different from the other issues, so
         # it does not ride on validity_weight with everything else. The train

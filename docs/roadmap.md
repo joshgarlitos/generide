@@ -32,7 +32,7 @@ The bigger answer came on 2026-08-15, at 25 seeds and 2,000 evaluations per meth
 
 Buildable and runnable are now separate questions, which they had to become. `validate_construction` answers only whether the game would accept the track. Whether a train can actually get around it belongs to the physics model, with a cheap energy screen standing in wherever the simulation is too expensive to run. Before that split, tracks evolved by the default fitness passed construction validation every time and completed their circuit about one time in ten.
 
-Still to do here: a small track renderer. A top-down drawing of the occupied tiles, colored by elevation, plus a fitness curve per run, would let me see what a track looks like without loading the game and give every experiment a figure I can put in the devlog.
+The track renderer exists: a top-down drawing of the occupied tiles colored by elevation, a fitness curve per run, a side profile, and an isometric view with a train. They let me see what a track looks like without loading the game and give every experiment a figure for the devlog.
 
 ## Next: teach it what makes a ride good
 
@@ -71,7 +71,7 @@ Detail in [research-plan.md](research-plan.md).
 
 ## Later: make the results richer
 
-After validation and ratings are reliable, the project can explore better mutation strategies, more track pieces, additional coaster types, faster parallel evaluation, saved evolution runs, and visual tools for understanding why a design passed or failed.
+After validation and ratings are reliable, the project can explore better mutation strategies, more track pieces, additional coaster types, faster parallel evaluation, and visual tools for understanding why a design passed or failed.
 
 Presentation can grow too: names, colors, scenery, and batches of different finalists from the same request. Those enhancements become worthwhile once the generator can consistently produce rides that are valid, fit the available land, and match the experience the user asked for.
 
