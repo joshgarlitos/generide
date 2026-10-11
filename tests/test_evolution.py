@@ -901,3 +901,51 @@ class TestRideTracker:
         assert watched.fitness_history == plain.fitness_history
         assert tracker.best_playable is not None
         assert tracker.best_fitting is not None
+
+
+class TestSiteRideTrackerPredicates:
+    """The real buildable, fits and playable checks that `site_ride_tracker` builds."""
+
+    @staticmethod
+    def _tracker():
+        from rct2.evolution import site_ride_tracker
+        from rct2.fitness import PhysicsFitness
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+        return site_ride_tracker(PhysicsFitness(site=site), site)
+
+    def test_an_open_track_that_fits_the_site_is_never_the_fitting_ride(self):
+        from rct2.construction import build_station
+
+        tracker = self._tracker()
+
+        tracker.evaluate(build_station(4) + [0, 0, 0, 0])  # fits the tiles, never closes
+
+        assert tracker.best_fitting is None
+        assert tracker.best_playable is None
+
+    def test_a_track_that_only_runs_out_of_energy_is_a_fitting_ride_but_not_a_playable_one(self):
+        from tests.test_fitness import TestMovedHill
+
+        tracker = self._tracker()
+        stranded = TestMovedHill._small_climb_then_hill()
+
+        tracker.evaluate(stranded)
+
+        assert tracker.best_fitting is not None
+        assert tracker.best_fitting.segments == stranded
+        assert tracker.best_fitting.playable is False
+        assert tracker.best_playable is None
+
+    def test_a_valid_finishing_ride_is_both(self):
+        from tests.test_fitness import TestMovedHill
+
+        tracker = self._tracker()
+        ride = TestMovedHill._turn_then_hill()
+
+        tracker.evaluate(ride)
+
+        assert tracker.best_playable.segments == ride
+        assert tracker.best_fitting.segments == ride
+        assert tracker.best_fitting.playable is True

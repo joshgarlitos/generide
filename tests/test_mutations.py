@@ -651,6 +651,28 @@ class TestHillIsAlwaysPresent:
         assert "relocate_hill" in offered_by(relocate_hill=True)
         assert "relocate_hill" not in offered_by(free_hill=False, relocate_hill=True)
 
+    def test_the_relocate_mutation_moves_only_the_hill(self, monkeypatch):
+        """Force the mutation type, and let any result count as closed, to look at
+        the move itself: same parts, one hill, station first, the hill elsewhere."""
+        import rct2.mutations as mutations
+
+        def choose(self, seq):
+            seq = list(seq)
+            return "relocate_hill" if "relocate_hill" in seq else seq[0]
+
+        monkeypatch.setattr(mutations.random.Random, "choice", choose)
+        monkeypatch.setattr(mutations, "is_closed_circuit", lambda *args: True)
+        monkeypatch.setattr(mutations, "repair_circuit", lambda flat, rng: flat)
+        parts = segments_to_parts(create_hill_circuit())
+        hill = parts[find_hill_index(parts)]
+
+        result = mutate_parts(parts, random.Random(1), rate=0.01, relocate_hill=True)  # one mutation
+
+        assert sorted(map(tuple, result)) == sorted(map(tuple, parts))
+        assert result[find_hill_index(result)] == hill
+        assert find_hill_index(result) != find_hill_index(parts)
+        assert station_length(result[0]) > 0
+
     def test_delete_replace_and_swap_never_touch_the_hill(self, monkeypatch):
         import rct2.mutations as mutations
 

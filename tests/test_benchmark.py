@@ -499,3 +499,30 @@ def benchmark_run(methods, sites, seeds, evaluations):
     from rct2.benchmark import run_site_benchmark
 
     return run_site_benchmark(methods, sites, seeds, evaluations)
+
+
+class TestBenchmarkMovesTheHillOnlyWithASite:
+    def _kwargs(self, monkeypatch, site):
+        import rct2.evolution as evolution
+        from rct2.benchmark import method_ga_parts
+
+        seen = {}
+        real = evolution.evolve_parts
+
+        def spy(*args, **kwargs):
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(evolution, "evolve_parts", spy)
+        method_ga_parts(random.Random(1), 8, population_size=4, site=site)
+        return seen
+
+    def test_a_site_run_moves_the_hill(self, monkeypatch):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 30] * 30, anchor=(10, 10))
+
+        assert self._kwargs(monkeypatch, site)["relocate_hill"] is True
+
+    def test_a_run_without_a_site_does_not(self, monkeypatch):
+        assert self._kwargs(monkeypatch, None)["relocate_hill"] is False

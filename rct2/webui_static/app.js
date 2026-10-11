@@ -714,7 +714,7 @@ async function showRun(runId, tabParam) {
     }
     const sentence = fit.no_playable_ride
       ? "No playable ride was found, so this is the only ride, and it can not be built as it stands."
-      : "This ride fits the site better than the main result does.";
+      : "This is the ride that came closest to fitting the site.";
     const text = () => h("div", { class: "well" },
       h("h2", {}, fit.label),
       h("p", {}, sentence),

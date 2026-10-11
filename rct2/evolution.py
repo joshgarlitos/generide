@@ -139,7 +139,9 @@ def site_ride_tracker(
         return last["result"]
 
     def buildable(segments):
-        return all(issue.code != "energy_shortfall" for issue in validate(segments).issues)
+        # Only the energy estimate may fail: everything else is a rule the game
+        # enforces (closed circuit, geometry, slope, bank, lift steepness).
+        return all(issue.code == "energy_shortfall" for issue in validate(segments).issues)
 
     def playable(segments):
         return validate(segments).valid and physics.simulate(segments).completed

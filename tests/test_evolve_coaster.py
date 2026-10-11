@@ -559,3 +559,28 @@ class TestTwoRides:
         run = runrecord.load_run(record["id"])
         assert run.record["status"] == "failed"
         assert run.record["result"]["fitting_ride"]["playable"] is False
+
+
+class TestHillMovesOnlyWithASite:
+    """The move-the-hill mutation is on for runs with a site and off for runs without one."""
+
+    def _kwargs_seen(self, monkeypatch, tmp_path, *extra):
+        seen = {}
+        monkeypatch.setattr(evolve_coaster, "evolve_parts", _fake_run(seen))
+        monkeypatch.setattr(sys, "argv", [
+            "evolve_coaster.py", "--output", str(tmp_path / "out.td6"), "--genome", "parts",
+            "-g", "1", "-p", "4", *extra,
+        ])
+        evolve_coaster.main()
+        return seen
+
+    def test_a_run_with_a_site_moves_the_hill(self, monkeypatch, tmp_path):
+        from rct2.site import Site
+
+        path = tmp_path / "site.json"
+        Site.from_rows(["." * 20] * 30, anchor=(5, 5)).save(path)
+
+        assert self._kwargs_seen(monkeypatch, tmp_path, "--site", str(path))["relocate_hill"] is True
+
+    def test_a_run_without_a_site_does_not(self, monkeypatch, tmp_path):
+        assert self._kwargs_seen(monkeypatch, tmp_path)["relocate_hill"] is False

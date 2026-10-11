@@ -586,6 +586,10 @@ def main():
                 file=runrecord.FITS_TD6,
             )
 
+    stale_fits = fits_path(args.output)
+    if fitting is None and stale_fits.exists():
+        print(f"\nNote: {stale_fits} is left over from an earlier run and is not this run's result.")
+
     if fitting is not None:
         fits_ride = create_ride_from_segments(fitting.segments, template_path)
         td6.save(fits_ride, fits_output)
