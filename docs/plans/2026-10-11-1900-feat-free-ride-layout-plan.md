@@ -132,7 +132,7 @@ This plan covers freeing the lift hill's position and the train-length check. Th
 
 ## Planning Contract
 
-Product Contract unchanged. Planning answered the questions it left for planning (the bars for R8 and R9, how the lift rule is applied, how crossover keeps one hill, how starting variety is produced) in the decisions below.
+Product Contract unchanged. Planning answered the questions it left for planning (the bars for R8 and R9, how the lift rule is applied, how crossover keeps one hill, how starting variety is produced, and what a run exports when it finds no playable ride) in the decisions and units below. The feasibility check for the 14 by 14 site stays in U7.
 
 ### Key Technical Decisions
 
@@ -140,15 +140,15 @@ Product Contract unchanged. Planning answered the questions it left for planning
 - KTD2. **Exactly one hill, enforced where genomes are made.** After crossover and after any mutation, a second hill is dropped (the first is kept) and a missing hill is inserted at slot 1, as `ensure_hill_parts` does today. Two hills would compete for the one chain lift. Governs R2.
 - KTD3. **The lift rule does not change.** The chain lift stays on the first uphill run, which `construction.find_first_hill` and `default_lift_indices` already define for physics, scoring and the exported ride (`rct2/generate.py`). A small climb separated from the hill by flat pieces takes the lift and strands the hill. Checked: station, a two-piece climb, two flats, then a 10-unit hill gives lift indices on the climb only, 30 energy violations, a stall at piece 10, and energy-shortfall issues from `validate_construction`. That is already a graded penalty, so U5 pins it with a test and adds no new rule. Governs R3. Giving every climb a lift is deferred.
 - KTD4. **Variety comes from the search's own moves.** Mutation can insert before the hill, a new relocate-the-hill mutation moves it, and the random starting tracks place the hill after a random number of parts. The seed stays `create_hill_circuit()`. Governs R4. No hand-made starting layouts.
-- KTD5. **Soft rules are the existing graded penalties.** A stalled train, a missing lift and energy shortfalls already cost score in `WeightedProxyFitness` (stall penalty graded by progress, missing-lift penalty, energy-violation penalty), so R5 needs no new scoring. The only hard rejections at mutation time are the closed circuit (game-enforced) and the ground check (`_stays_above_ground`), which is deferred. R6 is checked, not rebuilt: penalties must stay large enough that an invalid ride never outscores a valid equivalent (`docs/solutions/performance-issues/genome-bloat-from-uncapped-fitness-rewards.md`). Governs R5, R6.
-- KTD6. **Fallback if quality cannot be held.** If no-site median excitement stays under the R8 bar after tuning (relocation rate, share of varied starting tracks, hill adjust steps), free the hill only when the run has a site, so ordinary runs behave exactly as today. This is a decision rule for U7, not a second implementation up front. Governs R8.
+- KTD5. **Soft rules are the existing graded penalties, in both scorers.** The benchmark and the CLI's physics mode score with `PhysicsFitness(ported_ratings=True)`; `WeightedProxyFitness` is the other scorer. `PhysicsFitness` charges `validity_weight` (50) for each construction issue, which includes an energy shortfall, and charges for a stall in proportion to the unfinished share of the track. `WeightedProxyFitness` charges for energy violations and a graded stall penalty. Neither needs new scoring for R5. The proxy's missing-lift penalty cannot fire today, because the lift set it checks is derived from the first hill it is checking, so it is not relied on. The only hard rejections at mutation time are the closed circuit (game-enforced) and the ground check (`_stays_above_ground`), which is deferred. R6 is checked, not rebuilt: penalties must stay large enough that an invalid ride never outscores a valid equivalent, and U5 checks that on both scorers (`docs/solutions/performance-issues/genome-bloat-from-uncapped-fitness-rewards.md`). Governs R5, R6.
+- KTD6. **Fallback if quality cannot be held.** If no-site median excitement stays under the R8 bar after tuning (relocation rate, share of varied starting tracks, hill adjust steps), free the hill only when the run has a site, so ordinary runs behave exactly as today. This is a decision rule for U7, not a second implementation up front. The fallback is one boolean passed down from the search entry point (`evolve_parts`) to the mutation and crossover functions. With it off, the no-site mutation choices and random draws stay exactly as today, so the existing digests keep holding. Governs R8.
 - KTD7. **The two rides come from observing every evaluation.** The evolution loop takes an optional predicate for "fits the site" and a playable test, and keeps the best individual that is playable and the best that fits, next to the best overall. Nothing about selection changes. Governs R7.
-- KTD8. **One measurement protocol, same seeds before and after.** `ga_parts`, seeds 1 to 25, 2,000 evaluations, the three canned sites plus no site, results saved under `benchmark_results/` (not tracked) and the tables copied into `docs/devlog.md` with the code revision. Proposed bars, recorded as assumptions: no-site median excitement at least 95% of the baseline; blocked-centre fit at least 80%; L-shape and downhill no worse than baseline. Governs R8, R9.
+- KTD8. **One measurement protocol, same seeds before and after.** `ga_parts`, seeds 1 to 25, 2,000 evaluations, the three canned sites plus no site, results saved under `benchmark_results/` (not tracked) and the tables copied into `docs/devlog.md` with the code revision. Bars: no-site median excitement not below the baseline, as R8 and AE4 say; blocked-centre fit at least 80% (a proposal, recorded as an assumption); L-shape and downhill no worse than baseline. Medians of 25 runs are noisy, because excitement splits around the drop-height threshold (about 2.0 below it, about 3.8 above it, `docs/architecture.md`), and a changed search does not replay the same random draws. So U7 also reports the number of runs that clear the drop threshold and the median of those that do. A shortfall that sits inside the baseline's own run-to-run spread is reported to Josh as a decision and is not accepted or rejected silently. Governs R8, R9.
 - KTD9. **The train-length check follows the park-read spike pattern.** A probe script and a runbook for the owner, findings blank until they run it, and no search code depends on it. Governs R10.
 
 ### High-Level Technical Design
 
-How a candidate ride moves through the search after this change. The hard gate is the only place a layout is rejected outright. Everything after it is a score.
+How a candidate ride moves through the search after this change. The closed-circuit gate is the only place the game forces a rejection. The ground check (`_stays_above_ground`) also rejects at mutation time today and is deferred (KTD5). Everything else is a score.
 
 ```mermaid
 flowchart TB
@@ -209,8 +209,9 @@ flowchart TB
 - **Goal:** Record today's results at the full protocol, and make it possible to benchmark an extra site from a file so the 14 by 14 site is reported.
 - **Requirements:** R8, R9; Success Criteria.
 - **Dependencies:** None.
-- **Files:** `run_benchmark.py`, `rct2/benchmark.py`, `tests/test_benchmark.py`, `docs/devlog.md`.
+- **Files:** `run_benchmark.py`, `rct2/benchmark.py`, `tests/test_benchmark.py`, `tests/data/site-14x14.json` (new), `docs/devlog.md`.
 - **Approach:**
+  0. Commit the 14 by 14 test site as `tests/data/site-14x14.json`: all 196 tiles usable, flat ground, the anchor at a stated tile, built with `Site.from_rows` and `Site.save`. Both benchmark passes and the tests use this one file, so the before and after runs score the same site.
   1. Add a `--site-file` option to `run_benchmark.py` that loads a site with `Site.load` and runs it alongside the canned sites, named by its file stem, in the same summary. `canned_sites()` itself does not change.
   2. A missing or malformed file is rejected with the existing site error message before any run starts.
   3. Run the baseline on the unchanged search (commands under the Verification Contract), in the background, and copy the no-site table and the site table into `docs/devlog.md` with the code revision.
@@ -248,8 +249,9 @@ flowchart TB
 - **Approach:**
   1. Add the hill lookup (KTD1) and use it in `ensure_hill_parts`, `mutate_parts`, `crossover_parts` and the scaffold ordering in `rct2/evolution.py`.
   2. In `mutate_parts`, allow insertion from the slot after the station, including directly before the hill. Delete, replace and swap skip the hill part. `adjust_hill` edits the hill wherever it sits. Add one mutation that moves the hill to another slot after the station.
-  3. In `crossover_parts`, start cut points just after the station, then keep the first hill and drop any later one (KTD2).
-  4. Keep the backstop that inserts a hill at slot 1 when a genome from elsewhere has none.
+  3. In `crossover_parts`, start cut points just after the station. Choose the cut points so each child takes exactly one hill (the second cut is placed relative to both parents' hill positions) instead of repairing the count afterwards, because dropping or inserting a 10-tile or longer hill moves the loop by more than `repair_circuit`'s 8-piece budget can undo. The backstop in KTD2 stays for genomes that come from elsewhere.
+  4a. Expose the tunables as named module constants in `rct2/mutations.py`: the relocation weight, and later (U4) the share of varied starting tracks and the hill-position bound. U7 tunes these.
+  4. Keep the backstop that inserts a hill at slot 1 when a genome from elsewhere has none. Pass the site-only switch from KTD6 through these functions, off by default, so the fallback does not need new architecture later.
 - **Execution note:** Rewrite the existing tests that assert the hill sits at `HILL_INDEX` first, so they state the new invariant (one hill after the station) and fail against the old code.
 - **Patterns to follow:** `ensure_hill_parts`, the existing six mutation types, and the part-boundary rule in `crossover_parts`.
 - **Test scenarios:**
@@ -259,24 +261,24 @@ flowchart TB
   - A relocate mutation changes the hill's slot, leaves the hill's pieces intact, and leaves the station first.
   - Delete, replace and swap never remove or alter the hill part, and `adjust_hill` still changes only its height.
   - A genome with no hill gets one at slot 1; a genome with two hills keeps the first.
-  - `mutate_parts` still sometimes returns closed circuits (the existing test).
+  - `mutate_parts` still sometimes returns closed circuits (the existing test). Record the closed share of relocate results and of crossover children over many seeds, against today's share, so a drop is visible in the smoke run.
   - Starting from `create_hill_circuit()`, the first genome still has the hill at slot 1.
-- **Verification:** The mutation and evolution tests pass, and a 5-seed smoke run of `ga_parts` completes with every individual keeping one hill.
+- **Verification:** The mutation and evolution tests pass, and a 5-seed smoke run of `ga_parts` completes with every individual keeping one hill. The seeded no-site pins (the seeded-run test in `tests/test_fitness.py` and the digest tests in `tests/test_evolve_coaster.py`) are expected to fail from this unit until U7 re-records them; see the Verification Contract.
 
 ### U4. Varied starting populations
 
-- **Goal:** Each run starts with some layouts where the hill is not right after the station.
+- **Goal:** Each run starts with some layouts where the hill is not right after the station. Most of the starting population is already mutated from the seed (about 70%, `_create_initial_population_parts`), so U3's moves may supply this variety alone; random starting tracks change only if they do not.
 - **Requirements:** R4; KTD4.
 - **Dependencies:** U3.
 - **Files:** `rct2/mutations.py` (`generate_random_track_parts`), `rct2/evolution.py` (`_create_initial_population_parts`), `tests/test_mutations.py`, `tests/test_evolution.py`.
 - **Approach:**
-  1. `generate_random_track_parts` places the hill after a random number of leading parts, up to a small bound, instead of always at slot 1.
-  2. Pick the bound by measuring how often those tracks close under `repair_circuit` (it adds at most 8 pieces), against today's closure rate.
-  3. The mutated-from-seed share of the starting population gets its variety from U3's moves; the seed stays `create_hill_circuit()`.
+  1. First measure: after U3, count how many starting individuals have a part between the station and the hill, across many seeds. If layouts with the hill at slot 1 and layouts with the hill later are both common, stop here and add only the test below.
+  2. If variety is too thin, have `generate_random_track_parts` place the hill after a random number of leading parts, up to a small bound, instead of always at slot 1. Pick the bound by measuring how often those tracks close under `repair_circuit` (it adds at most 8 pieces), against today's closure rate.
+  3. The seed stays `create_hill_circuit()`.
 - **Patterns to follow:** The comment in `generate_random_track_parts` on why the hill does not count against the length budget.
 - **Test scenarios:**
   - Across many seeds, the starting population contains both layouts with the hill at slot 1 and layouts with a part between the station and the hill.
-  - Random starting tracks close at no less than a rate recorded from today's generator on the same seeds.
+  - If random starting tracks were changed: they close at no less than a rate recorded from today's generator on the same seeds.
   - Every starting individual has the station first and exactly one hill.
 - **Verification:** Tests pass, and the closure-rate comparison is recorded in the devlog entry in U7.
 
@@ -287,8 +289,8 @@ flowchart TB
 - **Dependencies:** U3.
 - **Files:** `tests/test_fitness.py`, `tests/test_construction.py`, `tests/test_generate.py`; `rct2/fitness.py` only if a test fails.
 - **Approach:**
-  1. Write the tests below first. They check behavior that exists today for a moved hill.
-  2. Fix only what fails. If the ordering of scores is wrong, adjust the weights minimally and record why, keeping penalties large enough that an invalid ride never outscores a valid equivalent.
+  1. Write the tests below first, once against `PhysicsFitness(ported_ratings=True)` (the scorer the benchmark uses) and once against `WeightedProxyFitness`. They check behavior that exists today for a moved hill.
+  2. Fix only what fails. If the ordering of scores is wrong, adjust the weights minimally and record why, keeping penalties large enough that an invalid ride never outscores a valid equivalent. For `PhysicsFitness` this includes checking how `validity_weight` scales with the number of issues.
   3. Confirm that no new rejection was added to the search beyond the closed circuit and the deferred ground check.
 - **Execution note:** Verify first and change second. The expected result is that no production change is needed.
 - **Patterns to follow:** `TestSiteFitness` in `tests/test_fitness.py` for ordering tests; the export round trip tests in `tests/test_generate.py`.
@@ -307,15 +309,18 @@ flowchart TB
 - **Dependencies:** None for the code, though it is most useful after U3 and U4.
 - **Files:** `rct2/evolution.py`, `evolve_coaster.py`, `rct2/runrecord.py`, `rct2/webui.py`, `rct2/webui_static/app.js`, `rct2/webui_static/style.css`, `tests/test_evolution.py`, `tests/test_evolve_coaster.py`, `tests/test_runrecord.py`, `tests/test_webui.py`.
 - **Approach:**
-  1. Add one small tracker used by both evolution loops (the part-based and the piece-based). It sees every evaluated individual and keeps the best playable one (construction valid and the train completes) and the best that fits the site, next to the best overall. Selection and the best-overall result do not change.
-  2. In `evolve_coaster.py`, when a site is set and the best fitting ride differs from the best playable ride, write a second ride file with a `-fits` suffix next to the first and print both rides' stats. When they are the same ride, or there is no site, nothing changes.
-  3. The run record's result gains an optional fitting-ride section (the ride, whether it is playable, its file). Records without it load unchanged.
-  4. The web UI result shows a second picture and a plain label ("Best fit, not playable: the train stalls") when the fitting ride is not playable, and shows one ride when they are the same.
+  1. Add one small tracker to the part-based loop (`evolve_parts`, the CLI default and the only search this plan changes). The piece-based loop is not changed. The tracker sees every evaluated individual and keeps the best playable one (construction valid and the train completes) and the best that fits the site, next to the best overall. Selection and the best-overall result do not change.
+  2. Define the fitting ride's floor as buildable in the game: geometry, slope, bank, lift steepness and a closed circuit pass. An energy shortfall and a stalled train do not fail that floor (they make the ride not playable). The second ride's export uses this narrower check; the primary ride's export check is unchanged.
+  3. In `evolve_coaster.py`, when a site is set and the best fitting ride differs from the best playable ride, write a second ride file with a `-fits` suffix next to the first and print both rides' stats. When there is no playable ride but a fitting ride passes the floor, write that ride with the `-fits` suffix, say plainly that no playable ride was found, and treat the run as having no primary ride. When they are the same ride, or there is no site, nothing changes.
+  4. The run record's result gains an optional fitting-ride section (the ride, whether it is playable, its file). Records without it load unchanged.
+  5. The web UI result shows a second picture and a plain label ("Best fit, not playable: the train stalls") when the fitting ride is not playable, and shows one ride when they are the same.
 - **Patterns to follow:** The site verdict plumbing from the site feature (`ride_summary`, `_site_verdict`, the web UI rows); the installed-ride and check sections of the web UI result.
 - **Test scenarios:**
   - The tracker, fed a scripted sequence of evaluations, keeps a fitting ride that scores lower overall than a non-fitting one.
   - Covers AE3. A seeded run on a site where the best fitting ride stalls returns both rides, and the result labels the fitting ride as not playable.
   - When the best fitting ride is also the best playable ride, the result carries one ride and no second file is written.
+  - A run whose only buildable ride is a stalled fitting ride writes it with the `-fits` suffix, reports that no playable ride was found, and labels it as not playable in the record and the web UI.
+  - A fitting ride with an energy shortfall passes the export floor; one with an open circuit or a slope the game rejects does not.
   - With no site, the result carries one ride and no fitting section.
   - A run record from before this change loads and renders with no fitting section.
   - The web payload for a run with two rides includes both pictures and the label text.
@@ -327,7 +332,7 @@ flowchart TB
 - **Goal:** Show whether the change met the bars, re-record the seeded pins on purpose, and update the docs that described the pinned hill.
 - **Requirements:** R8, R9; Success Criteria; KTD6, KTD8.
 - **Dependencies:** U1, U3, U4, U5.
-- **Files:** `docs/devlog.md`, `docs/architecture.md`, `docs/research-plan.md`, `tests/test_fitness.py`, `tests/test_evolve_coaster.py`.
+- **Files:** `docs/devlog.md`, `docs/architecture.md`, `docs/research-plan.md`, `tests/test_fitness.py`, `tests/test_evolve_coaster.py`; `rct2/mutations.py`, `rct2/evolution.py` and `rct2/benchmark.py` only if tuning or the KTD6 fallback is needed (the fallback switch is passed from the benchmark's `ga_parts` method).
 - **Approach:**
   1. Run the same protocol as U1 on the same seeds and compare against the bars in KTD8. If the no-site bar fails, tune within KTD6's list and run again; if it still fails, apply the site-only fallback and say so.
   2. Once the guard passes, re-record the seeded best-ride values and output digests, each with a comment saying the search changed on purpose and pointing at the devlog entry.
@@ -344,7 +349,8 @@ flowchart TB
 | Check | Command | Applies to |
 |---|---|---|
 | Full test suite | `python3 -m pytest -q` (about 2 minutes) | every unit |
-| Search tests | `python3 -m pytest -q tests/test_mutations.py tests/test_evolution.py tests/test_fitness.py tests/test_construction.py tests/test_generate.py` | U3, U4, U5 |
+| Search tests | `python3 -m pytest -q tests/test_mutations.py tests/test_evolution.py tests/test_fitness.py tests/test_construction.py tests/test_generate.py --deselect tests/test_fitness.py::TestNoSiteIsUnchanged::test_a_seeded_run_finds_the_same_best_ride` | U3, U4, U5 |
+| Expected failures until U7 | The seeded-run pin (`test_a_seeded_run_finds_the_same_best_ride` in `tests/test_fitness.py`) and the output digests in `tests/test_evolve_coaster.py` fail once U3 changes the mutation choices. They stay failing and unedited until U7 re-records them, so the full suite is red on exactly those tests between U3 and U7. Phase 2 (U3, U4, U5, U7) is one PR, so `main` is never red. | U3 to U7 |
 | Benchmark tests | `python3 -m pytest -q tests/test_benchmark.py` | U1 |
 | Baseline and after, no site and canned sites | `python3 run_benchmark.py --methods ga_parts --seeds 25 --evaluations 2000 --sites --output benchmark_results/<name>.json` (run in the background; a full pass is long) | U1, U7 |
 | Extra site | add `--site-file <path to site.json>` to the command above | U1, U7 |
