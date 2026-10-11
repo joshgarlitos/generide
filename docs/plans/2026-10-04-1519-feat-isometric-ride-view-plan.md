@@ -174,7 +174,7 @@ Paint order for one picture: ground grid, then all chunks sorted by rotated dept
 
 ### Scope notes from planning
 
-Considered and not built: rail banking tilt (pieces draw level; nobody asked for it, and the rails read the same shape), a lift hill colour or speed colouring (already deferred in the Product Contract), and a free-orbit view. Revisit banking if the rough render in U2 reads wrongly on banked turns. Also considered and not built: a pause toggle for viewers who have no reduced-motion setting. R12 settles reduced motion with the user, and a looping train longer than five seconds is normally expected to be pausable, so this is worth the user's call. Reusing the Play lap button as a toggle would be the cheapest form.
+Considered and not built: rail banking tilt (pieces draw level; nobody asked for it, and the rails read the same shape), a lift hill colour or speed colouring (already deferred in the Product Contract), and a free-orbit view. Revisit banking if the rough render in U2 reads wrongly on banked turns. A pause toggle for viewers who have no reduced-motion setting was first left out, then added in a commit of its own (2026-10-07 devlog entry), because a looping train longer than five seconds is normally expected to be pausable (WCAG 2.2.2). It is a Pause train and Resume train button in `iso-view.js`, shown only when reduced motion is off, so Play lap is unchanged. The paused state lasts for the screen: turning the view or a new best ride redraws the picture at rest, and Resume train carries on from where the train stopped. It is the owner's call and reverts by reverting that commit.
 
 ---
 
