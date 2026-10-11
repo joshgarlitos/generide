@@ -25,7 +25,7 @@ from rct2.render import (
 )
 from rct2.construction import STATION_SEGMENTS
 from rct2.generate import create_simple_circuit
-from rct2.site import Site, site_coords
+from rct2.site import Site, best_fit, site_coords
 from rct2.geometry import Heading
 from rct2.physics import trace
 from rct2.trackpath import STRAIGHT_STEPS, PiecePath, track_path
@@ -514,7 +514,47 @@ def test_a_ride_that_does_not_fit_marks_the_tiles_that_break_the_site():
 def test_the_legend_names_what_the_marks_mean():
     svg = render_isometric(SITE_RIDE, site=open_site(all_blocked=True))
 
-    assert "blocked" in svg and "ride breaks the site" in svg
+    legend = elements(svg, "legend")
+    assert len(legend) == 1
+    labels = [e.text for e in legend[0].iter() if e.text and e.text.strip()]
+    assert labels == ["blocked", "ride breaks the site"]
+
+
+def test_a_ride_that_dips_below_its_start_does_not_turn_flat_ground_into_raised_blocks():
+    # Ten tiles of 25 degree downhill, so the track ends 8 height units under the anchor.
+    diving = SITE_RIDE[:6] + [10] * 4 + SITE_RIDE[6:]
+    site = open_site()
+
+    svg = render_isometric(diving, site=site)
+
+    assert elements(svg, "usable")
+    assert elements(svg, "wall") == []
+    assert len(svg) < len(render_isometric(diving)) * 2  # it was five times before the fix
+
+
+def test_the_picture_draws_the_site_at_the_heading_the_fit_check_picked():
+    # A long, narrow strip only holds the ride when it faces east.
+    site = Site.from_rows(["." * 40] * 8, anchor=(5, 3))
+    assert best_fit(site, SITE_RIDE).heading == Heading.EAST
+    blocked_tile = site_coords((5, 3), Heading.EAST, 6, 10)
+    rows = [list(row) for row in site.rows]
+    rows[blocked_tile[1]][blocked_tile[0]] = "#"
+    site = Site.from_rows(["".join(r) for r in rows], anchor=(5, 3))
+
+    svg = render_isometric(SITE_RIDE, site=site)
+
+    assert "fits the site" in svg and "does not fit" not in svg
+    assert elements(svg, "violation") == []
+    assert len(elements(svg, "blocked")) == 1
+
+
+def test_ride_tiles_outside_a_small_site_are_marked():
+    site = Site.from_rows(["." * 3] * 3, anchor=(1, 1))
+
+    svg = render_isometric(SITE_RIDE, site=site)
+
+    assert len(elements(svg, "violation")) > 10
+    assert "does not fit the site" in svg
 
 
 @pytest.mark.parametrize("angle", [0, 1, 2, 3])

@@ -319,3 +319,16 @@ def test_violating_tiles_agree_with_the_fit_check_on_whether_the_ride_fits(headi
 
     for site in sites:
         assert bool(violating_tiles(site, RIDE, heading)) == (not fit_at(site, RIDE, heading).fits)
+
+
+def test_view_tiles_and_violating_tiles_follow_a_heading_other_than_north():
+    site = site_around_ride(width=24, depth=24, anchor=(10, 10))
+    blocked = site_coords((10, 10), Heading.EAST, 0, 2)
+    rows = [list(r) for r in site.rows]
+    rows[blocked[1]][blocked[0]] = "#"
+    site = Site.from_rows(["".join(r) for r in rows], anchor=(10, 10))
+
+    tiles = {(t.x, t.y): t for t in view_tiles(site, Heading.EAST, 0, 0, 2, 2)}
+
+    assert tiles[(0, 2)].blocked
+    assert (0, 2) in violating_tiles(site, RIDE, Heading.EAST)

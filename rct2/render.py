@@ -553,6 +553,7 @@ def render_isometric(
     ground_z = min(bounds.min_z, 0)
 
     site_fit = site_tiles = site_bad = None
+    site_base = 0
     if site is not None:
         from rct2 import site as site_model
 
@@ -563,7 +564,10 @@ def render_isometric(
             bounds.min_y - ISO_SITE_MARGIN, bounds.max_y + ISO_SITE_MARGIN,
         )
         site_bad = site_model.violating_tiles(site, segments, site_fit.heading)
-        ground_z = min([ground_z] + [tile.ground for tile in site_tiles])
+        # The site's own flat level, kept apart from the ride's lowest point: a
+        # ride that dips under its start must not make flat ground read as raised.
+        site_base = min((tile.ground for tile in site_tiles), default=0)
+        ground_z = min(ground_z, site_base)
 
     def project(x: float, y: float, z: float) -> Tuple[float, float]:
         u, v = _rotate(x, y, angle, cx, cy)
@@ -581,10 +585,13 @@ def render_isometric(
         ys.append(point[1])
         return point
 
+    def tile_corners(x: int, y: int, z: float) -> List[Tuple[float, float]]:
+        return [seen(project(x + dx, y + dy, z)) for dx, dy in _TILE_CORNERS]
+
     layers: List[str] = []
 
     if site is not None:
-        layers.extend(_iso_site_layers(site_tiles, project, fmt, seen, angle, (cx, cy), ground_z))
+        layers.extend(_iso_site_layers(site_tiles, tile_corners, fmt, angle, (cx, cy), site_base))
 
     # Ground grid: tile edges at the lowest level the ride reaches.
     left, right = bounds.min_x - 0.5, bounds.max_x + 0.5
@@ -610,7 +617,7 @@ def render_isometric(
     for path in marked:
         mid = path.points[len(path.points) // 2]
         sx, sy = round(mid[0]), round(mid[1])
-        corners = [seen(project(sx + dx, sy + dy, ground_z)) for dx, dy in _TILE_CORNERS]
+        corners = tile_corners(sx, sy, ground_z)
         tag = ' data-station="tile"' if is_station else ""
         layers.append(
             f'<path class="ac"{tag} d="M{"L".join(fmt(c) for c in corners)}Z" fill="none" '
@@ -702,7 +709,7 @@ def render_isometric(
         )
 
     if site is not None:
-        layers.extend(_iso_violation_layers(site_tiles, site_bad, project, fmt, seen, ground_z))
+        layers.extend(_iso_violation_layers(site_tiles, site_bad, tile_corners, fmt, ground_z))
 
     pad, label_h = 24, 46
     min_x, max_x = min(xs), max(xs)
@@ -740,17 +747,14 @@ fill="{GRAPH["text"]}">{_escape(title)}</text>
 """
 
 
-def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List[str]:
+def _iso_site_layers(tiles, corners, fmt, angle, centre, base) -> List[str]:
     """The site under the ride, back to front: ground, then blocks and blocked tiles.
 
-    Ground at the lowest level in view is one path. Every other tile, raised
-    ground or blocked, is its own element so it can be marked and so it paints
-    in front of what is behind it.
+    Ground at the site's lowest level in view (`base`) is one path. Every other
+    tile, raised ground or blocked, is its own element so it can be marked and
+    so it paints in front of what is behind it.
     """
     cx, cy = centre
-
-    def corners(x: int, y: int, z: float) -> List[Tuple[float, float]]:
-        return [seen(project(x + dx, y + dy, z)) for dx, dy in _TILE_CORNERS]
 
     def outline(points) -> str:
         return "M" + "L".join(fmt(p) for p in points) + "Z"
@@ -761,10 +765,10 @@ def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List
         f'<line x1="0" y1="0" x2="0" y2="6" stroke="{GRAPH["text_sec"]}" stroke-width="2"/>'
         f'</pattern></defs>'
     ]
-    flat = [t for t in tiles if not t.blocked and t.ground == ground_z]
+    flat = [t for t in tiles if not t.blocked and t.ground == base]
     if flat:
         layers.append(
-            f'<path class="ax" data-site="usable" d="{"".join(outline(corners(t.x, t.y, ground_z)) for t in flat)}" '
+            f'<path class="ax" data-site="usable" d="{"".join(outline(corners(t.x, t.y, base)) for t in flat)}" '
             f'fill="{GRAPH["border"]}" fill-opacity="0.35" stroke="{GRAPH["border"]}" stroke-width="0.6"/>'
         )
 
@@ -772,11 +776,11 @@ def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List
         u, v = _rotate(tile.x, tile.y, angle, cx, cy)
         return -(u + v), tile.ground
 
-    for tile in sorted((t for t in tiles if t.blocked or t.ground != ground_z), key=far_first):
+    for tile in sorted((t for t in tiles if t.blocked or t.ground != base), key=far_first):
         top = corners(tile.x, tile.y, tile.ground)
-        rise = tile.ground - ground_z
+        rise = tile.ground - base
         if rise > 0:
-            low = corners(tile.x, tile.y, ground_z)
+            low = corners(tile.x, tile.y, base)
             walls = "".join(
                 f"M{fmt(top[i])}L{fmt(top[(i + 1) % 4])}L{fmt(low[(i + 1) % 4])}L{fmt(low[i])}Z"
                 for i in range(4)
@@ -799,15 +803,14 @@ def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List
     return layers
 
 
-def _iso_violation_layers(tiles, bad, project, fmt, seen, ground_z) -> List[str]:
+def _iso_violation_layers(tiles, bad, corners, fmt, ground_z) -> List[str]:
     """A dashed outline on each ride tile that breaks the site, at the ground it stands on."""
     grounds = {(tile.x, tile.y): tile.ground for tile in tiles}
     layers = []
     for x, y in sorted(bad):
-        corners = [seen(project(x + dx, y + dy, grounds.get((x, y), ground_z)))
-                   for dx, dy in _TILE_CORNERS]
+        points = corners(x, y, grounds.get((x, y), ground_z))
         layers.append(
-            f'<path class="tx" data-site="violation" d="M{"L".join(fmt(c) for c in corners)}Z" '
+            f'<path class="tx" data-site="violation" d="M{"L".join(fmt(c) for c in points)}Z" '
             f'fill="none" stroke="{GRAPH["stall"]}" stroke-width="2.2" stroke-dasharray="4 2"/>'
         )
     return layers
