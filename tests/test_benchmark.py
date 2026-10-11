@@ -420,7 +420,109 @@ class TestSiteBenchmark:
         assert load_results(tmp_path / "r.json") == [result]
 
 
+class TestExtraSiteFiles:
+    """`--site-file` adds a saved site to the benchmark, named by its file."""
+
+    REPO = Path(__file__).parent.parent
+    FIXTURE = Path(__file__).parent / "data" / "site-14x14.json"
+
+    def _run_cli(self, tmp_path, *extra):
+        import subprocess
+        import sys
+
+        return subprocess.run(
+            [sys.executable, str(self.REPO / "run_benchmark.py"), "--methods", "random",
+             "--seeds", "1", "--evaluations", "3", "--output", str(tmp_path / "out.json"),
+             *extra],
+            capture_output=True, text=True, cwd=self.REPO,
+        )
+
+    def test_the_14_by_14_fixture_is_an_open_flat_square(self):
+        from rct2.site import Site
+
+        site = Site.load(self.FIXTURE)
+
+        assert (site.width, site.depth) == (14, 14)
+        assert all(ch == "." for row in site.rows for ch in row)
+        assert {h for row in site.heights for h in row} == {0}
+
+    def test_a_site_file_appears_next_to_the_canned_sites_under_its_file_name(self):
+        from rct2.benchmark import benchmark_sites
+
+        sites = benchmark_sites(True, [self.FIXTURE])
+
+        assert list(sites) == ["l-shape", "blocked-centre", "downhill", "site-14x14"]
+
+    def test_a_site_file_alone_runs_without_the_canned_sites(self):
+        from rct2.benchmark import benchmark_sites
+
+        assert list(benchmark_sites(False, [self.FIXTURE])) == ["site-14x14"]
+
+    def test_the_canned_sites_do_not_change(self):
+        from rct2.benchmark import canned_sites
+
+        assert list(canned_sites()) == ["l-shape", "blocked-centre", "downhill"]
+
+    def test_a_missing_file_a_bad_file_and_a_clashing_name_are_each_refused(self, tmp_path):
+        from rct2.benchmark import benchmark_sites
+        from rct2.site import SiteError
+
+        bad = tmp_path / "bad.json"
+        bad.write_text("not json")
+        clash = tmp_path / "l-shape.json"
+        clash.write_text(self.FIXTURE.read_text())
+
+        with pytest.raises(SiteError, match="could not be read"):
+            benchmark_sites(False, [tmp_path / "nope.json"])
+        with pytest.raises(SiteError, match="not valid JSON"):
+            benchmark_sites(False, [bad])
+        with pytest.raises(SiteError, match="both be called 'l-shape'"):
+            benchmark_sites(True, [clash])
+
+    def test_the_command_refuses_a_bad_site_before_any_run_starts(self, tmp_path):
+        done = self._run_cli(tmp_path, "--site-file", str(tmp_path / "nope.json"))
+
+        assert done.returncode == 2
+        assert "could not be read" in done.stderr
+        assert not (tmp_path / "out.json").exists()
+        assert "Methods:" not in done.stdout
+
+    def test_the_command_reports_the_file_next_to_the_canned_sites(self, tmp_path):
+        done = self._run_cli(tmp_path, "--sites", "--site-file", str(self.FIXTURE))
+
+        assert done.returncode == 0, done.stderr
+        for name in ("l-shape", "blocked-centre", "downhill", "site-14x14"):
+            assert name in done.stdout
+
+
 def benchmark_run(methods, sites, seeds, evaluations):
     from rct2.benchmark import run_site_benchmark
 
     return run_site_benchmark(methods, sites, seeds, evaluations)
+
+
+class TestBenchmarkMovesTheHillOnlyWithASite:
+    def _kwargs(self, monkeypatch, site):
+        import rct2.evolution as evolution
+        from rct2.benchmark import method_ga_parts
+
+        seen = {}
+        real = evolution.evolve_parts
+
+        def spy(*args, **kwargs):
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(evolution, "evolve_parts", spy)
+        method_ga_parts(random.Random(1), 8, population_size=4, site=site)
+        return seen
+
+    def test_a_site_run_moves_the_hill(self, monkeypatch):
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 30] * 30, anchor=(10, 10))
+
+        assert self._kwargs(monkeypatch, site)["relocate_hill"] is True
+
+    def test_a_run_without_a_site_does_not(self, monkeypatch):
+        assert self._kwargs(monkeypatch, None)["relocate_hill"] is False

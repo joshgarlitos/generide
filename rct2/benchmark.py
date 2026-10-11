@@ -29,7 +29,7 @@ from typing import Callable, Optional
 
 from rct2 import construction, physics, ratings
 from rct2.geometry import Position, track_bounds
-from rct2.site import Site, best_fit
+from rct2.site import Site, SiteError, best_fit
 
 
 @dataclass
@@ -142,6 +142,7 @@ def method_ga_parts(
     stats = evolve_parts(
         create_hill_circuit(), rng, fitness_fn=_search_fitness(site),
         population_size=population_size, generations=generations,
+        relocate_hill=site is not None,
     )
     return stats.best_individual.segments
 
@@ -250,6 +251,25 @@ def canned_sites() -> dict[str, Site]:
     downhill = Site.from_rows(["." * width] * depth, anchor=(8, 2), heights=heights)
 
     return {"l-shape": l_shape, "blocked-centre": blocked_centre, "downhill": downhill}
+
+
+def benchmark_sites(include_canned: bool, site_files: list[Path]) -> dict[str, Site]:
+    """The sites a benchmark run uses: the canned ones, then each saved site file.
+
+    A file is named by its stem, so `tests/data/site-14x14.json` shows up as
+    `site-14x14`. Everything is checked before any search starts, so a bad
+    path costs a message and not a long run.
+    """
+    sites = dict(canned_sites()) if include_canned else {}
+    for path in site_files:
+        name = Path(path).stem
+        if name in sites:
+            raise SiteError(
+                f"Two sites would both be called '{name}'. Rename the file "
+                f"{path} so its name differs from the other sites."
+            )
+        sites[name] = Site.load(Path(path))
+    return sites
 
 
 def run_site_benchmark(
