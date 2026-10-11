@@ -406,7 +406,9 @@ def _create_initial_population_parts(
             mutated = mutate_parts(seed_parts, rng, rate=0.3, free_hill=free_hill)
             mutated = _ensure_scaffold_parts(mutated, rng, platform, free_hill)
         else:
-            mutated = generate_random_track_parts(rng, station_tiles=platform)
+            mutated = generate_random_track_parts(
+                rng, station_tiles=platform, free_hill=free_hill,
+            )
 
         ind = Individual(segments=flatten_parts(mutated), parts=mutated)
         ind.fitness = fitness_fn.evaluate(ind.segments)

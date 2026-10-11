@@ -654,6 +654,10 @@ PINNED_FIRST_FREE_INDEX = 2
 # plus this many. One is the same weight as each of the other types.
 RELOCATE_HILL_WEIGHT = 1
 
+# The most parts a random starting track may put between the station and the
+# hill. Zero is the old layout (hill right after the station).
+HILL_LEAD_MAX = 3
+
 # Hill parts by contents, so finding the hill is a lookup and not a rebuild.
 _HILL_HEIGHTS = {
     tuple(build_hill(height)): height
@@ -729,15 +733,18 @@ def generate_random_track_parts(
     min_length: int = 8,
     max_length: int = 50,
     station_tiles: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
 ) -> list[list[int]]:
     """Part-based counterpart to `generate_random_track`.
 
     Builds the same mix of station, slope runs, bank runs, and single simple
     segments with the same probabilities, but keeps each one as its own part
     instead of flattening into one list. A lift hill tall enough to clear the
-    game's drop-height threshold is placed at `HILL_INDEX` up front, so every
-    track starts with a qualifying drop rather than waiting for one to
-    assemble itself out of individually-chosen climb pieces.
+    game's drop-height threshold is part of every track, so every track starts
+    with a qualifying drop rather than waiting for one to assemble itself out
+    of individually-chosen climb pieces. It goes after a random number of
+    leading parts (up to `HILL_LEAD_MAX`), so some starting tracks turn before
+    the hill. With `free_hill=False` it is always right after the station.
     """
     # The hill deliberately does not count against target_length. It is a
     # straight run of 8 to 16 tiles, so charging it to the budget left short
@@ -747,6 +754,7 @@ def generate_random_track_parts(
     hill = build_hill(random_hill_height(rng))
     parts: list[list[int]] = [build_station(station_tiles), hill]
     length = 0
+    lead_start = len(parts)
 
     while length < target_length:
         choice = rng.random()
@@ -765,6 +773,13 @@ def generate_random_track_parts(
         else:  # 60% chance for simple segment
             parts.append([rng.choice(SIMPLE_SEGMENTS)])
             length += 1
+
+    if free_hill:
+        # Move the hill behind a few of the parts built after it. This has to
+        # happen before repair_circuit, which closes the loop for whatever
+        # arrangement it is given.
+        lead = rng.randint(0, min(HILL_LEAD_MAX, len(parts) - lead_start))
+        parts.insert(HILL_INDEX + lead, parts.pop(HILL_INDEX))
 
     # repair_circuit only ever appends, never touches the existing prefix, so
     # regrouping just the new tail (rather than the whole flattened result)

@@ -464,6 +464,49 @@ class TestFreeHillSearch:
         )
 
 
+    def test_starting_populations_mix_hill_positions_with_the_station_first(self):
+        from rct2.construction import hill_height, station_length
+        from rct2.evolution import _create_initial_population_parts, _ensure_scaffold_parts
+        from rct2.fitness import PhysicsFitness
+        from rct2.mutations import find_hill_index, segments_to_parts
+
+        seed = _ensure_scaffold_parts(
+            segments_to_parts(create_hill_circuit()), random.Random(0),
+        )
+        slots = []
+        for run in range(8):
+            population = _create_initial_population_parts(
+                seed, 30, PhysicsFitness(), random.Random(run),
+            )
+            for individual in population.individuals:
+                parts = individual.parts
+                assert station_length(parts[0]) > 0
+                assert sum(1 for part in parts if hill_height(part) > 0) == 1
+                slots.append(find_hill_index(parts))
+
+        assert 1 in slots
+        assert any(slot > 1 for slot in slots)
+
+    def test_with_the_hill_pinned_starting_tracks_all_have_it_at_slot_one(self):
+        from rct2.construction import hill_height
+        from rct2.mutations import generate_random_track_parts
+
+        for run in range(40):
+            parts = generate_random_track_parts(random.Random(run), free_hill=False)
+            assert hill_height(parts[1]) > 0
+
+    def test_random_starting_tracks_put_some_parts_before_the_hill(self):
+        from rct2.mutations import HILL_LEAD_MAX, find_hill_index, generate_random_track_parts
+
+        slots = {
+            find_hill_index(generate_random_track_parts(random.Random(run)))
+            for run in range(60)
+        }
+
+        assert slots == set(range(1, 2 + HILL_LEAD_MAX))
+
+
+
 class TestEvolvePartsOracleCalibration:
     """Tests for the oracle-calibration sampling hook in evolve_parts()."""
 
