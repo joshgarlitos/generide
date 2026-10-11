@@ -451,6 +451,11 @@ ISO_GAUGE = 0.36
 ISO_ANGLES = 4
 # One lap of the animated train, however long the ride is.
 ISO_LAP_SECONDS = 20
+# How many tiles of the site are drawn beyond the ride's own footprint. A large
+# site is cut off here so it cannot shrink the ride in the picture.
+ISO_SITE_MARGIN = 4
+# The corners of a tile, as offsets from its centre.
+_TILE_CORNERS = ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
 
 
 class IsoChunk(NamedTuple):
@@ -512,6 +517,7 @@ def render_isometric(
     start: Optional[Position] = None,
     title: str = "Ride view",
     tile_px: int = 28,
+    site=None,
 ) -> str:
     """An isometric picture of a track: rails, ties, and support columns.
 
@@ -523,6 +529,12 @@ def render_isometric(
     piece is the one `physics.trace` gives, so it crawls up the lift and
     races down the drops, and the lap takes `ISO_LAP_SECONDS` whatever the
     ride's length. A train that stalls runs to the stall and stops there.
+
+    With a `site` (the ride starting at its own origin, as `rct2.site` maps
+    it), the ground the ride has to fit is drawn under it: usable tiles, blocked
+    tiles hatched, raised ground as blocks, and a dashed outline on every ride
+    tile that breaks the site. Only the tiles within `ISO_SITE_MARGIN` of the
+    ride are drawn. With no site the picture is exactly as it was.
     """
     angle %= ISO_ANGLES
     paths = track_path(segments, start)
@@ -535,6 +547,19 @@ def render_isometric(
     half = tile_px / 2
     z_px = ISO_Z_PER_HALF_TILE * half
     ground_z = min(bounds.min_z, 0)
+
+    site_fit = site_tiles = site_bad = None
+    if site is not None:
+        from rct2 import site as site_model
+
+        site_fit = site_model.best_fit(site, segments)
+        site_tiles = site_model.view_tiles(
+            site, site_fit.heading,
+            bounds.min_x - ISO_SITE_MARGIN, bounds.max_x + ISO_SITE_MARGIN,
+            bounds.min_y - ISO_SITE_MARGIN, bounds.max_y + ISO_SITE_MARGIN,
+        )
+        site_bad = site_model.violating_tiles(site, segments, site_fit.heading)
+        ground_z = min([ground_z] + [tile.ground for tile in site_tiles])
 
     def project(x: float, y: float, z: float) -> Tuple[float, float]:
         u, v = _rotate(x, y, angle, cx, cy)
@@ -553,6 +578,9 @@ def render_isometric(
         return point
 
     layers: List[str] = []
+
+    if site is not None:
+        layers.extend(_iso_site_layers(site_tiles, project, fmt, seen, angle, (cx, cy), ground_z))
 
     # Ground grid: tile edges at the lowest level the ride reaches.
     left, right = bounds.min_x - 0.5, bounds.max_x + 0.5
@@ -672,14 +700,28 @@ def render_isometric(
             f'font-size="10" fill="{GRAPH["stall"]}">stalls here</text>'
         )
 
+    legend_h = 0
+    if site is not None:
+        grounds = {(tile.x, tile.y): tile.ground for tile in site_tiles}
+        for x, y in sorted(site_bad):
+            corners = [seen(project(x + dx, y + dy, grounds.get((x, y), ground_z)))
+                       for dx, dy in _TILE_CORNERS]
+            layers.append(
+                f'<path class="tx" data-site="violation" d="M{"L".join(fmt(c) for c in corners)}Z" '
+                f'fill="none" stroke="{GRAPH["stall"]}" stroke-width="2.2" stroke-dasharray="4 2"/>'
+            )
+
     pad, label_h = 24, 46
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     footprint = f"{bounds.width} x {bounds.depth} tiles"
     subtitle = f"{len(segments)} pieces, {footprint}, {bounds.height} height units of relief"
-    text_w = int(max(len(title) * 8.4, len(subtitle) * 6.2))
+    if site is not None:
+        subtitle += ", fits the site" if site_fit.fits else ", does not fit the site"
+        legend_h = 26
+    text_w = int(max(len(title) * 8.4, len(subtitle) * 6.2, 330 if site is not None else 0))
     w = max(max_x - min_x, text_w) + pad * 2
-    h = (max_y - min_y) + pad * 2 + label_h
+    h = (max_y - min_y) + pad * 2 + label_h + legend_h
     # The shift puts the picture's top-left corner at (pad, pad + label_h),
     # centred when the heading is the wider of the two.
     shift_x = pad + (w - pad * 2 - (max_x - min_x)) / 2 - min_x
@@ -699,8 +741,81 @@ fill="{GRAPH["text"]}">{_escape(title)}</text>
   <g transform="translate({shift_x:.1f} {shift_y:.1f})">
 {chr(10).join("    " + layer for layer in layers)}
   </g>
-</svg>
+{_iso_site_legend(pad, h - 12) if site is not None else ""}</svg>
 """
+
+
+def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List[str]:
+    """The site under the ride, back to front: ground, then blocks and blocked tiles.
+
+    Ground at the lowest level in view is one path. Every other tile, raised
+    ground or blocked, is its own element so it can be marked and so it paints
+    in front of what is behind it.
+    """
+    cx, cy = centre
+
+    def corners(x: int, y: int, z: float) -> List[Tuple[float, float]]:
+        return [seen(project(x + dx, y + dy, z)) for dx, dy in _TILE_CORNERS]
+
+    def outline(points) -> str:
+        return "M" + "L".join(fmt(p) for p in points) + "Z"
+
+    layers = [
+        f'<defs><pattern id="site-hatch" width="6" height="6" patternUnits="userSpaceOnUse" '
+        f'patternTransform="rotate(45)"><rect width="6" height="6" fill="{GRAPH["bg"]}"/>'
+        f'<line x1="0" y1="0" x2="0" y2="6" stroke="{GRAPH["text_sec"]}" stroke-width="2"/>'
+        f'</pattern></defs>'
+    ]
+    flat = [t for t in tiles if not t.blocked and t.ground == ground_z]
+    if flat:
+        layers.append(
+            f'<path class="ax" data-site="usable" d="{"".join(outline(corners(t.x, t.y, ground_z)) for t in flat)}" '
+            f'fill="{GRAPH["border"]}" fill-opacity="0.35" stroke="{GRAPH["border"]}" stroke-width="0.6"/>'
+        )
+
+    def far_first(tile) -> Tuple[float, int]:
+        u, v = _rotate(tile.x, tile.y, angle, cx, cy)
+        return -(u + v), tile.ground
+
+    for tile in sorted((t for t in tiles if t.blocked or t.ground != ground_z), key=far_first):
+        top = corners(tile.x, tile.y, tile.ground)
+        rise = tile.ground - ground_z
+        if rise > 0:
+            low = corners(tile.x, tile.y, ground_z)
+            walls = "".join(
+                f"M{fmt(top[i])}L{fmt(top[(i + 1) % 4])}L{fmt(low[(i + 1) % 4])}L{fmt(low[i])}Z"
+                for i in range(4)
+            )
+            layers.append(
+                f'<path class="ax" data-site="wall" d="{walls}" fill="{ELEVATION[0]}" '
+                f'stroke="{GRAPH["bg"]}" stroke-width="0.5"/>'
+            )
+        if tile.blocked:
+            layers.append(
+                f'<path class="ax" data-site="blocked" d="{outline(top)}" fill="url(#site-hatch)" '
+                f'stroke="{GRAPH["text_sec"]}" stroke-width="1"/>'
+            )
+        else:
+            band = min(ELEVATION_BANDS - 1, 1 + rise // 2) if rise > 0 else 0
+            layers.append(
+                f'<path class="ax" data-site="raised" d="{outline(top)}" fill="{ELEVATION[band]}" '
+                f'stroke="{GRAPH["bg"]}" stroke-width="0.5"/>'
+            )
+    return layers
+
+
+def _iso_site_legend(x: int, y: float) -> str:
+    """A key for the marks the site adds, so no mark relies on colour alone."""
+    return (
+        f'  <g class="ts" data-site="legend" font-size="10" fill="{GRAPH["text_sec"]}">\n'
+        f'    <rect x="{x}" y="{y - 9:.0f}" width="12" height="12" fill="url(#site-hatch)" '
+        f'stroke="{GRAPH["text_sec"]}"/>\n'
+        f'    <text x="{x + 18}" y="{y:.0f}">blocked</text>\n'
+        f'    <rect x="{x + 90}" y="{y - 9:.0f}" width="12" height="12" fill="none" '
+        f'stroke="{GRAPH["stall"]}" stroke-width="2" stroke-dasharray="4 2"/>\n'
+        f'    <text x="{x + 108}" y="{y:.0f}">ride breaks the site</text>\n'
+        f'  </g>\n'
+    )
 
 
 def _empty_svg(title: str, reason: str) -> str:

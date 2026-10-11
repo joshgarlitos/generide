@@ -172,3 +172,23 @@ def test_every_best_ride_carries_the_command_that_reproduces_it(tmp_path):
             cwd=REPO, check=True, capture_output=True,
         )
         assert out.read_bytes() == payload["td6"], payload["generation"]
+
+
+def test_a_ride_result_with_a_site_draws_it_in_all_four_views_and_reports_the_fit():
+    from rct2.site import Site
+
+    ride = create_simple_circuit(station_length=6)
+    site = Site.from_rows(["." * 24] * 26, anchor=(8, 8))
+
+    result = demo.ride_result(ride, 30, 30, site=site)
+
+    assert result["summary"]["site"]["fits"] is True
+    assert len(result["iso_svgs"]) == 4
+    assert all('data-site="usable"' in svg for svg in result["iso_svgs"])
+
+
+def test_a_ride_result_with_no_site_has_no_site_in_it():
+    result = demo.ride_result(create_simple_circuit(station_length=6), 30, 30)
+
+    assert "site" not in result["summary"] or result["summary"]["site"] is None
+    assert not any("data-site" in svg for svg in result["iso_svgs"])

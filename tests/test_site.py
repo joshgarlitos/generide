@@ -11,7 +11,9 @@ import pytest
 
 from rct2.generate import create_simple_circuit
 from rct2.geometry import Heading, Position, occupied_tiles
-from rct2.site import Site, SiteError, SiteFit, best_fit, fit_at, site_coords, site_penalty
+from rct2.site import (
+    Site, SiteError, SiteFit, best_fit, fit_at, site_coords, site_penalty, view_tiles, violating_tiles,
+)
 
 RIDE = create_simple_circuit()
 RIDE_TILES = {(t.x, t.y) for t in occupied_tiles(Position(), RIDE)}
@@ -240,3 +242,64 @@ def test_site_penalty_adds_each_kind_and_caps_each_kind_separately():
     # 2 * 10 = 20 (under the cap), 3 * 10 = 30 -> 25, 4 * 10 = 40 -> 25
     assert site_penalty(fit, per_tile=10, cap_per_kind=25) == 70
     assert site_penalty(SiteFit(Heading.NORTH, 0, 0, 0), per_tile=10, cap_per_kind=25) == 0
+
+
+def test_view_tiles_put_each_site_tile_where_the_ride_sees_it():
+    site = site_around_ride(extra_blocked=[world((6, 10))], width=14, depth=20)
+
+    tiles = {(t.x, t.y): t for t in view_tiles(site, Heading.NORTH, 5, 7, 9, 11)}
+
+    assert tiles[(6, 10)].blocked
+    assert not tiles[(5, 10)].blocked
+    assert all(t.ground == 0 for t in tiles.values())
+
+
+def test_view_tiles_give_ground_height_relative_to_the_anchor():
+    heights = [[2] * 14 for _ in range(20)]
+    heights[world((6, 10))[1]][world((6, 10))[0]] = 8
+    site = site_around_ride(heights=heights, width=14, depth=20)
+
+    tiles = {(t.x, t.y): t for t in view_tiles(site, Heading.NORTH, 6, 6, 10, 10)}
+
+    # The anchor's own ground is 2, so a tile at 8 stands 6 above where the ride starts.
+    assert tiles[(6, 10)].ground == 6
+
+
+def test_view_tiles_leave_out_tiles_beyond_the_site():
+    site = site_around_ride()
+
+    tiles = view_tiles(site, Heading.NORTH, -20, 20, -20, 20)
+
+    assert len(tiles) == site.width * site.depth
+
+
+def test_violating_tiles_are_empty_exactly_when_the_ride_fits():
+    site = site_around_ride()
+    fit = fit_at(site, RIDE, Heading.NORTH)
+
+    assert fit.fits
+    assert violating_tiles(site, RIDE, Heading.NORTH) == set()
+
+
+def test_violating_tiles_name_a_ride_tile_on_a_blocked_tile():
+    site = site_around_ride(extra_blocked=[world((0, 2))])
+
+    bad = violating_tiles(site, RIDE, Heading.NORTH)
+
+    assert (0, 2) in bad
+    assert not fit_at(site, RIDE, Heading.NORTH).fits
+
+
+def test_violating_tiles_name_an_entrance_tile_on_a_blocked_tile():
+    site = site_around_ride(extra_blocked=[world((-1, 0))])
+
+    assert (-1, 0) in violating_tiles(site, RIDE, Heading.NORTH)
+
+
+def test_violating_tiles_name_a_ride_tile_below_the_ground():
+    heights = [[0] * 10 for _ in range(14)]
+    wx, wy = world((0, 2))
+    heights[wy][wx] = 40
+    site = site_around_ride(heights=heights)
+
+    assert (0, 2) in violating_tiles(site, RIDE, Heading.NORTH)
