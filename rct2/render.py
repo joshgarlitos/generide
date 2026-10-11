@@ -454,6 +454,10 @@ ISO_LAP_SECONDS = 20
 # How many tiles of the site are drawn beyond the ride's own footprint. A large
 # site is cut off here so it cannot shrink the ride in the picture.
 ISO_SITE_MARGIN = 4
+# Room under the picture for the key to the site's marks, and the least width
+# that holds it.
+ISO_SITE_LEGEND_HEIGHT = 26
+ISO_SITE_LEGEND_WIDTH = 330
 # The corners of a tile, as offsets from its centre.
 _TILE_CORNERS = ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
 
@@ -606,10 +610,7 @@ def render_isometric(
     for path in marked:
         mid = path.points[len(path.points) // 2]
         sx, sy = round(mid[0]), round(mid[1])
-        corners = [
-            seen(project(sx + dx, sy + dy, ground_z))
-            for dx, dy in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))
-        ]
+        corners = [seen(project(sx + dx, sy + dy, ground_z)) for dx, dy in _TILE_CORNERS]
         tag = ' data-station="tile"' if is_station else ""
         layers.append(
             f'<path class="ac"{tag} d="M{"L".join(fmt(c) for c in corners)}Z" fill="none" '
@@ -700,26 +701,20 @@ def render_isometric(
             f'font-size="10" fill="{GRAPH["stall"]}">stalls here</text>'
         )
 
-    legend_h = 0
     if site is not None:
-        grounds = {(tile.x, tile.y): tile.ground for tile in site_tiles}
-        for x, y in sorted(site_bad):
-            corners = [seen(project(x + dx, y + dy, grounds.get((x, y), ground_z)))
-                       for dx, dy in _TILE_CORNERS]
-            layers.append(
-                f'<path class="tx" data-site="violation" d="M{"L".join(fmt(c) for c in corners)}Z" '
-                f'fill="none" stroke="{GRAPH["stall"]}" stroke-width="2.2" stroke-dasharray="4 2"/>'
-            )
+        layers.extend(_iso_violation_layers(site_tiles, site_bad, project, fmt, seen, ground_z))
 
     pad, label_h = 24, 46
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     footprint = f"{bounds.width} x {bounds.depth} tiles"
     subtitle = f"{len(segments)} pieces, {footprint}, {bounds.height} height units of relief"
+    legend_h = 0
+    min_text_w = 0
     if site is not None:
         subtitle += ", fits the site" if site_fit.fits else ", does not fit the site"
-        legend_h = 26
-    text_w = int(max(len(title) * 8.4, len(subtitle) * 6.2, 330 if site is not None else 0))
+        legend_h, min_text_w = ISO_SITE_LEGEND_HEIGHT, ISO_SITE_LEGEND_WIDTH
+    text_w = int(max(len(title) * 8.4, len(subtitle) * 6.2, min_text_w))
     w = max(max_x - min_x, text_w) + pad * 2
     h = (max_y - min_y) + pad * 2 + label_h + legend_h
     # The shift puts the picture's top-left corner at (pad, pad + label_h),
@@ -801,6 +796,20 @@ def _iso_site_layers(tiles, project, fmt, seen, angle, centre, ground_z) -> List
                 f'<path class="ax" data-site="raised" d="{outline(top)}" fill="{ELEVATION[band]}" '
                 f'stroke="{GRAPH["bg"]}" stroke-width="0.5"/>'
             )
+    return layers
+
+
+def _iso_violation_layers(tiles, bad, project, fmt, seen, ground_z) -> List[str]:
+    """A dashed outline on each ride tile that breaks the site, at the ground it stands on."""
+    grounds = {(tile.x, tile.y): tile.ground for tile in tiles}
+    layers = []
+    for x, y in sorted(bad):
+        corners = [seen(project(x + dx, y + dy, grounds.get((x, y), ground_z)))
+                   for dx, dy in _TILE_CORNERS]
+        layers.append(
+            f'<path class="tx" data-site="violation" d="M{"L".join(fmt(c) for c in corners)}Z" '
+            f'fill="none" stroke="{GRAPH["stall"]}" stroke-width="2.2" stroke-dasharray="4 2"/>'
+        )
     return layers
 
 

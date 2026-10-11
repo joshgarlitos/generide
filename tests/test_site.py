@@ -303,3 +303,19 @@ def test_violating_tiles_name_a_ride_tile_below_the_ground():
     site = site_around_ride(heights=heights)
 
     assert (0, 2) in violating_tiles(site, RIDE, Heading.NORTH)
+
+
+@pytest.mark.parametrize("heading", [Heading.NORTH, Heading.EAST, Heading.SOUTH, Heading.WEST])
+def test_violating_tiles_agree_with_the_fit_check_on_whether_the_ride_fits(heading):
+    heights = [[0] * 10 for _ in range(14)]
+    heights[world((0, 2))[1]][world((0, 2))[0]] = 40
+    sites = [
+        site_around_ride(),
+        site_around_ride(extra_blocked=[world((0, 2))]),
+        site_around_ride(extra_blocked=[world((-1, 0))]),
+        site_around_ride(heights=heights),
+        site_around_ride(width=ANCHOR[0] + 3),
+    ]
+
+    for site in sites:
+        assert bool(violating_tiles(site, RIDE, heading)) == (not fit_at(site, RIDE, heading).fits)
