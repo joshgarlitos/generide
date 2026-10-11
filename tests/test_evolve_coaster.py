@@ -234,12 +234,18 @@ class TestRunRecord:
 
     @pytest.mark.parametrize("args,digest", [
         (["-g", "10", "-p", "12", "--rng-seed", "21", "--fitness", "physics"],
-         "dcca17515b2780c02f22006b08ef6c37a731dcc7c7a843918486f0a9a43fb986"),
+         "bc8e533a824ab43c2528ef0b5cc5944da74ebcb22194ae1aa69803c265408dfe"),
         (["-g", "10", "-p", "12", "--rng-seed", "8", "--fitness", "proxy"],
-         "d48f9f35d8f5e58c1d124687610266ae30016a3ce8af84dd6a5983458788c978"),
+         "cdb4828557e651720f61be21d769be3b0730f4cc96ec5556a2291e4e79021819"),
     ])
     def test_output_bytes_are_unchanged_for_a_fixed_seed(self, monkeypatch, tmp_path, args, digest):
-        """Digests recorded from the CLI before run records existed."""
+        """Digests of a seeded CLI run, to catch an accidental change.
+
+        Recorded before run records existed, and re-recorded on 2026-10-11
+        when the lift hill stopped being pinned to slot 1 (the search now
+        draws different random numbers; docs/devlog.md, 2026-10-11). With
+        `free_hill=False` the old digests still come out.
+        """
         output = _real_cli(monkeypatch, tmp_path, *args)
         assert hashlib.sha256(output.read_bytes()).hexdigest() == digest
         run = _only_run()
