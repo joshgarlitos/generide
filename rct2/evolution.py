@@ -375,14 +375,15 @@ def _ensure_scaffold_parts(
     parts: list[list[int]],
     rng: random.Random,
     length: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
 ) -> list[list[int]]:
-    """Station at part 0, lift hill at part 1, in that order.
+    """Station at part 0, then exactly one lift hill somewhere after it.
 
-    Order matters: `ensure_hill_parts` inserts at a fixed index on the
-    assumption the station is already part 0, so a genome missing both would
+    Order matters: `ensure_hill_parts` looks for the hill after the station
+    and inserts a missing one just behind it, so a genome missing both would
     otherwise end up with the hill in the wrong slot.
     """
-    return ensure_hill_parts(_ensure_station_parts(parts, length), rng)
+    return ensure_hill_parts(_ensure_station_parts(parts, length), rng, free_hill)
 
 
 def _create_initial_population_parts(
@@ -391,6 +392,7 @@ def _create_initial_population_parts(
     fitness_fn: FitnessFunction,
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
 ) -> Population:
     """Part-based counterpart to `_create_initial_population`."""
     individuals = []
@@ -401,8 +403,8 @@ def _create_initial_population_parts(
 
     while len(individuals) < population_size:
         if rng.random() < 0.7:
-            mutated = mutate_parts(seed_parts, rng, rate=0.3)
-            mutated = _ensure_scaffold_parts(mutated, rng, platform)
+            mutated = mutate_parts(seed_parts, rng, rate=0.3, free_hill=free_hill)
+            mutated = _ensure_scaffold_parts(mutated, rng, platform, free_hill)
         else:
             mutated = generate_random_track_parts(rng, station_tiles=platform)
 
@@ -420,16 +422,19 @@ def _create_offspring_parts(
     fitness_fn: FitnessFunction,
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
 ) -> list[Individual]:
     """Part-based counterpart to `_create_offspring`."""
     offspring = []
 
-    child1_parts, child2_parts = crossover_parts(parent1.parts, parent2.parts, rng)
+    child1_parts, child2_parts = crossover_parts(
+        parent1.parts, parent2.parts, rng, free_hill,
+    )
 
     for child_parts in [child1_parts, child2_parts]:
-        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
-        child_parts = mutate_parts(child_parts, rng, rate=mutation_rate)
-        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
+        child_parts = mutate_parts(child_parts, rng, rate=mutation_rate, free_hill=free_hill)
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
 
         child = Individual(segments=flatten_parts(child_parts), parts=child_parts)
         child.fitness = fitness_fn.evaluate(child.segments)
@@ -529,6 +534,7 @@ def evolve_parts(
     oracle_scorer: Optional[Callable[[list[int]], Any]] = None,
     oracle_log_writer: Optional[Callable[[Any], None]] = None,
     stop_check: Optional[Callable[[], bool]] = None,
+    free_hill: bool = True,
 ) -> EvolutionStats:
     """Part-based counterpart to `evolve`.
 
@@ -538,7 +544,7 @@ def evolve_parts(
     docs/research-plan.md for why that matters.
 
     Seed with `generate.create_hill_circuit()`, not `create_simple_circuit()`.
-    Every genome here carries a mandatory lift hill, and a hill is a straight
+    Every genome here carries exactly one lift hill, and a hill is a straight
     run of 8 or more tiles, so inserting one into the flat oval displaces its
     end further than `repair_circuit` can walk back and leaves every descendant
     open. Seeded correctly this run improves; seeded with the flat oval it does
@@ -575,6 +581,9 @@ def evolve_parts(
             after the progress callback. When it returns True the run ends
             there and returns the best of the current population, with
             `generations` set to the number of generations actually bred.
+        free_hill: When True (the default) the hill may sit anywhere after
+            the station and the search can move it. When False it stays pinned
+            at the slot right after the station, as in earlier versions.
 
     Returns:
         EvolutionStats with best individual and history
@@ -588,10 +597,10 @@ def evolve_parts(
 
     platform = station_length(seed) or DEFAULT_STATION_LENGTH
     seed_parts = _ensure_scaffold_parts(
-        segments_to_parts(_ensure_station(seed, platform)), rng, platform
+        segments_to_parts(_ensure_station(seed, platform)), rng, platform, free_hill
     )
     population = _create_initial_population_parts(
-        seed_parts, population_size, fitness_fn, rng, platform
+        seed_parts, population_size, fitness_fn, rng, platform, free_hill
     )
 
     fitness_history = []
@@ -632,7 +641,7 @@ def evolve_parts(
             parent1 = _tournament_select(population, rng, tournament_size)
             parent2 = _tournament_select(population, rng, tournament_size)
             offspring = _create_offspring_parts(
-                parent1, parent2, mutation_rate, fitness_fn, rng, platform
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform, free_hill
             )
             next_gen.extend(offspring)
 

@@ -412,6 +412,58 @@ class TestEvolveParts:
         assert stats1.best_individual.segments == stats2.best_individual.segments
 
 
+class TestFreeHillSearch:
+    """The hill may move after the station, and the search keeps exactly one."""
+
+    def test_every_individual_in_every_generation_has_the_station_first_and_one_hill(self):
+        from rct2.construction import hill_height, station_length
+
+        seen_slots = set()
+
+        def check(gen, population):
+            for individual in population.individuals:
+                parts = individual.parts
+                assert station_length(parts[0]) > 0
+                hills = [i for i, part in enumerate(parts) if hill_height(part) > 0]
+                assert len(hills) == 1
+                seen_slots.add(hills[0])
+
+        evolve_parts(
+            create_hill_circuit(), random.Random(21),
+            generations=12, population_size=24, progress_callback=check,
+        )
+
+        assert len(seen_slots) > 1
+
+    def test_the_pinned_hill_search_matches_the_run_recorded_before_the_hill_was_freed(self):
+        """Values recorded from the code before the genome change, with the
+        same seed and settings as the seeded no-site pin in test_fitness.py."""
+        from rct2.fitness import PhysicsFitness
+
+        for make_fitness, best_fitness, length in (
+            (ProxyFitness, 235.0, 58),
+            (PhysicsFitness, 50.853068924145916, 54),
+        ):
+            stats = evolve_parts(
+                create_hill_circuit(), random.Random(3), fitness_fn=make_fitness(),
+                generations=6, population_size=12, free_hill=False,
+            )
+            assert stats.best_fitness == pytest.approx(best_fitness)
+            assert len(stats.best_individual.segments) == length
+
+    def test_with_the_hill_pinned_it_stays_at_slot_one(self):
+        from rct2.construction import hill_height
+
+        def check(gen, population):
+            for individual in population.individuals:
+                assert hill_height(individual.parts[1]) > 0
+
+        evolve_parts(
+            create_hill_circuit(), random.Random(21), generations=8, population_size=16,
+            progress_callback=check, free_hill=False,
+        )
+
+
 class TestEvolvePartsOracleCalibration:
     """Tests for the oracle-calibration sampling hook in evolve_parts()."""
 

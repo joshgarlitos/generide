@@ -34,6 +34,7 @@ from rct2.mutations import (
     _build_slope_run,
     _slope_bump,
     HILL_INDEX,
+    find_hill_index,
     crossover,
     crossover_parts,
     delete_segment,
@@ -570,49 +571,122 @@ class TestPartsRepresentation:
 
 
 class TestHillIsAlwaysPresent:
-    """Every part-based genome carries exactly one lift hill at HILL_INDEX.
+    """Every part-based genome carries exactly one lift hill after the station.
 
     The measured reason: across 25 benchmarked runs of the part-based GA
     before this, only 3 built a drop over the game's 8-unit threshold, and
     those 3 scored roughly double everything else (docs/devlog.md,
     2026-08-15). A hill that has to assemble itself out of individually
-    chosen climb pieces mostly does not.
+    chosen climb pieces mostly does not. The hill may sit anywhere after the
+    station (docs/plans/2026-10-11-1900-feat-free-ride-layout-plan.md), so a
+    turn can come before it.
     """
 
     def _hill_count(self, parts):
         return sum(1 for part in parts if hill_height(part) > 0)
 
+    def _has_one_hill_after_a_station(self, parts):
+        return (
+            station_length(parts[0]) > 0
+            and hill_height(parts[0]) == 0
+            and self._hill_count(parts) == 1
+        )
+
     def test_generated_tracks_have_one(self):
         rng = random.Random(3)
         for _ in range(30):
             parts = generate_random_track_parts(rng)
-            assert hill_height(parts[HILL_INDEX]) > 0
-            assert self._hill_count(parts) == 1
+            assert self._has_one_hill_after_a_station(parts)
 
-    def test_mutation_never_loses_it(self):
+    def test_mutation_keeps_the_station_first_and_exactly_one_hill(self):
         rng = random.Random(5)
         parts = segments_to_parts(create_hill_circuit())
-        for _ in range(50):
+        for _ in range(200):
             parts = mutate_parts(parts, rng, rate=0.3)
-            assert hill_height(parts[HILL_INDEX]) > 0
+            assert self._has_one_hill_after_a_station(parts)
+
+    def test_mutation_sometimes_puts_a_part_between_the_station_and_the_hill(self):
+        rng = random.Random(5)
+        found = 0
+        for seed in range(40):
+            parts = segments_to_parts(create_hill_circuit())
+            for _ in range(15):
+                parts = mutate_parts(parts, random.Random(seed * 100 + _), rate=0.3)
+            if find_hill_index(parts) > HILL_INDEX:
+                found += 1
+        assert found > 0
+
+    def test_relocating_moves_the_hill_and_keeps_its_pieces(self):
+        """Pull out only the relocate type by checking runs where the hill's
+        slot changes: its height is untouched unless adjust_hill also fired."""
+        moved = 0
+        for seed in range(200):
+            parts = segments_to_parts(create_hill_circuit())
+            parts = mutate_parts(parts, random.Random(seed), rate=0.3)
+            if find_hill_index(parts) != HILL_INDEX:
+                moved += 1
+                assert hill_height(parts[find_hill_index(parts)]) > 0
+                assert station_length(parts[0]) > 0
+        assert moved > 0
+
+    def test_delete_replace_and_swap_never_touch_the_hill(self, monkeypatch):
+        import rct2.mutations as mutations
+
+        for kind in ("delete", "replace", "swap"):
+            monkeypatch.setattr(
+                mutations.random.Random, "choice",
+                lambda self, seq, _kind=kind: _kind if _kind in list(seq) else seq[0],
+            )
+            parts = segments_to_parts(create_hill_circuit())
+            before = hill_height(parts[find_hill_index(parts)])
+            result = mutate_parts(parts, random.Random(1), rate=0.3)
+            monkeypatch.undo()
+            assert self._hill_count(result) == 1
+            assert hill_height(result[find_hill_index(result)]) == before
 
     def test_crossover_gives_each_child_exactly_one(self):
-        """Both cut points start past the hill, so each child keeps its own
-        parent's and inherits a suffix that has none. Two hills would leave
-        the second one unpowered, since only the first gets the chain lift."""
+        """Cuts may land anywhere after the station, so the cut points are
+        picked to keep one hill per child. Two hills would leave the second
+        one unpowered, since only the first gets the chain lift."""
         rng = random.Random(7)
         parts1 = generate_random_track_parts(rng)
         parts2 = generate_random_track_parts(rng)
-        for seed in range(30):
-            for child in crossover_parts(parts1, parts2, random.Random(seed)):
-                assert hill_height(child[HILL_INDEX]) > 0
-                assert self._hill_count(child) == 1
+        moved = segments_to_parts(create_hill_circuit())
+        moved.insert(1, list(TURN_RIGHT))
+        for left, right in ((parts1, parts2), (parts1, moved), (moved, parts2)):
+            for seed in range(60):
+                for child in crossover_parts(left, right, random.Random(seed)):
+                    assert self._has_one_hill_after_a_station(child)
 
-    def test_a_genome_arriving_without_one_gets_one(self):
+    def test_crossover_can_put_the_hill_in_a_new_slot(self):
+        """With the hill at different slots in the two parents, children take
+        it to slots neither parent had at that position."""
+        rng = random.Random(7)
+        plain = generate_random_track_parts(rng)
+        turned = segments_to_parts(create_hill_circuit())
+        turned.insert(1, list(TURN_RIGHT))
+        slots = {
+            find_hill_index(child)
+            for seed in range(80)
+            for child in crossover_parts(plain, turned, random.Random(seed))
+        }
+        assert len(slots) > 1
+
+    def test_a_genome_arriving_without_one_gets_one_at_slot_one(self):
         rng = random.Random(11)
         parts = ensure_hill_parts(segments_to_parts(create_simple_circuit()), rng)
         assert hill_height(parts[HILL_INDEX]) > 0
         assert station_length(parts[0]) > 0
+
+    def test_a_genome_with_two_hills_keeps_the_first(self):
+        rng = random.Random(11)
+        parts = segments_to_parts(create_hill_circuit())
+        first = build_hill(MIN_HILL_HEIGHT)
+        second = build_hill(MIN_HILL_HEIGHT + 2)
+        genome = [parts[0], list(TURN_RIGHT), first, list(TURN_LEFT), second] + parts[2:]
+        result = ensure_hill_parts(genome, rng)
+        assert self._hill_count(result) == 1
+        assert result[2] == first
 
     def test_ensuring_twice_does_not_add_a_second(self):
         rng = random.Random(13)
@@ -620,17 +694,22 @@ class TestHillIsAlwaysPresent:
         twice = ensure_hill_parts(once, rng)
         assert twice == once
 
+    def test_starting_from_the_seed_the_hill_is_at_slot_one(self):
+        parts = ensure_hill_parts(
+            segments_to_parts(create_hill_circuit()), random.Random(1),
+        )
+        assert find_hill_index(parts) == HILL_INDEX
+
     def test_mutation_can_change_the_height(self):
         """Height is a setting evolution tunes, not a structure it has to
-        rediscover -- that is the whole point of holding the hill in a fixed
-        slot rather than letting mutations rebuild it."""
+        rediscover -- that is the whole point of keeping the hill a single
+        part that delete, replace and swap never touch."""
         rng = random.Random(17)
         parts = segments_to_parts(create_hill_circuit())
-        start = hill_height(parts[HILL_INDEX])
-        seen = {start}
+        seen = {hill_height(parts[find_hill_index(parts)])}
         for _ in range(80):
             parts = mutate_parts(parts, rng, rate=0.3)
-            seen.add(hill_height(parts[HILL_INDEX]))
+            seen.add(hill_height(parts[find_hill_index(parts)]))
         assert len(seen) > 1
         assert all(MIN_HILL_HEIGHT <= h <= MAX_HILL_HEIGHT for h in seen)
 
@@ -644,3 +723,29 @@ class TestHillIsAlwaysPresent:
         for _ in range(50):
             parts = mutate_parts(parts, rng, rate=0.3)
             assert track_bounds(Position(), flatten_parts(parts)).min_z >= 0
+
+
+class TestPinnedHill:
+    """`free_hill=False` keeps the earlier rules: the hill sits at HILL_INDEX."""
+
+    def test_mutation_keeps_it_at_slot_one(self):
+        rng = random.Random(5)
+        parts = segments_to_parts(create_hill_circuit())
+        for _ in range(50):
+            parts = mutate_parts(parts, rng, rate=0.3, free_hill=False)
+            assert hill_height(parts[HILL_INDEX]) > 0
+
+    def test_crossover_keeps_it_at_slot_one(self):
+        rng = random.Random(7)
+        parts1 = generate_random_track_parts(rng)
+        parts2 = generate_random_track_parts(rng)
+        for seed in range(30):
+            for child in crossover_parts(parts1, parts2, random.Random(seed), free_hill=False):
+                assert hill_height(child[HILL_INDEX]) > 0
+                assert sum(1 for part in child if hill_height(part) > 0) == 1
+
+    def test_a_hill_in_the_wrong_slot_is_not_moved_but_a_slot_one_hill_is_inserted(self):
+        parts = segments_to_parts(create_hill_circuit())
+        shifted = [parts[0], list(TURN_RIGHT)] + parts[1:]
+        result = ensure_hill_parts(shifted, random.Random(1), free_hill=False)
+        assert hill_height(result[HILL_INDEX]) > 0

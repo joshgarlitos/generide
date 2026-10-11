@@ -20,7 +20,6 @@ from rct2.construction import (
     build_hill,
     build_station,
     elevation_at,
-    hill_height,
     legal_bank_segments,
     legal_slope_segments,
     slope_closing_path,
@@ -635,13 +634,44 @@ def flatten_parts(parts: list[list[int]]) -> list[int]:
     return [seg for part in parts for seg in part]
 
 
-# Part 0 is the station and part 1 is the lift hill. Those are fixed positions
-# rather than parts that happen to be there: the chain lift is assigned to the
-# *first* run of climb pieces on the track (construction.find_first_hill), so a
-# hill anywhere but directly after the station risks a smaller climb ahead of
-# it taking the lift and leaving the tall one unpowered.
+# Part 0 is the station. The lift hill is a single part that can sit anywhere
+# after it, because the chain lift goes to the *first* run of climb pieces on
+# the track (construction.find_first_hill), so a smaller climb ahead of the hill
+# can take the lift. That is a cost the score charges (the train stalls or the
+# hill goes unpowered), not a reason to forbid the layout: a turn before the
+# hill is a layout a builder would try.
+#
+# `HILL_INDEX` is where a missing hill is put back, and `FIRST_FREE_INDEX` is
+# the first slot mutation and crossover may touch. With `free_hill=False` they
+# are the old rules again (hill pinned at slot 1, nothing changed before slot 2),
+# which keeps the earlier behaviour available to compare against and to fall
+# back to if the free hill costs ordinary rides their quality.
 HILL_INDEX = 1
-FIRST_FREE_INDEX = 2
+FIRST_FREE_INDEX = 1
+PINNED_FIRST_FREE_INDEX = 2
+
+# How many of the mutation types are "relocate the hill", out of the eight
+# plus this many. One is the same weight as each of the other types.
+RELOCATE_HILL_WEIGHT = 1
+
+# Hill parts by contents, so finding the hill is a lookup and not a rebuild.
+_HILL_HEIGHTS = {
+    tuple(build_hill(height)): height
+    for height in range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2)
+}
+
+
+def _hill_height_of(part: list[int]) -> int:
+    """Height of a built hill part, or 0 for any other part."""
+    return _HILL_HEIGHTS.get(tuple(part), 0)
+
+
+def find_hill_index(parts: list[list[int]]) -> Optional[int]:
+    """Index of the first lift hill after the station, or None if there is none."""
+    for index in range(HILL_INDEX, len(parts)):
+        if _hill_height_of(parts[index]):
+            return index
+    return None
 
 
 def _stays_above_ground(segments: list[int], min_elevation: int = 0) -> bool:
@@ -663,22 +693,35 @@ def random_hill_height(rng: random.Random) -> int:
 
 
 def ensure_hill_parts(
-    parts: list[list[int]], rng: random.Random,
+    parts: list[list[int]], rng: random.Random, free_hill: bool = True,
 ) -> list[list[int]]:
-    """Guarantee `parts[HILL_INDEX]` is a lift hill, inserting one if not.
+    """Guarantee the genome carries exactly one lift hill after the station.
 
-    The counterpart to `_ensure_station_parts`. Every part-based genome is
-    supposed to carry exactly one hill in this slot, so a track can never
-    score below the game's drop-height threshold for want of a big drop.
-    Crossover and mutation are written to preserve it, and this is the
-    backstop for genomes that arrive from anywhere else (a user-supplied
-    seed, `segments_to_parts` on a flat track).
+    The counterpart to `_ensure_station_parts`. Every part-based genome carries
+    one hill, so a track can never score below the game's drop-height threshold
+    for want of a big drop, and never two, because two would compete for the one
+    chain lift. A second hill is dropped (the first stays) and a missing one is
+    inserted at `HILL_INDEX`. Crossover and mutation are written to preserve
+    this, and this is the backstop for genomes that arrive from anywhere else
+    (a user-supplied seed, `segments_to_parts` on a flat track).
+
+    With `free_hill=False` the hill must sit at `HILL_INDEX` exactly, as before.
     """
     result = [part.copy() for part in parts]
-    if len(result) > HILL_INDEX and hill_height(result[HILL_INDEX]) > 0:
+    if not free_hill:
+        if len(result) > HILL_INDEX and _hill_height_of(result[HILL_INDEX]):
+            return result
+        result.insert(HILL_INDEX, build_hill(random_hill_height(rng)))
         return result
-    result.insert(HILL_INDEX, build_hill(random_hill_height(rng)))
-    return result
+
+    hill = find_hill_index(result)
+    if hill is None:
+        result.insert(min(HILL_INDEX, len(result)), build_hill(random_hill_height(rng)))
+        return result
+    return [
+        part for index, part in enumerate(result)
+        if index <= hill or not _hill_height_of(part)
+    ]
 
 
 def generate_random_track_parts(
@@ -741,6 +784,7 @@ def mutate_parts(
     rng: random.Random,
     rate: float = 0.1,
     max_attempts: int = 10,
+    free_hill: bool = True,
 ) -> list[list[int]]:
     """Part-based counterpart to `mutate`.
 
@@ -750,34 +794,51 @@ def mutate_parts(
     (callers should run the seed through `segments_to_parts` after
     `_ensure_station`, never the other way around).
 
-    A seventh type, "adjust_hill", raises or lowers the lift hill at
-    `HILL_INDEX` by one height step. That hill is otherwise untouchable: it is
-    never deleted, replaced, swapped, or inserted over, so its height is a
-    setting evolution tunes rather than a structure it has to keep
-    rediscovering. Everything from `FIRST_FREE_INDEX` on behaves as before.
+    A seventh type, "adjust_hill", raises or lowers the lift hill by one height
+    step, and an eighth, "relocate_hill", moves it to another slot after the
+    station. The hill is otherwise untouchable: it is never deleted, replaced
+    or swapped, so its height is a setting evolution tunes rather than a
+    structure it has to keep rediscovering. Parts may be inserted anywhere
+    after the station, including directly before the hill.
+
+    With `free_hill=False` the hill stays at `HILL_INDEX`, nothing before
+    `PINNED_FIRST_FREE_INDEX` changes, and "relocate_hill" is not drawn, so the
+    random draws match the earlier behaviour exactly.
     """
     if not parts:
         return parts
 
-    parts = ensure_hill_parts(parts, rng)
+    parts = ensure_hill_parts(parts, rng, free_hill)
+    first_free = FIRST_FREE_INDEX if free_hill else PINNED_FIRST_FREE_INDEX
+    mutation_types = [
+        "insert_simple", "insert_slope", "insert_banked",
+        "delete", "replace", "swap", "adjust_hill",
+    ]
+    if free_hill:
+        mutation_types += ["relocate_hill"] * RELOCATE_HILL_WEIGHT
 
     for _ in range(max_attempts):
         result = [part.copy() for part in parts]
         num_mutations = max(1, int(len(parts) * rate))
 
         for _ in range(num_mutations):
-            mutation_type = rng.choice([
-                "insert_simple", "insert_slope", "insert_banked",
-                "delete", "replace", "swap", "adjust_hill",
-            ])
-            mutable_indices = list(range(FIRST_FREE_INDEX, len(result)))
-            insert_low = min(FIRST_FREE_INDEX, len(result))
+            mutation_type = rng.choice(mutation_types)
+            hill = find_hill_index(result)
+            mutable_indices = [
+                i for i in range(first_free, len(result)) if i != hill
+            ]
+            insert_low = min(first_free, len(result))
 
             if mutation_type == "adjust_hill":
-                current = hill_height(result[HILL_INDEX])
+                current = _hill_height_of(result[hill])
                 step = rng.choice([-2, 2])
                 new_height = min(MAX_HILL_HEIGHT, max(MIN_HILL_HEIGHT, current + step))
-                result[HILL_INDEX] = build_hill(new_height)
+                result[hill] = build_hill(new_height)
+
+            elif mutation_type == "relocate_hill":
+                moved = result.pop(hill)
+                slots = [i for i in range(FIRST_FREE_INDEX, len(result) + 1) if i != hill]
+                result.insert(rng.choice(slots) if slots else hill, moved)
 
             elif mutation_type == "insert_simple":
                 pos = rng.randint(insert_low, len(result))
@@ -837,21 +898,38 @@ def crossover_parts(
     parts1: list[list[int]],
     parts2: list[list[int]],
     rng: random.Random,
+    free_hill: bool = True,
 ) -> tuple[list[list[int]], list[list[int]]]:
     """Part-based counterpart to `crossover`.
 
     Cuts only ever land on a part boundary, so a slope run or banked turn
     can never be split between the two children -- the flat version's bug.
 
-    Cut points start at `FIRST_FREE_INDEX`, which protects the station and the
-    lift hill twice over: each child keeps its own parent's prefix (station and
-    hill intact), and the donated suffix starts past the other parent's hill,
-    so no child ends up with two hills competing for the one chain lift.
+    Free hill: cuts may land anywhere after the station. The second cut is
+    chosen on the same side of its parent's hill as the first cut is of its
+    own, so each child takes exactly one hill (its own parent's prefix hill, or
+    the other parent's suffix hill, never both and never neither). Repairing
+    the count afterwards would drop or insert a straight run of 10 or more
+    tiles and move the loop further than `repair_circuit` can walk back.
+
+    With `free_hill=False`, cut points start at `PINNED_FIRST_FREE_INDEX`,
+    which protects the station and the hill at slot 1 twice over: each child
+    keeps its own parent's prefix, and the donated suffix starts past the other
+    parent's hill.
     """
-    parts1 = ensure_hill_parts(parts1, rng)
-    parts2 = ensure_hill_parts(parts2, rng)
-    point1 = rng.randint(min(FIRST_FREE_INDEX, len(parts1)), len(parts1))
-    point2 = rng.randint(min(FIRST_FREE_INDEX, len(parts2)), len(parts2))
+    parts1 = ensure_hill_parts(parts1, rng, free_hill)
+    parts2 = ensure_hill_parts(parts2, rng, free_hill)
+    if not free_hill:
+        point1 = rng.randint(min(PINNED_FIRST_FREE_INDEX, len(parts1)), len(parts1))
+        point2 = rng.randint(min(PINNED_FIRST_FREE_INDEX, len(parts2)), len(parts2))
+    else:
+        hill1 = find_hill_index(parts1)
+        hill2 = find_hill_index(parts2)
+        point1 = rng.randint(FIRST_FREE_INDEX, len(parts1))
+        if hill1 < point1:  # child 1 keeps its own hill, so it must not take the other one
+            point2 = rng.randint(hill2 + 1, len(parts2))
+        else:
+            point2 = rng.randint(FIRST_FREE_INDEX, hill2)
     child1 = parts1[:point1] + parts2[point2:]
     child2 = parts2[:point2] + parts1[point1:]
     return child1, child2
