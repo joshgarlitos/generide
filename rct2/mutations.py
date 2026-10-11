@@ -14,6 +14,7 @@ from rct2.construction import (
     END_STATION,
     MAX_HILL_HEIGHT,
     MIN_HILL_HEIGHT,
+    hill_height,
     SLOPE_TRANSITIONS,
     bank_closing_path,
     bank_state_at,
@@ -642,10 +643,10 @@ def flatten_parts(parts: list[list[int]]) -> list[int]:
 # hill is a layout a builder would try.
 #
 # `HILL_INDEX` is where a missing hill is put back, and `FIRST_FREE_INDEX` is
-# the first slot mutation and crossover may touch. With `free_hill=False` they
-# are the old rules again (hill pinned at slot 1, nothing changed before slot 2),
-# which keeps the earlier behaviour available to compare against and to fall
-# back to if the free hill costs ordinary rides their quality.
+# the first slot mutation and crossover may touch. With `free_hill=False` the
+# hill is pinned at slot 1 and nothing before slot 2 changes, which is the
+# baseline the free hill is measured against and a fallback if it ever costs
+# ordinary rides their quality.
 HILL_INDEX = 1
 FIRST_FREE_INDEX = 1
 PINNED_FIRST_FREE_INDEX = 2
@@ -659,22 +660,10 @@ RELOCATE_HILL_WEIGHT = 1
 # hill. Zero is the old layout (hill right after the station).
 HILL_LEAD_MAX = 3
 
-# Hill parts by contents, so finding the hill is a lookup and not a rebuild.
-_HILL_HEIGHTS = {
-    tuple(build_hill(height)): height
-    for height in range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2)
-}
-
-
-def _hill_height_of(part: list[int]) -> int:
-    """Height of a built hill part, or 0 for any other part."""
-    return _HILL_HEIGHTS.get(tuple(part), 0)
-
-
 def find_hill_index(parts: list[list[int]]) -> Optional[int]:
     """Index of the first lift hill after the station, or None if there is none."""
     for index in range(HILL_INDEX, len(parts)):
-        if _hill_height_of(parts[index]):
+        if hill_height(parts[index]):
             return index
     return None
 
@@ -710,11 +699,11 @@ def ensure_hill_parts(
     this, and this is the backstop for genomes that arrive from anywhere else
     (a user-supplied seed, `segments_to_parts` on a flat track).
 
-    With `free_hill=False` the hill must sit at `HILL_INDEX` exactly, as before.
+    With `free_hill=False` the hill must sit at `HILL_INDEX` exactly.
     """
     result = [part.copy() for part in parts]
     if not free_hill:
-        if len(result) > HILL_INDEX and _hill_height_of(result[HILL_INDEX]):
+        if len(result) > HILL_INDEX and hill_height(result[HILL_INDEX]):
             return result
         result.insert(HILL_INDEX, build_hill(random_hill_height(rng)))
         return result
@@ -723,10 +712,10 @@ def ensure_hill_parts(
     if hill is None:
         result.insert(min(HILL_INDEX, len(result)), build_hill(random_hill_height(rng)))
         return result
-    return [
-        part for index, part in enumerate(result)
-        if index <= hill or not _hill_height_of(part)
-    ]
+    extras = [i for i in range(hill + 1, len(result)) if hill_height(result[i])]
+    for index in reversed(extras):
+        del result[index]
+    return result
 
 
 def generate_random_track_parts(
@@ -819,14 +808,13 @@ def mutate_parts(
 
     With `relocate_hill=True` an eighth type, "relocate_hill", moves the hill
     to another slot after the station. It is what lets the search fit a very
-    tight site (the 14 by 14 benchmark site goes from 4% to 92% of runs), but
-    without a site it cost ordinary rides their quality (the share of runs
-    stuck near the bottom of the score range tripled over 50 seeds), so runs
-    without a site leave it off.
+    tight site, but without a site it costs ordinary rides quality (more runs
+    get stuck at a low score; docs/devlog.md, 2026-10-11), so runs without a
+    site leave it off.
 
     With `free_hill=False` the hill stays at `HILL_INDEX`, nothing before
     `PINNED_FIRST_FREE_INDEX` changes, and "relocate_hill" is not drawn, so the
-    random draws match the earlier behaviour exactly.
+    random draws are those of a pinned-hill search.
     """
     if not parts:
         return parts
@@ -853,7 +841,7 @@ def mutate_parts(
             insert_low = min(first_free, len(result))
 
             if mutation_type == "adjust_hill":
-                current = _hill_height_of(result[hill])
+                current = hill_height(result[hill])
                 step = rng.choice([-2, 2])
                 new_height = min(MAX_HILL_HEIGHT, max(MIN_HILL_HEIGHT, current + step))
                 result[hill] = build_hill(new_height)

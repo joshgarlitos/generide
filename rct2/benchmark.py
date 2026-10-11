@@ -29,7 +29,7 @@ from typing import Callable, Optional
 
 from rct2 import construction, physics, ratings
 from rct2.geometry import Position, track_bounds
-from rct2.site import Site, best_fit, SiteError
+from rct2.site import Site, SiteError, best_fit
 
 
 @dataclass

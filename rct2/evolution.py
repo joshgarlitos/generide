@@ -125,8 +125,18 @@ def site_ride_tracker(
     from rct2.construction import validate_for_request
     from rct2.site import best_fit
 
+    last = {}
+
     def validate(segments):
-        return validate_for_request(segments, site=site, max_width=max_width, max_depth=max_depth)
+        # buildable and playable both ask about the same track, so the check
+        # runs once for it.
+        key = tuple(segments)
+        if last.get("key") != key:
+            last["key"] = key
+            last["result"] = validate_for_request(
+                segments, site=site, max_width=max_width, max_depth=max_depth,
+            )
+        return last["result"]
 
     def buildable(segments):
         return all(issue.code != "energy_shortfall" for issue in validate(segments).issues)
@@ -687,7 +697,7 @@ def evolve_parts(
             `generations` set to the number of generations actually bred.
         free_hill: When True (the default) the hill may sit anywhere after
             the station and the search can move it. When False it stays pinned
-            at the slot right after the station, as in earlier versions.
+            at the slot right after the station.
         relocate_hill: Also let mutation move the hill to another slot. Meant
             for runs with a site: it fits tight sites that nothing else does,
             and costs ordinary rides some quality (see `mutate_parts`).
