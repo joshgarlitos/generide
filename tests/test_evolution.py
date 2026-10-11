@@ -799,3 +799,105 @@ class TestStopCheck:
         assert stats.generations == 0
         assert len(first) == 1
         assert stats.best_individual is first[0]
+
+
+class TestRideTracker:
+    """The tracker keeps the best playable ride and the best fitting ride, and changes nothing else."""
+
+    def _tracker(self, scores, fits=(), buildable=(), playable=()):
+        class Scored:
+            def evaluate(self, segments):
+                return scores[tuple(segments)]
+
+        from rct2.evolution import RideTracker
+
+        return RideTracker(
+            Scored(),
+            fits=lambda s: tuple(s) in fits,
+            buildable=lambda s: tuple(s) in buildable,
+            playable=lambda s: tuple(s) in playable,
+        )
+
+    def test_scores_pass_through_unchanged(self):
+        tracker = self._tracker({(1,): 5.0, (2,): -3.0})
+
+        assert tracker.evaluate([1]) == 5.0
+        assert tracker.evaluate([2]) == -3.0
+
+    def test_a_fitting_ride_is_kept_even_when_it_scores_below_a_ride_that_does_not_fit(self):
+        scores = {(1,): 100.0, (2,): -50.0, (3,): -20.0}
+        tracker = self._tracker(
+            scores, fits={(2,), (3,)}, buildable={(2,), (3,)}, playable={(1,)},
+        )
+
+        for segments in ([1], [2], [3]):
+            tracker.evaluate(segments)
+
+        assert tracker.best_playable.segments == [1]
+        assert tracker.best_fitting.segments == [3]
+        assert tracker.best_fitting.playable is False
+
+    def test_the_fitting_ride_is_marked_playable_when_it_is(self):
+        tracker = self._tracker(
+            {(1,): 10.0}, fits={(1,)}, buildable={(1,)}, playable={(1,)},
+        )
+
+        tracker.evaluate([1])
+
+        assert tracker.best_fitting.segments == [1]
+        assert tracker.best_fitting.playable is True
+        assert tracker.best_playable.segments == [1]
+
+    def test_a_ride_the_game_would_not_build_is_never_the_fitting_ride(self):
+        tracker = self._tracker({(1,): 10.0}, fits={(1,)}, buildable=set(), playable=set())
+
+        tracker.evaluate([1])
+
+        assert tracker.best_fitting is None
+        assert tracker.best_playable is None
+
+    def test_it_keeps_a_copy_and_the_first_of_equal_scores(self):
+        tracker = self._tracker(
+            {(1,): 5.0, (2,): 5.0}, fits={(1,), (2,)}, buildable={(1,), (2,)}, playable={(1,), (2,)},
+        )
+        segments = [1]
+        tracker.evaluate(segments)
+        segments.append(9)
+        tracker.evaluate([2])
+
+        assert tracker.best_playable.segments == [1]
+
+    def test_other_attributes_come_from_the_wrapped_scorer(self):
+        from rct2.evolution import RideTracker
+
+        class Scorer:
+            site = "the site"
+
+            def evaluate(self, segments):
+                return 0.0
+
+        tracker = RideTracker(Scorer(), fits=lambda s: False, buildable=lambda s: False,
+                              playable=lambda s: False)
+
+        assert tracker.site == "the site"
+
+    def test_wrapping_a_real_run_does_not_change_the_result(self):
+        from rct2.evolution import site_ride_tracker
+        from rct2.fitness import PhysicsFitness
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 30] * 30, anchor=(10, 10))
+        plain = evolve_parts(
+            create_hill_circuit(), random.Random(4), fitness_fn=PhysicsFitness(site=site),
+            generations=4, population_size=10,
+        )
+        tracker = site_ride_tracker(PhysicsFitness(site=site), site)
+        watched = evolve_parts(
+            create_hill_circuit(), random.Random(4), fitness_fn=tracker,
+            generations=4, population_size=10,
+        )
+
+        assert watched.best_individual.segments == plain.best_individual.segments
+        assert watched.fitness_history == plain.fitness_history
+        assert tracker.best_playable is not None
+        assert tracker.best_fitting is not None

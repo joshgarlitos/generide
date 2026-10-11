@@ -48,6 +48,100 @@ class Individual:
         return validate_construction(self.segments).valid
 
 
+@dataclass(frozen=True)
+class TrackedRide:
+    """A ride the tracker kept, with the score the search gave it."""
+
+    segments: list[int]
+    fitness: float
+    playable: bool
+
+
+class RideTracker:
+    """Wraps a fitness function and remembers two rides besides the best overall.
+
+    One is the best ride the game would build and a train could finish; the
+    other is the best ride that fits the site, even when its train stalls. A
+    tight site can leave no playable ride that fits, and the second one still
+    shows how far the search got.
+
+    It only watches. Every score passes through unchanged, so selection, the
+    best overall and every seeded run are exactly what they were without it.
+    Anything else asked of it (`site`, `max_width`, ...) goes to the wrapped
+    fitness function.
+
+    Args:
+        fitness_fn: The scorer the search uses.
+        fits: Whether a track fits the site.
+        buildable: Whether the game would build the track. A stalled train or an
+            energy estimate that falls short does not count against it, because
+            those only make a ride not playable.
+        playable: Whether the track is buildable and a train finishes it.
+    """
+
+    def __init__(
+        self,
+        fitness_fn: FitnessFunction,
+        fits: Callable[[list[int]], bool],
+        buildable: Callable[[list[int]], bool],
+        playable: Callable[[list[int]], bool],
+    ):
+        self.fitness_fn = fitness_fn
+        self._fits = fits
+        self._buildable = buildable
+        self._playable = playable
+        self.best_playable: Optional[TrackedRide] = None
+        self.best_fitting: Optional[TrackedRide] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.fitness_fn, name)
+
+    def evaluate(self, segments: list[int]) -> float:
+        score = self.fitness_fn.evaluate(segments)
+
+        # Cheap comparisons first: most evaluations beat neither record.
+        beats_playable = self.best_playable is None or score > self.best_playable.fitness
+        beats_fitting = self.best_fitting is None or score > self.best_fitting.fitness
+        is_playable = None
+        if beats_playable:
+            is_playable = self._playable(segments)
+            if is_playable:
+                self.best_playable = TrackedRide(list(segments), score, True)
+        if beats_fitting and self._fits(segments) and self._buildable(segments):
+            if is_playable is None:
+                is_playable = self._playable(segments)
+            self.best_fitting = TrackedRide(list(segments), score, is_playable)
+        return score
+
+
+def site_ride_tracker(
+    fitness_fn: FitnessFunction,
+    site: Any,
+    max_width: Optional[int] = None,
+    max_depth: Optional[int] = None,
+) -> RideTracker:
+    """A `RideTracker` that judges fit, buildable and playable the way a request does."""
+    from rct2 import physics
+    from rct2.construction import validate_for_request
+    from rct2.site import best_fit
+
+    def validate(segments):
+        return validate_for_request(segments, site=site, max_width=max_width, max_depth=max_depth)
+
+    def buildable(segments):
+        return all(issue.code != "energy_shortfall" for issue in validate(segments).issues)
+
+    def playable(segments):
+        return validate(segments).valid and physics.simulate(segments).completed
+
+    return RideTracker(
+        fitness_fn,
+        fits=lambda segments: best_fit(site, segments).fits,
+        buildable=buildable,
+        playable=playable,
+    )
+
+
 @dataclass
 class Population:
     """A population of track designs."""

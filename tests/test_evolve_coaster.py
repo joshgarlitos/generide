@@ -421,3 +421,135 @@ class TestSiteFlag:
             _run_cli(monkeypatch, tmp_path, ["--site", str(path)])
 
         assert "anchor" in capsys.readouterr().err
+
+
+class TestTwoRides:
+    """Covers AE3: with a site, the run returns the best playable ride and the best one that fits.
+
+    The scripted search scores two rides: the hill circuit, which a train
+    finishes but which does not fit a narrow site, and the flat oval, which
+    fits it and which no train can finish.
+    """
+
+    SITE_ROWS = ["." * 8] * 14
+
+    def _site_path(self, tmp_path):
+        from rct2.site import Site
+
+        path = tmp_path / "narrow.json"
+        Site.from_rows(self.SITE_ROWS, anchor=(4, 7)).save(path)
+        return path
+
+    def _scripted_search(self, rides, best):
+        def run(**kwargs):
+            fitness_fn = kwargs["fitness_fn"]
+            for segments in rides:
+                fitness_fn.evaluate(segments)
+            return EvolutionStats(
+                generations=1, best_fitness=1.0,
+                best_individual=Individual(segments=best, fitness=1.0),
+                fitness_history=[1.0], valid_ratio_history=[1.0],
+            )
+
+        return run
+
+    def _cli(self, monkeypatch, tmp_path, *extra):
+        output = tmp_path / "out.td6"
+        monkeypatch.setattr(sys, "argv", [
+            "evolve_coaster.py", "--output", str(output), "--genome", "parts",
+            "-g", "1", "-p", "4", "--rng-seed", "1", "--fitness", "physics", *extra,
+        ])
+        evolve_coaster.main()
+        return output
+
+    def test_a_stalled_ride_that_fits_is_returned_next_to_the_playable_one(
+        self, monkeypatch, tmp_path, capsys,
+    ):
+        from rct2 import runrecord, td6
+        from rct2.generate import create_simple_circuit
+
+        hill, oval = create_hill_circuit(), create_simple_circuit()
+        monkeypatch.setattr(
+            evolve_coaster, "evolve_parts", self._scripted_search([hill, oval], best=hill),
+        )
+
+        output = self._cli(monkeypatch, tmp_path, "--site", str(self._site_path(tmp_path)))
+
+        fits_file = tmp_path / "out-fits.td6"
+        assert output.exists() and fits_file.exists()
+        assert [e.segment_type for e in td6.load(fits_file).elements] == oval
+        out = capsys.readouterr().out
+        assert "NOT playable" in out
+        (record,) = runrecord.list_runs()
+        run = runrecord.load_run(record["id"])
+        result = run.record["result"]
+        assert result["site"]["fits"] is False  # the playable ride does not fit
+        fitting = result["fitting_ride"]
+        assert fitting["track"] == oval
+        assert fitting["playable"] is False
+        assert fitting["site"]["fits"] is True
+        assert (run.directory / runrecord.FITS_TD6).exists()
+
+    def test_one_ride_when_the_best_fitting_ride_is_the_best_ride(
+        self, monkeypatch, tmp_path,
+    ):
+        from rct2 import runrecord
+
+        hill = create_hill_circuit()
+        roomy = tmp_path / "roomy.json"
+        from rct2.site import Site
+
+        Site.from_rows(["." * 40] * 40, anchor=(10, 10)).save(roomy)
+        monkeypatch.setattr(
+            evolve_coaster, "evolve_parts", self._scripted_search([hill], best=hill),
+        )
+
+        output = self._cli(monkeypatch, tmp_path, "--site", str(roomy))
+
+        assert output.exists()
+        assert not (tmp_path / "out-fits.td6").exists()
+        (record,) = runrecord.list_runs()
+        run = runrecord.load_run(record["id"])
+        assert "fitting_ride" not in run.record["result"]
+        assert not (run.directory / runrecord.FITS_TD6).exists()
+
+    def test_with_no_site_there_is_one_ride_and_no_fitting_section(self, monkeypatch, tmp_path):
+        from rct2 import runrecord
+
+        hill = create_hill_circuit()
+        monkeypatch.setattr(
+            evolve_coaster, "evolve_parts", self._scripted_search([hill], best=hill),
+        )
+
+        output = self._cli(monkeypatch, tmp_path)
+
+        assert output.exists()
+        assert not (tmp_path / "out-fits.td6").exists()
+        (record,) = runrecord.list_runs()
+        assert "fitting_ride" not in runrecord.load_run(record["id"]).record["result"]
+
+    def test_with_no_playable_ride_the_fitting_ride_is_still_written(
+        self, monkeypatch, tmp_path, capsys,
+    ):
+        from rct2 import runrecord
+        from rct2.generate import create_simple_circuit
+
+        oval = create_simple_circuit()
+        # The best overall is an open stub, which the game cannot build.
+        stub = [0x02, 0x01, 0x00, 0x00, 0x00]
+        monkeypatch.setattr(
+            evolve_coaster, "evolve_parts", self._scripted_search([oval], best=stub),
+        )
+
+        with pytest.raises(SystemExit) as exit_info:
+            self._cli(monkeypatch, tmp_path, "--site", str(self._site_path(tmp_path)))
+
+        assert exit_info.value.code == 1
+        assert (tmp_path / "out-fits.td6").exists()
+        assert not (tmp_path / "out.td6").exists()
+        captured = capsys.readouterr()
+        assert "No playable ride was found" in captured.out
+        (record,) = runrecord.list_runs()
+        run = runrecord.load_run(record["id"])
+        assert run.record["status"] == "failed"
+        assert run.record["result"]["fitting_ride"]["playable"] is False
