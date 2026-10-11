@@ -314,6 +314,13 @@ function. Making the lift hill a mandatory part rather than something the
 search had to stumble on took it to 4.33. Every one of those numbers comes
 from the ported model, so the game has confirmed none of it yet.
 
+On 2026-10-11 the pin on the hill's position was relaxed: the hill is still one
+mandatory part, but it can sit anywhere after the station. With no site the
+median stayed at 4.36 over 50 seeds (4.365 before, 4.355 after) and every one of
+the 50 runs still cleared the drop threshold; with a site, runs also move the
+hill, which fits a 14 by 14 square in 92% of runs against 0% before. See
+docs/devlog.md (2026-10-11).
+
 ### Building piece by piece instead of editing
 
 Start at the station and choose each next piece, rather than editing finished
