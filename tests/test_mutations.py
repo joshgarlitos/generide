@@ -622,12 +622,34 @@ class TestHillIsAlwaysPresent:
         moved = 0
         for seed in range(200):
             parts = segments_to_parts(create_hill_circuit())
-            parts = mutate_parts(parts, random.Random(seed), rate=0.3)
+            parts = mutate_parts(parts, random.Random(seed), rate=0.3, relocate_hill=True)
             if find_hill_index(parts) != HILL_INDEX:
                 moved += 1
                 assert hill_height(parts[find_hill_index(parts)]) > 0
                 assert station_length(parts[0]) > 0
         assert moved > 0
+
+    def test_relocating_is_a_mutation_only_when_asked_for(self, monkeypatch):
+        import rct2.mutations as mutations
+
+        offered = set()
+
+        def spy(self, seq):
+            if "adjust_hill" in list(seq):
+                offered.update(seq)
+            return seq[0]
+
+        monkeypatch.setattr(mutations.random.Random, "choice", spy)
+        parts = segments_to_parts(create_hill_circuit())
+
+        def offered_by(**kwargs):
+            offered.clear()
+            mutate_parts(parts, random.Random(1), rate=0.3, **kwargs)
+            return set(offered)
+
+        assert "relocate_hill" not in offered_by()
+        assert "relocate_hill" in offered_by(relocate_hill=True)
+        assert "relocate_hill" not in offered_by(free_hill=False, relocate_hill=True)
 
     def test_delete_replace_and_swap_never_touch_the_hill(self, monkeypatch):
         import rct2.mutations as mutations

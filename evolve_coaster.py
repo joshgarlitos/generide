@@ -478,6 +478,10 @@ def main():
         mutation_rate=args.mutation_rate,
         progress_callback=progress if (args.verbose or run_id) else None,
     )
+    if args.genome == "parts":
+        # Moving the hill is what fits a very tight site; without a site it
+        # only costs ride quality, so it is on for site runs alone.
+        run_kwargs["relocate_hill"] = site is not None
     if args.oracle_calibrate:
         from rct2.calibration_log import append_record
 

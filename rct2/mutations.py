@@ -650,8 +650,9 @@ HILL_INDEX = 1
 FIRST_FREE_INDEX = 1
 PINNED_FIRST_FREE_INDEX = 2
 
-# How many of the mutation types are "relocate the hill", out of the eight
-# plus this many. One is the same weight as each of the other types.
+# How many of the mutation types are "relocate the hill", on top of the seven
+# others, when relocation is turned on. One is the same weight as each of the
+# others. Relocation is off unless a run asks for it (see `mutate_parts`).
 RELOCATE_HILL_WEIGHT = 1
 
 # The most parts a random starting track may put between the station and the
@@ -800,6 +801,7 @@ def mutate_parts(
     rate: float = 0.1,
     max_attempts: int = 10,
     free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> list[list[int]]:
     """Part-based counterpart to `mutate`.
 
@@ -810,11 +812,17 @@ def mutate_parts(
     `_ensure_station`, never the other way around).
 
     A seventh type, "adjust_hill", raises or lowers the lift hill by one height
-    step, and an eighth, "relocate_hill", moves it to another slot after the
-    station. The hill is otherwise untouchable: it is never deleted, replaced
-    or swapped, so its height is a setting evolution tunes rather than a
-    structure it has to keep rediscovering. Parts may be inserted anywhere
-    after the station, including directly before the hill.
+    step. The hill is otherwise untouchable: it is never deleted, replaced or
+    swapped, so its height is a setting evolution tunes rather than a structure
+    it has to keep rediscovering. Parts may be inserted anywhere after the
+    station, including directly before the hill.
+
+    With `relocate_hill=True` an eighth type, "relocate_hill", moves the hill
+    to another slot after the station. It is what lets the search fit a very
+    tight site (the 14 by 14 benchmark site goes from 4% to 92% of runs), but
+    without a site it cost ordinary rides their quality (the share of runs
+    stuck near the bottom of the score range tripled over 50 seeds), so runs
+    without a site leave it off.
 
     With `free_hill=False` the hill stays at `HILL_INDEX`, nothing before
     `PINNED_FIRST_FREE_INDEX` changes, and "relocate_hill" is not drawn, so the
@@ -829,7 +837,7 @@ def mutate_parts(
         "insert_simple", "insert_slope", "insert_banked",
         "delete", "replace", "swap", "adjust_hill",
     ]
-    if free_hill:
+    if free_hill and relocate_hill:
         mutation_types += ["relocate_hill"] * RELOCATE_HILL_WEIGHT
 
     for _ in range(max_attempts):

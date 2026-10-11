@@ -487,6 +487,7 @@ def _create_initial_population_parts(
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
     free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> Population:
     """Part-based counterpart to `_create_initial_population`."""
     individuals = []
@@ -497,7 +498,9 @@ def _create_initial_population_parts(
 
     while len(individuals) < population_size:
         if rng.random() < 0.7:
-            mutated = mutate_parts(seed_parts, rng, rate=0.3, free_hill=free_hill)
+            mutated = mutate_parts(
+                seed_parts, rng, rate=0.3, free_hill=free_hill, relocate_hill=relocate_hill,
+            )
             mutated = _ensure_scaffold_parts(mutated, rng, platform, free_hill)
         else:
             mutated = generate_random_track_parts(
@@ -519,6 +522,7 @@ def _create_offspring_parts(
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
     free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> list[Individual]:
     """Part-based counterpart to `_create_offspring`."""
     offspring = []
@@ -529,7 +533,10 @@ def _create_offspring_parts(
 
     for child_parts in [child1_parts, child2_parts]:
         child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
-        child_parts = mutate_parts(child_parts, rng, rate=mutation_rate, free_hill=free_hill)
+        child_parts = mutate_parts(
+            child_parts, rng, rate=mutation_rate, free_hill=free_hill,
+            relocate_hill=relocate_hill,
+        )
         child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
 
         child = Individual(segments=flatten_parts(child_parts), parts=child_parts)
@@ -631,6 +638,7 @@ def evolve_parts(
     oracle_log_writer: Optional[Callable[[Any], None]] = None,
     stop_check: Optional[Callable[[], bool]] = None,
     free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> EvolutionStats:
     """Part-based counterpart to `evolve`.
 
@@ -680,6 +688,9 @@ def evolve_parts(
         free_hill: When True (the default) the hill may sit anywhere after
             the station and the search can move it. When False it stays pinned
             at the slot right after the station, as in earlier versions.
+        relocate_hill: Also let mutation move the hill to another slot. Meant
+            for runs with a site: it fits tight sites that nothing else does,
+            and costs ordinary rides some quality (see `mutate_parts`).
 
     Returns:
         EvolutionStats with best individual and history
@@ -696,7 +707,7 @@ def evolve_parts(
         segments_to_parts(_ensure_station(seed, platform)), rng, platform, free_hill
     )
     population = _create_initial_population_parts(
-        seed_parts, population_size, fitness_fn, rng, platform, free_hill
+        seed_parts, population_size, fitness_fn, rng, platform, free_hill, relocate_hill
     )
 
     fitness_history = []
@@ -737,7 +748,8 @@ def evolve_parts(
             parent1 = _tournament_select(population, rng, tournament_size)
             parent2 = _tournament_select(population, rng, tournament_size)
             offspring = _create_offspring_parts(
-                parent1, parent2, mutation_rate, fitness_fn, rng, platform, free_hill
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform, free_hill,
+                relocate_hill,
             )
             next_gen.extend(offspring)
 

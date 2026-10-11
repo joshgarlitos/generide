@@ -142,6 +142,7 @@ def method_ga_parts(
     stats = evolve_parts(
         create_hill_circuit(), rng, fitness_fn=_search_fitness(site),
         population_size=population_size, generations=generations,
+        relocate_hill=site is not None,
     )
     return stats.best_individual.segments
 
