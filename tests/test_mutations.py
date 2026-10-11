@@ -737,8 +737,8 @@ class TestPinnedHill:
 
     def test_crossover_keeps_it_at_slot_one(self):
         rng = random.Random(7)
-        parts1 = generate_random_track_parts(rng)
-        parts2 = generate_random_track_parts(rng)
+        parts1 = generate_random_track_parts(rng, free_hill=False)
+        parts2 = generate_random_track_parts(rng, free_hill=False)
         for seed in range(30):
             for child in crossover_parts(parts1, parts2, random.Random(seed), free_hill=False):
                 assert hill_height(child[HILL_INDEX]) > 0
