@@ -4,6 +4,16 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-11: The ride view shows the space it has to fit
+
+A verdict of "fits the site" is hard to trust when you cannot see the site, so the isometric view now draws it. Give a run a site and the picture of its best ride shows the ground under the ride: usable tiles as a faint grid, blocked tiles hatched, ground that stands higher than where the ride starts as blocks with walls, and a dashed outline on every ride tile that breaks the site. A small key under the picture names the hatching and the dashes, so nothing depends on colour alone, and the heading says whether the ride fits.
+
+Two choices worth writing down. The picture draws only the tiles within four of the ride, so a 60 by 60 site does not shrink the ride into a corner, and drawing a site adds about a fifth to the picture's size, where a no-site picture is exactly what it was. And the picture draws the heading the fit check picked, the same one the "place at" line reports, because drawing the site at a different heading than the verdict would be the most confusing thing this view could do.
+
+The local web UI draws the site for any run that has one. The browser demo's result code takes a site too, but the page has no way to give it one yet, so nothing changes there until the painter exists. I checked the picture in a real browser on an L-shaped patch with a hill and a blocked block, and it reads the way I wanted. I did not add a browser test: the seeded library the tests use has two runs and the compare tests count on that, and a render test already pins every mark.
+
+---
+
 ## 2026-10-10: Designing a ride to fit a space, phase 1
 
 I wanted to point at a space in a park and get a ride that fits it, so the request now carries a site: which tiles are free, how high the ground is, and where the first station piece goes. The plan is `docs/plans/2026-10-09-0326-feat-site-aware-ride-fit-plan.md` and the tracking issue is #78. This is phase 1 of three: the core, plus a spike I have written but not run.

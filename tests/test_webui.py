@@ -816,6 +816,38 @@ class TestSiteInTheResult:
         rows = {r["label"]: r["value"] for r in run["stats_view"]["simulated"]}
         assert "allowed" not in rows["Footprint"]
 
+    def test_the_isometric_view_of_a_run_with_a_site_draws_the_site(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture())
+
+        body = call(app, "GET", f"/api/runs/{run_id}/iso.svg").body.decode("utf-8")
+
+        assert 'data-site="usable"' in body
+        assert "fits the site" in body
+
+    def test_the_isometric_view_marks_where_a_ride_breaks_the_site(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture(blocked_everywhere=True))
+
+        body = call(app, "GET", f"/api/runs/{run_id}/iso.svg").body.decode("utf-8")
+
+        assert 'data-site="violation"' in body
+        assert "does not fit the site" in body
+
+    def test_the_isometric_view_of_a_run_with_no_site_is_unchanged(self, app):
+        run_id = saved_run(seed=9)
+
+        body = call(app, "GET", f"/api/runs/{run_id}/iso.svg").body.decode("utf-8")
+
+        assert "data-site" not in body
+
+    def test_the_isometric_view_still_draws_when_the_runs_site_file_is_gone(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture())
+        (runrecord.run_dir(run_id) / "site.json").unlink()
+
+        response = call(app, "GET", f"/api/runs/{run_id}/iso.svg")
+
+        assert response.status == 200
+        assert "data-site" not in response.body.decode("utf-8")
+
     def test_a_run_without_a_site_shows_no_fit_rows(self, app):
         run_id = saved_run(seed=9)
 

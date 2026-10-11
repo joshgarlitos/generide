@@ -115,13 +115,16 @@ def _window(value: Optional[List[float]]):
     return None if value is None else (float(value[0]), float(value[1]))
 
 
-def ride_result(segments: List[int], max_width: Optional[int], max_depth: Optional[int]) -> Dict[str, Any]:
+def ride_result(
+    segments: List[int], max_width: Optional[int], max_depth: Optional[int], site=None,
+) -> Dict[str, Any]:
     """Pictures, summary, and .td6 bytes for one ride.
 
     A ride that fails construction checks gets no .td6, as in the CLI, which
-    never exports one.
+    never exports one. With a site, the summary says whether the ride fits it
+    and every picture draws it.
     """
-    summary = runrecord.ride_summary(segments, max_width, max_depth)
+    summary = runrecord.ride_summary(segments, max_width, max_depth, site=site)
     data = None
     if summary["valid"]:
         ride = create_ride_from_segments(list(segments), TEMPLATE)
@@ -137,6 +140,7 @@ def ride_result(segments: List[int], max_width: Optional[int], max_depth: Option
         "iso_svgs": [
             render.render_isometric(
                 segments, angle, lift_indices=set(summary["lift_indices"]), title="Ride view",
+                site=site,
             )
             for angle in range(render.ISO_ANGLES)
         ],

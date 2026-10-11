@@ -931,6 +931,7 @@ class App:
             elif kind == "iso":
                 body = render.render_isometric(
                     segments, angle=_quarter_turns((query or {}).get("angle")), title="Ride view",
+                    site=runrecord.site_from_path((run.record.get("request") or {}).get("site")),
                 )
             else:
                 body = render.render_profile(segments, title="Side profile")

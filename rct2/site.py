@@ -20,7 +20,7 @@ to the entrance and clearance above ground are not checked.
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from rct2 import construction
 from rct2.generate import calculate_entrance_positions
@@ -267,6 +267,61 @@ def best_fit(site: Site, segments: Iterable[int]) -> SiteFit:
         if best.total == 0:
             break
     return best
+
+
+@dataclass(frozen=True)
+class SiteTile:
+    """One site tile as the ride sees it: its place in the ride's own frame."""
+
+    x: int
+    y: int
+    blocked: bool
+    ground: int  # height above the ground at the anchor, in track height units
+
+
+def view_tiles(
+    site: Site, heading: Heading, min_x: int, max_x: int, min_y: int, max_y: int
+) -> List[SiteTile]:
+    """The site's tiles inside a rectangle of the ride's frame, for drawing.
+
+    Tiles of the rectangle that fall outside the site are left out.
+    """
+    anchor_ground = site.ground(*site.anchor)
+    tiles = []
+    for y in range(min_y, max_y + 1):
+        for x in range(min_x, max_x + 1):
+            wx, wy = site_coords(site.anchor, heading, x, y)
+            if site.inside(wx, wy):
+                tiles.append(SiteTile(
+                    x=x, y=y, blocked=site.blocked(wx, wy),
+                    ground=site.ground(wx, wy) - anchor_ground,
+                ))
+    return tiles
+
+
+def violating_tiles(
+    site: Site, segments: Iterable[int], heading: Heading
+) -> Set[Tuple[int, int]]:
+    """Where, in the ride's frame, a ride breaks the site when it faces `heading`.
+
+    The same three tests as `fit_at`, but naming the tiles instead of counting
+    them, so a picture can mark them. Entrance and exit tiles are included.
+    """
+    segments = list(segments)
+    anchor_ground = site.ground(*site.anchor)
+    bad: Set[Tuple[int, int]] = set()
+    for x, y, z in _footprint(segments):
+        wx, wy = site_coords(site.anchor, heading, x, y)
+        if (not site.inside(wx, wy) or site.blocked(wx, wy)
+                or anchor_ground + z < site.ground(wx, wy)):
+            bad.add((x, y))
+    side = _entrance_side(segments)
+    if side is not None:
+        for y in (0, construction.station_length(segments) - 1):
+            wx, wy = site_coords(site.anchor, heading, side, y)
+            if not site.inside(wx, wy) or site.blocked(wx, wy):
+                bad.add((side, y))
+    return bad
 
 
 def site_penalty(fit: SiteFit, per_tile: float, cap_per_kind: float) -> float:

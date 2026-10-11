@@ -14,6 +14,7 @@ from rct2.geometry import Position, track_bounds
 from rct2.render import (
     ELEVATION_BANDS,
     GRAPH,
+    ISO_Z_PER_HALF_TILE,
     _elevation_band,
     iso_paint_order,
     plan_track,
@@ -23,6 +24,9 @@ from rct2.render import (
     render_track,
 )
 from rct2.construction import STATION_SEGMENTS
+from rct2.generate import create_simple_circuit
+from rct2.site import Site, best_fit, site_coords
+from rct2.geometry import Heading
 from rct2.physics import trace
 from rct2.trackpath import STRAIGHT_STEPS, PiecePath, track_path
 
@@ -409,3 +413,173 @@ def test_the_stall_cross_sits_where_the_train_stops():
     first_x, first_y = (float(v) for v in cross[1:].split("L")[0].split(","))
     assert first_x + 5 == pytest.approx(last_x, abs=0.1)
     assert first_y + 5 == pytest.approx(last_y, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# The isometric view draws the site
+
+SITE_RIDE = create_simple_circuit()
+SITE_ANCHOR = (12, 12)
+
+
+def open_site(width=30, depth=30, blocked=(), heights=None, anchor=SITE_ANCHOR, all_blocked=False):
+    rows = [["#" if all_blocked else "."] * width for _ in range(depth)]
+    rows[anchor[1]][anchor[0]] = "."
+    for x, y in blocked:
+        rows[y][x] = "#"
+    return Site.from_rows(["".join(r) for r in rows], anchor=anchor, heights=heights)
+
+
+def world_of(ride_tile, anchor=SITE_ANCHOR):
+    return site_coords(anchor, Heading.NORTH, *ride_tile)
+
+
+def elements(svg, marker):
+    root = ET.fromstring(svg)
+    return [e for e in root.iter() if e.get("data-site") == marker]
+
+
+def first_corner_y(svg, marker):
+    """The y of the first corner of the first element with this marker."""
+    path = elements(svg, marker)[0].get("d")
+    return float(path[1:].split("L")[0].split(",")[1])
+
+
+def test_a_render_with_no_site_has_no_site_elements():
+    svg = render_isometric(SITE_RIDE)
+
+    assert "data-site" not in svg
+    assert render_isometric(SITE_RIDE, site=None) == svg
+
+
+def test_a_blocked_tile_is_its_own_marked_element():
+    site = open_site(blocked=[world_of((6, 10))])
+
+    svg = render_isometric(SITE_RIDE, site=site)
+
+    assert len(elements(svg, "blocked")) == 1
+    assert ET.fromstring(svg).tag.endswith("svg")
+    assert "var(--" not in svg
+
+
+def test_a_blocked_tile_is_marked_by_hatching_not_by_colour_alone():
+    svg = render_isometric(SITE_RIDE, site=open_site(blocked=[world_of((6, 10))]))
+
+    assert "url(#site-hatch)" in elements(svg, "blocked")[0].get("fill")
+    assert 'id="site-hatch"' in svg
+
+
+def test_a_raised_tile_draws_higher_by_the_height_difference():
+    def tile_top(raise_by):
+        heights = [[0] * 30 for _ in range(30)]
+        wx, wy = world_of((6, 10))
+        heights[wy][wx] = raise_by
+        svg = render_isometric(SITE_RIDE, site=open_site(heights=heights))
+        # The picture is shifted to fit its contents, so measure against the flat ground.
+        return first_corner_y(svg, "raised") - first_corner_y(svg, "usable")
+
+    z_px = ISO_Z_PER_HALF_TILE * 28 / 2
+
+    assert tile_top(4) - tile_top(10) == pytest.approx(6 * z_px, abs=0.3)
+
+
+def test_a_raised_tile_gets_walls_down_to_the_ground():
+    heights = [[0] * 30 for _ in range(30)]
+    wx, wy = world_of((6, 10))
+    heights[wy][wx] = 6
+
+    svg = render_isometric(SITE_RIDE, site=open_site(heights=heights))
+
+    assert len(elements(svg, "wall")) == 1
+    assert "data-site=\"wall\"" not in render_isometric(SITE_RIDE, site=open_site())
+
+
+def test_a_ride_that_fits_has_no_violation_marks_and_says_so():
+    svg = render_isometric(SITE_RIDE, site=open_site())
+
+    assert elements(svg, "violation") == []
+    assert "fits the site" in svg
+    assert "does not fit" not in svg
+
+
+def test_a_ride_that_does_not_fit_marks_the_tiles_that_break_the_site():
+    svg = render_isometric(SITE_RIDE, site=open_site(all_blocked=True))
+
+    marks = elements(svg, "violation")
+    assert len(marks) > 10
+    assert all(m.get("fill") == "none" and m.get("stroke-dasharray") for m in marks)
+    assert "does not fit the site" in svg
+
+
+def test_the_legend_names_what_the_marks_mean():
+    svg = render_isometric(SITE_RIDE, site=open_site(all_blocked=True))
+
+    legend = elements(svg, "legend")
+    assert len(legend) == 1
+    labels = [e.text for e in legend[0].iter() if e.text and e.text.strip()]
+    assert labels == ["blocked", "ride breaks the site"]
+
+
+def test_a_ride_that_dips_below_its_start_does_not_turn_flat_ground_into_raised_blocks():
+    # Ten tiles of 25 degree downhill, so the track ends 8 height units under the anchor.
+    diving = SITE_RIDE[:6] + [10] * 4 + SITE_RIDE[6:]
+    site = open_site()
+
+    svg = render_isometric(diving, site=site)
+
+    assert elements(svg, "usable")
+    assert elements(svg, "wall") == []
+    assert len(svg) < len(render_isometric(diving)) * 2  # it was five times before the fix
+
+
+def test_the_picture_draws_the_site_at_the_heading_the_fit_check_picked():
+    # A long, narrow strip only holds the ride when it faces east.
+    site = Site.from_rows(["." * 40] * 8, anchor=(5, 3))
+    assert best_fit(site, SITE_RIDE).heading == Heading.EAST
+    blocked_tile = site_coords((5, 3), Heading.EAST, 6, 10)
+    rows = [list(row) for row in site.rows]
+    rows[blocked_tile[1]][blocked_tile[0]] = "#"
+    site = Site.from_rows(["".join(r) for r in rows], anchor=(5, 3))
+
+    svg = render_isometric(SITE_RIDE, site=site)
+
+    assert "fits the site" in svg and "does not fit" not in svg
+    assert elements(svg, "violation") == []
+    assert len(elements(svg, "blocked")) == 1
+
+
+def test_ride_tiles_outside_a_small_site_are_marked():
+    site = Site.from_rows(["." * 3] * 3, anchor=(1, 1))
+
+    svg = render_isometric(SITE_RIDE, site=site)
+
+    assert len(elements(svg, "violation")) > 10
+    assert "does not fit the site" in svg
+
+
+@pytest.mark.parametrize("angle", [0, 1, 2, 3])
+def test_every_view_angle_includes_the_site(angle):
+    site = open_site(blocked=[world_of((6, 10))])
+
+    svg = render_isometric(SITE_RIDE, angle, site=site)
+
+    assert elements(svg, "usable") and len(elements(svg, "blocked")) == 1
+
+
+def test_a_site_much_larger_than_the_ride_draws_only_the_tiles_near_it():
+    small = render_isometric(SITE_RIDE, site=open_site(width=30, depth=30))
+    big = render_isometric(SITE_RIDE, site=open_site(
+        width=60, depth=60, anchor=(27, 27),
+    ))
+
+    assert small.split("viewBox=")[1].split(" ")[0:3] == big.split("viewBox=")[1].split(" ")[0:3]
+    assert len(big) < len(small) * 1.1
+
+
+def test_drawing_a_site_adds_a_modest_amount_to_a_picture_sent_four_at_a_time():
+    segments = manic_miner_segments()
+    plain = len(render_isometric(segments).encode("utf-8"))
+
+    with_site = render_isometric(segments, site=open_site(width=60, depth=60, anchor=(30, 30)))
+
+    assert len(with_site.encode("utf-8")) < plain * 1.3
