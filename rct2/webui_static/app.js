@@ -460,6 +460,8 @@ async function showRun(runId, tabParam) {
   const liveBox = h("div", { class: "panel-stack" });
   const warnings = [h("div", { class: "panel-stack" }), h("div", { class: "panel-stack" })]; // on Overview and Install
   const pictures = h("div", { class: "pictures" });
+  const fittingOverview = h("div", { class: "panel-stack" });
+  const fittingGraphs = h("div", { class: "panel-stack" });
   const fitness = h("div", { class: "score-chart" });
   const stats = h("div", { class: "panel-stack" });
   const checkBox = h("div", { class: "panel-stack" });
@@ -474,8 +476,8 @@ async function showRun(runId, tabParam) {
   // ---- tabs ----
   let current = RUN_TABS.some(([key]) => key === tabParam) ? tabParam : "overview";
   const panelContent = {
-    overview: [liveBox, warnings[0], stats],
-    graphs: [pictures, fitness],
+    overview: [liveBox, warnings[0], stats, fittingOverview],
+    graphs: [pictures, fittingGraphs, fitness],
     check: [checkBox],
     install: [warnings[1], installBox],
   };
@@ -698,6 +700,33 @@ async function showRun(runId, tabParam) {
     put(pictures, h("div", { class: "iso-cell" }, group.element, figure), profileSlot);
   };
 
+  // ---- The second ride: the best one that fits the site ----
+  let fittingKey = null;
+  const renderFitting = () => {
+    const fit = run.fitting_ride;
+    const key = fit ? `${fit.label}-${fit.segments}-${run.status}` : "none";
+    if (key === fittingKey) return;
+    fittingKey = key;
+    if (!fit) {
+      put(fittingOverview);
+      put(fittingGraphs);
+      return;
+    }
+    const sentence = fit.no_playable_ride
+      ? "No playable ride was found, so this is the only ride, and it can not be built as it stands."
+      : "This ride fits the site better than the main result does.";
+    const text = () => h("div", { class: "well" },
+      h("h2", {}, fit.label),
+      h("p", {}, sentence),
+      fit.playable ? null : h("p", { class: "small muted" },
+        "Its pieces are valid but the train runs out of speed before the lap ends, so the game would not run it as a ride."));
+    put(fittingOverview, text());
+    const group = isoGroup();
+    const figure = group.picture((angle) => fetchSvg(`${path}/iso.svg?angle=${angle}&ride=fits&v=${fittingKey}`), `Isometric view of the ride that fits the site: ${fit.label}`);
+    figure.append(h("figcaption", {}, `${fit.label}: isometric view.`));
+    put(fittingGraphs, text(), h("div", { class: "iso-cell" }, group.element, figure));
+  };
+
   const renderFitness = () => {
     const version = run.live.generation;
     put(fitness, picture(`${path}/fitness.svg?v=${version}-${run.status}`,
@@ -856,6 +885,7 @@ async function showRun(runId, tabParam) {
     renderLive();
     renderWarnings();
     renderPictures();
+    renderFitting();
     renderFitness();
     renderStats();
     renderCheck();
@@ -886,6 +916,7 @@ async function showRun(runId, tabParam) {
     renderLive();
     renderWarnings();
     renderPictures();
+    renderFitting();
     renderFitness();
     renderStats();
     renderCheck();

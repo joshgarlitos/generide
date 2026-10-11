@@ -211,6 +211,29 @@ def _best_summary(run: runrecord.Run) -> Optional[Dict[str, Any]]:
     return summary
 
 
+def _fitting_ride(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The second ride of a run with a site: the best one that fits, if it differs.
+
+    Its label says plainly when a train would stall on it, because it is shown
+    as a ride the search found, not as one to build.
+    """
+    result = record.get("result") or {}
+    fitting = result.get("fitting_ride")
+    if not fitting:
+        return None
+    playable = bool(fitting.get("playable"))
+    verdict = fitting.get("site") or {}
+    return {
+        "playable": playable,
+        "label": "Best fit" if playable else "Best fit, not playable: the train stalls",
+        "no_playable_ride": not result.get("exported"),
+        "fits": verdict.get("fits"),
+        "segments": fitting.get("segments"),
+        "stall_index": fitting.get("stall_index"),
+        "has_file": bool(fitting.get("file")),
+    }
+
+
 def _headline(best: Optional[Dict[str, Any]], record: Dict[str, Any]) -> Dict[str, Any]:
     """Flat headline numbers, estimates and game-checked kept apart by key."""
     source: Dict[str, Any] = {}
@@ -394,6 +417,7 @@ def run_detail(run: runrecord.Run, now: Optional[float] = None) -> Dict[str, Any
         "warnings": _warnings(best, record),
         "stopped_early": record.get("status") == "stopped",
         "has_ride": (directory / runrecord.BEST_TD6).is_file(),
+        "fitting_ride": _fitting_ride(record),
         "improvements": len(run.improvements),
         "checks": record.get("checks") or [],
         "checking": record.get("check_status") == "checking",
@@ -926,6 +950,9 @@ class App:
             )
         else:
             segments = run.improvements[-1]["segments"] if run.improvements else []
+            if (query or {}).get("ride") == "fits":
+                fitting = (run.record.get("result") or {}).get("fitting_ride") or {}
+                segments = fitting.get("track") or segments
             if kind == "plan":
                 body = render.render_track(segments, title="Top-down plan")
             elif kind == "iso":
