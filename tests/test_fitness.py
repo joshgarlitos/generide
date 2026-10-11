@@ -561,3 +561,133 @@ class TestEveryKindOfSiteViolationIsCharged:
         fitting, _ = _site_for(short_ride)
 
         assert make(site=fitting).evaluate(short_ride) > make(site=shut).evaluate(long_ride)
+
+
+class TestMovedHill:
+    """A hill with a turn ahead of it is exported, scored and judged like any other.
+
+    Covers AE1 and AE2 of docs/plans/2026-10-11-1900-feat-free-ride-layout-plan.md.
+    The chain lift goes to the first run of climb pieces on the track, so a
+    turn before the hill is fine and a small climb before it steals the lift.
+    The scores are checked on both scorers: the benchmark searches with
+    PhysicsFitness, the other classes with ProxyFitness.
+    """
+
+    SCORERS = [
+        pytest.param(ProxyFitness, id="proxy"),
+        pytest.param(lambda: PhysicsFitness(ported_ratings=True), id="physics"),
+    ]
+
+    @staticmethod
+    def _layout(front, west):
+        """Station, a right turn, `front`, then a loop that closes (checked by each test)."""
+        from rct2.construction import DEFAULT_STATION_LENGTH, build_station
+        from rct2.generate import FLAT, RIGHT_QUARTER_TURN_3
+
+        turn = RIGHT_QUARTER_TURN_3
+        return (
+            build_station(DEFAULT_STATION_LENGTH) + [turn] + front + [turn]
+            + [FLAT] * 6 + [turn] + [FLAT] * west + [turn]
+        )
+
+    @classmethod
+    def _turn_then_hill(cls):
+        from rct2.construction import MIN_HILL_HEIGHT, build_hill
+
+        return cls._layout(build_hill(MIN_HILL_HEIGHT), west=10)
+
+    @classmethod
+    def _small_climb_then_hill(cls):
+        """A two-piece climb and a two-piece drop, two flats apart, ahead of the hill."""
+        from rct2.construction import MIN_HILL_HEIGHT, build_hill
+
+        front = [0x06, 0x09, 0x00, 0x00, 0x0C, 0x0F] + build_hill(MIN_HILL_HEIGHT)
+        return cls._layout(front, west=16)
+
+    @classmethod
+    def _climb_touching_the_hill(cls):
+        from rct2.construction import MIN_HILL_HEIGHT, build_hill
+
+        front = [0x06, 0x09] + build_hill(MIN_HILL_HEIGHT) + [0x0C, 0x0F]
+        return cls._layout(front, west=14)
+
+    def test_the_layouts_are_closed_loops(self):
+        from rct2.geometry import Position, is_closed_circuit
+
+        for segments in (
+            self._turn_then_hill(), self._small_climb_then_hill(), self._climb_touching_the_hill(),
+        ):
+            assert is_closed_circuit(Position(), segments)
+
+    def test_covers_ae1_a_turn_before_the_hill_keeps_the_lift_on_the_hill(self):
+        from rct2 import physics
+        from rct2.construction import (
+            default_lift_indices, find_first_hill, station_length, validate_construction,
+        )
+
+        segments = self._turn_then_hill()
+
+        start, end = find_first_hill(segments)
+        # One turn piece sits between the station and the hill.
+        assert start == station_length(segments) + 1
+        assert default_lift_indices(segments) == set(range(start, end))
+        assert physics.simulate(segments).completed
+        assert validate_construction(segments).valid
+
+    def test_covers_ae1_the_exported_ride_marks_the_hill_as_chain_lift(self, tmp_path):
+        from rct2 import td6
+        from rct2.construction import default_lift_indices
+        from rct2.generate import generate_ride
+        from rct2.mutations import BEGIN_STATION
+
+        template = Path(__file__).parent.parent / "data" / "sample_rides" / "manic_miner_test.td6"
+        segments = self._turn_then_hill()
+        path = tmp_path / "ride.td6"
+        td6.save(generate_ride(segments, template), path)
+
+        elements = td6.load(path).elements
+        lifted = {
+            i for i, element in enumerate(elements)
+            if element.chain_lift and element.segment_type != BEGIN_STATION
+        }
+        assert lifted == default_lift_indices(segments)
+
+    def test_covers_ae2_a_small_climb_ahead_takes_the_lift_and_strands_the_hill(self):
+        from rct2 import physics
+        from rct2.construction import default_lift_indices, find_first_hill, validate_construction
+
+        segments = self._small_climb_then_hill()
+
+        assert default_lift_indices(segments) == {7, 8}  # the small climb, not the hill
+        assert find_first_hill(segments) == (7, 9)
+        codes = {issue.code for issue in validate_construction(segments).issues}
+        assert "energy_shortfall" in codes
+        assert not physics.simulate(segments).completed
+
+    @pytest.mark.parametrize("make", SCORERS)
+    def test_covers_ae2_the_stranded_hill_scores_lower_than_the_turn_then_hill(self, make):
+        fitness = make()
+
+        assert fitness.evaluate(self._small_climb_then_hill()) < fitness.evaluate(
+            self._turn_then_hill()
+        )
+
+    @pytest.mark.parametrize("make", SCORERS)
+    def test_covers_ae2_the_stranded_hill_beats_the_same_ride_left_open(self, make):
+        """It is a penalty and not a rejection, and a closed loop still ranks above an open one."""
+        fitness = make()
+        stranded = self._small_climb_then_hill()
+
+        assert fitness.evaluate(stranded) > fitness.evaluate(stranded[:-1])
+
+    def test_a_climb_touching_the_hill_joins_it_in_one_lifted_run(self):
+        from rct2 import physics
+        from rct2.construction import default_lift_indices, find_first_hill, validate_construction
+
+        segments = self._climb_touching_the_hill()
+
+        start, end = find_first_hill(segments)
+        assert default_lift_indices(segments) == set(range(start, end))
+        assert end - start == 2 + 6  # the small climb and the hill's climb, as one run
+        assert physics.simulate(segments).completed
+        assert validate_construction(segments).valid
