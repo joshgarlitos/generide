@@ -412,6 +412,101 @@ class TestEvolveParts:
         assert stats1.best_individual.segments == stats2.best_individual.segments
 
 
+class TestFreeHillSearch:
+    """The hill may move after the station, and the search keeps exactly one."""
+
+    def test_every_individual_in_every_generation_has_the_station_first_and_one_hill(self):
+        from rct2.construction import hill_height, station_length
+
+        seen_slots = set()
+
+        def check(gen, population):
+            for individual in population.individuals:
+                parts = individual.parts
+                assert station_length(parts[0]) > 0
+                hills = [i for i, part in enumerate(parts) if hill_height(part) > 0]
+                assert len(hills) == 1
+                seen_slots.add(hills[0])
+
+        evolve_parts(
+            create_hill_circuit(), random.Random(21),
+            generations=12, population_size=24, progress_callback=check,
+        )
+
+        assert len(seen_slots) > 1
+
+    def test_the_pinned_hill_search_matches_the_run_recorded_before_the_hill_was_freed(self):
+        """Values recorded from the code before the genome change, with the
+        same seed and settings as the seeded no-site pin in test_fitness.py."""
+        from rct2.fitness import PhysicsFitness
+
+        for make_fitness, best_fitness, length in (
+            (ProxyFitness, 235.0, 58),
+            (PhysicsFitness, 50.853068924145916, 54),
+        ):
+            stats = evolve_parts(
+                create_hill_circuit(), random.Random(3), fitness_fn=make_fitness(),
+                generations=6, population_size=12, free_hill=False,
+            )
+            assert stats.best_fitness == pytest.approx(best_fitness)
+            assert len(stats.best_individual.segments) == length
+
+    def test_with_the_hill_pinned_it_stays_at_slot_one(self):
+        from rct2.construction import hill_height
+
+        def check(gen, population):
+            for individual in population.individuals:
+                assert hill_height(individual.parts[1]) > 0
+
+        evolve_parts(
+            create_hill_circuit(), random.Random(21), generations=8, population_size=16,
+            progress_callback=check, free_hill=False,
+        )
+
+
+    def test_starting_populations_mix_hill_positions_with_the_station_first(self):
+        from rct2.construction import hill_height, station_length
+        from rct2.evolution import _create_initial_population_parts, _ensure_scaffold_parts
+        from rct2.fitness import PhysicsFitness
+        from rct2.mutations import find_hill_index, segments_to_parts
+
+        seed = _ensure_scaffold_parts(
+            segments_to_parts(create_hill_circuit()), random.Random(0),
+        )
+        slots = []
+        for run in range(8):
+            population = _create_initial_population_parts(
+                seed, 30, PhysicsFitness(), random.Random(run),
+            )
+            for individual in population.individuals:
+                parts = individual.parts
+                assert station_length(parts[0]) > 0
+                assert sum(1 for part in parts if hill_height(part) > 0) == 1
+                slots.append(find_hill_index(parts))
+
+        assert 1 in slots
+        assert any(slot > 1 for slot in slots)
+
+    def test_with_the_hill_pinned_starting_tracks_all_have_it_at_slot_one(self):
+        from rct2.construction import hill_height
+        from rct2.mutations import generate_random_track_parts
+
+        for run in range(40):
+            parts = generate_random_track_parts(random.Random(run), free_hill=False)
+            assert hill_height(parts[1]) > 0
+
+    def test_random_starting_tracks_put_some_parts_before_the_hill(self):
+        from rct2.mutations import HILL_LEAD_MAX, find_hill_index, generate_random_track_parts
+
+        slots = {
+            find_hill_index(generate_random_track_parts(random.Random(run)))
+            for run in range(60)
+        }
+
+        assert slots == set(range(1, 2 + HILL_LEAD_MAX))
+
+
+
 class TestEvolvePartsOracleCalibration:
     """Tests for the oracle-calibration sampling hook in evolve_parts()."""
 
@@ -704,3 +799,153 @@ class TestStopCheck:
         assert stats.generations == 0
         assert len(first) == 1
         assert stats.best_individual is first[0]
+
+
+class TestRideTracker:
+    """The tracker keeps the best playable ride and the best fitting ride, and changes nothing else."""
+
+    def _tracker(self, scores, fits=(), buildable=(), playable=()):
+        class Scored:
+            def evaluate(self, segments):
+                return scores[tuple(segments)]
+
+        from rct2.evolution import RideTracker
+
+        return RideTracker(
+            Scored(),
+            fits=lambda s: tuple(s) in fits,
+            buildable=lambda s: tuple(s) in buildable,
+            playable=lambda s: tuple(s) in playable,
+        )
+
+    def test_scores_pass_through_unchanged(self):
+        tracker = self._tracker({(1,): 5.0, (2,): -3.0})
+
+        assert tracker.evaluate([1]) == 5.0
+        assert tracker.evaluate([2]) == -3.0
+
+    def test_a_fitting_ride_is_kept_even_when_it_scores_below_a_ride_that_does_not_fit(self):
+        scores = {(1,): 100.0, (2,): -50.0, (3,): -20.0}
+        tracker = self._tracker(
+            scores, fits={(2,), (3,)}, buildable={(2,), (3,)}, playable={(1,)},
+        )
+
+        for segments in ([1], [2], [3]):
+            tracker.evaluate(segments)
+
+        assert tracker.best_playable.segments == [1]
+        assert tracker.best_fitting.segments == [3]
+        assert tracker.best_fitting.playable is False
+
+    def test_the_fitting_ride_is_marked_playable_when_it_is(self):
+        tracker = self._tracker(
+            {(1,): 10.0}, fits={(1,)}, buildable={(1,)}, playable={(1,)},
+        )
+
+        tracker.evaluate([1])
+
+        assert tracker.best_fitting.segments == [1]
+        assert tracker.best_fitting.playable is True
+        assert tracker.best_playable.segments == [1]
+
+    def test_a_ride_the_game_would_not_build_is_never_the_fitting_ride(self):
+        tracker = self._tracker({(1,): 10.0}, fits={(1,)}, buildable=set(), playable=set())
+
+        tracker.evaluate([1])
+
+        assert tracker.best_fitting is None
+        assert tracker.best_playable is None
+
+    def test_it_keeps_a_copy_and_the_first_of_equal_scores(self):
+        tracker = self._tracker(
+            {(1,): 5.0, (2,): 5.0}, fits={(1,), (2,)}, buildable={(1,), (2,)}, playable={(1,), (2,)},
+        )
+        segments = [1]
+        tracker.evaluate(segments)
+        segments.append(9)
+        tracker.evaluate([2])
+
+        assert tracker.best_playable.segments == [1]
+
+    def test_other_attributes_come_from_the_wrapped_scorer(self):
+        from rct2.evolution import RideTracker
+
+        class Scorer:
+            site = "the site"
+
+            def evaluate(self, segments):
+                return 0.0
+
+        tracker = RideTracker(Scorer(), fits=lambda s: False, buildable=lambda s: False,
+                              playable=lambda s: False)
+
+        assert tracker.site == "the site"
+
+    def test_wrapping_a_real_run_does_not_change_the_result(self):
+        from rct2.evolution import site_ride_tracker
+        from rct2.fitness import PhysicsFitness
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 30] * 30, anchor=(10, 10))
+        plain = evolve_parts(
+            create_hill_circuit(), random.Random(4), fitness_fn=PhysicsFitness(site=site),
+            generations=4, population_size=10,
+        )
+        tracker = site_ride_tracker(PhysicsFitness(site=site), site)
+        watched = evolve_parts(
+            create_hill_circuit(), random.Random(4), fitness_fn=tracker,
+            generations=4, population_size=10,
+        )
+
+        assert watched.best_individual.segments == plain.best_individual.segments
+        assert watched.fitness_history == plain.fitness_history
+        assert tracker.best_playable is not None
+        assert tracker.best_fitting is not None
+
+
+class TestSiteRideTrackerPredicates:
+    """The real buildable, fits and playable checks that `site_ride_tracker` builds."""
+
+    @staticmethod
+    def _tracker():
+        from rct2.evolution import site_ride_tracker
+        from rct2.fitness import PhysicsFitness
+        from rct2.site import Site
+
+        site = Site.from_rows(["." * 40] * 40, anchor=(10, 10))
+        return site_ride_tracker(PhysicsFitness(site=site), site)
+
+    def test_an_open_track_that_fits_the_site_is_never_the_fitting_ride(self):
+        from rct2.construction import build_station
+
+        tracker = self._tracker()
+
+        tracker.evaluate(build_station(4) + [0, 0, 0, 0])  # fits the tiles, never closes
+
+        assert tracker.best_fitting is None
+        assert tracker.best_playable is None
+
+    def test_a_track_that_only_runs_out_of_energy_is_a_fitting_ride_but_not_a_playable_one(self):
+        from tests.test_fitness import TestMovedHill
+
+        tracker = self._tracker()
+        stranded = TestMovedHill._small_climb_then_hill()
+
+        tracker.evaluate(stranded)
+
+        assert tracker.best_fitting is not None
+        assert tracker.best_fitting.segments == stranded
+        assert tracker.best_fitting.playable is False
+        assert tracker.best_playable is None
+
+    def test_a_valid_finishing_ride_is_both(self):
+        from tests.test_fitness import TestMovedHill
+
+        tracker = self._tracker()
+        ride = TestMovedHill._turn_then_hill()
+
+        tracker.evaluate(ride)
+
+        assert tracker.best_playable.segments == ride
+        assert tracker.best_fitting.segments == ride
+        assert tracker.best_fitting.playable is True

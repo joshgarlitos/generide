@@ -8,6 +8,8 @@ the library root holding:
     progress.jsonl      one line per generation, appended as the run goes
     improvements.jsonl  the full track every time the best ride improves
     best.td6            the exported ride, when there is one
+    fits.td6            the best ride that fits the site, when it differs from
+                        the one above
     name.txt            the run's name, written only by the web UI
 
 The two logs are append-only JSON lines, following `rct2.calibration_log`,
@@ -41,6 +43,7 @@ RUN_FILE = "run.json"
 PROGRESS_FILE = "progress.jsonl"
 IMPROVEMENTS_FILE = "improvements.jsonl"
 BEST_TD6 = "best.td6"
+FITS_TD6 = "fits.td6"
 NAME_FILE = "name.txt"
 SITE_FILE = "site.json"
 

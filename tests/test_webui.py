@@ -784,6 +784,98 @@ def _site_holding_the_fixture(blocked_everywhere=False):
     return Site.from_rows([mark * width] * depth, anchor=(ox, oy))
 
 
+def saved_run_with_two_rides(playable=False, exported=True):
+    """A finished run with a site whose best fitting ride differs from the main ride."""
+    from rct2.generate import create_simple_circuit
+    from rct2.site import Site
+
+    site = Site.from_rows(["." * 8] * 14, anchor=(4, 7))
+    ride = td6.load(MANIC_MINER)
+    segments = [e.segment_type for e in ride.elements]
+    oval = create_simple_circuit()
+    home = runrecord.generide_home()
+    home.mkdir(parents=True, exist_ok=True)
+    original = home / "given-site.json"
+    site.save(original)
+    values = settings.validate({"seed": 6, "site": str(original)}).values
+    run_id = runrecord.create_run(
+        seed=6, request=values, settings=settings.cli_args(values),
+        generations=values["generations"], pid=_dead_pid(),
+    )
+    runrecord.save_site(run_id, site)
+    runrecord.append_improvement(run_id, {"generation": 1, "time": time.time(), "fitness": 1.0,
+                                          "segments": segments})
+    summary = runrecord.ride_summary(segments, values["max_width"], values["max_depth"], site=site)
+    summary.update(fitness=1.0, stopped_early=False, exported=exported)
+    summary["fitting_ride"] = dict(
+        runrecord.ride_summary(oval, values["max_width"], values["max_depth"], site=site),
+        track=oval, playable=playable, fitness=0.5, file=runrecord.FITS_TD6,
+    )
+    (runrecord.run_dir(run_id) / "best.td6").write_bytes(MANIC_MINER.read_bytes())
+    (runrecord.run_dir(run_id) / runrecord.FITS_TD6).write_bytes(MANIC_MINER.read_bytes())
+    runrecord.finish_run(run_id, "completed" if exported else "failed", generations_run=4,
+                         result=summary)
+    return run_id, oval
+
+
+class TestTwoRidesInTheResult:
+    """Covers AE3 in the web UI: the fitting ride is shown and labelled."""
+
+    def test_a_stalled_fitting_ride_is_labelled_not_playable(self, app):
+        run_id, _ = saved_run_with_two_rides(playable=False)
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        fitting = run["fitting_ride"]
+        assert fitting["label"] == "Best fit, not playable: the train stalls"
+        assert fitting["playable"] is False
+        assert fitting["fits"] is True
+        assert fitting["no_playable_ride"] is False
+
+    def test_a_playable_fitting_ride_gets_a_plain_label(self, app):
+        run_id, _ = saved_run_with_two_rides(playable=True)
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["fitting_ride"]["label"] == "Best fit"
+
+    def test_a_run_with_no_playable_ride_says_so(self, app):
+        run_id, _ = saved_run_with_two_rides(playable=False, exported=False)
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["fitting_ride"]["no_playable_ride"] is True
+
+    def test_the_fitting_ride_has_its_own_picture(self, app):
+        from rct2 import render
+
+        run_id, oval = saved_run_with_two_rides()
+
+        main = call(app, "GET", f"/api/runs/{run_id}/iso.svg").body.decode("utf-8")
+        fits = call(app, "GET", f"/api/runs/{run_id}/iso.svg?ride=fits").body.decode("utf-8")
+
+        assert fits != main
+        assert fits.count("<svg") == 1
+        # The oval fits the narrow site, so its picture says so.
+        assert "fits the site" in fits and "does not fit the site" not in fits
+        assert "does not fit the site" in main
+
+    def test_a_run_with_one_ride_carries_no_fitting_section(self, app):
+        run_id = saved_run_with_site(_site_holding_the_fixture())
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["fitting_ride"] is None
+
+    def test_a_run_saved_before_this_change_has_no_fitting_section(self, app):
+        run_id = saved_run(seed=9)
+
+        run = call(app, "GET", f"/api/runs/{run_id}").json()["run"]
+
+        assert run["fitting_ride"] is None
+        assert call(app, "GET", f"/api/runs/{run_id}/iso.svg?ride=fits").status == 200
+
+
 class TestSiteInTheResult:
     def test_a_ride_that_fits_shows_the_verdict_and_where_to_place_it(self, app):
         run_id = saved_run_with_site(_site_holding_the_fixture())

@@ -7,13 +7,18 @@ import { expect, test } from "@playwright/test";
 
 const UI = `http://127.0.0.1:${Number(process.env.WEBUI_PORT || 8778)}`;
 
-// The two seeded run ids, newest first as the library lists them.
-async function seededIds(request) {
+// The two plain seeded run ids, newest first as the library lists them. The
+// oldest seeded run, the one with a second ride, is kept apart (see below).
+async function allSeededIds(request) {
   const response = await request.get(`${UI}/api/runs`);
   expect(response.ok()).toBeTruthy();
   const ids = (await response.json()).runs.map((run) => run.id);
-  expect(ids).toHaveLength(2);
+  expect(ids).toHaveLength(3);
   return ids;
+}
+
+async function seededIds(request) {
+  return (await allSeededIds(request)).filter((id) => !id.endsWith("-s4"));
 }
 
 async function openGraphs(page, request) {
@@ -162,4 +167,12 @@ test("on the compare screen one Pause train button stops every train", async ({ 
   const still = [await look(pictures.nth(0)), await look(pictures.nth(1))];
   await page.waitForTimeout(1500);
   expect([await look(pictures.nth(0)), await look(pictures.nth(1))]).toEqual(still);
+});
+
+test("a run with a site shows the best ride that fits it, labelled when its train stalls", async ({ page, request }) => {
+  const id = (await allSeededIds(request)).find((candidate) => candidate.endsWith("-s4"));
+  await page.goto(`${UI}/#/run/${id}?tab=graphs`);
+  await expect(page.getByRole("heading", { name: "Best fit, not playable: the train stalls" })).toBeVisible();
+  await expect(page.getByRole("img", { name: /Isometric view of the ride that fits the site/ })).toBeVisible();
+  await expect(page.locator("#panel-graphs").getByText("Its pieces are valid but the train runs out of speed")).toBeVisible();
 });

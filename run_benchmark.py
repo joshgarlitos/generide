@@ -7,6 +7,7 @@ Usage:
     python run_benchmark.py --output benchmark_results/2026-08-10.json
     python run_benchmark.py --methods ga ga_parts --oracle
     python run_benchmark.py --rescore benchmark_results/2026-08-10.json
+    python run_benchmark.py --methods ga_parts --sites --site-file my-site.json
 
 See docs/research-plan.md for why this exists and rct2/benchmark.py for the
 comparison design: equal evaluation budgets, a hard buildable-and-completed
@@ -18,9 +19,10 @@ import argparse
 from pathlib import Path
 
 from rct2.benchmark import (
-    METHODS, canned_sites, judge_results, rescore, run_benchmark, run_site_benchmark,
+    METHODS, benchmark_sites, judge_results, rescore, run_benchmark, run_site_benchmark,
     save_results, summarize, summarize_sites,
 )
+from rct2.site import SiteError
 
 
 def main():
@@ -82,6 +84,15 @@ def main():
              "clearance above ground are not checked.",
     )
     parser.add_argument(
+        "--site-file",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="SITE.JSON",
+        help="Also run every method against this saved site, named by the file's "
+             "name. Can be given more than once, and works with or without --sites.",
+    )
+    parser.add_argument(
         "--oracle",
         action="store_true",
         help="After the run, judge the winning tracks in a real headless OpenRCT2 "
@@ -120,6 +131,11 @@ def main():
         from datetime import datetime
         args.output = Path(f"benchmark_results/{datetime.now():%Y%m%d-%H%M%S}.json")
 
+    try:
+        sites = benchmark_sites(args.sites, args.site_file)
+    except SiteError as exc:
+        parser.error(str(exc))
+
     seeds = list(range(args.base_seed, args.base_seed + args.seeds))
     methods = {name: METHODS[name] for name in args.methods}
 
@@ -136,9 +152,9 @@ def main():
         print("Judging the results in a real headless OpenRCT2...")
         results = judge_results(results, top_n=args.oracle_top)
     site_results = []
-    if args.sites:
-        print("Running the canned sites...")
-        site_results = run_site_benchmark(methods, canned_sites(), seeds, args.evaluations)
+    if sites:
+        print(f"Running the sites: {', '.join(sites)}")
+        site_results = run_site_benchmark(methods, sites, seeds, args.evaluations)
         results = results + site_results
     save_results(results, args.output)
     print(f"Saved {len(results)} results to {args.output}")

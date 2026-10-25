@@ -16,7 +16,7 @@ from pathlib import Path
 
 from rct2 import physics, render, runrecord, settings, td6
 from rct2.construction import default_lift_indices, validate_for_request
-from rct2.evolution import evolve, evolve_parts
+from rct2.evolution import evolve, evolve_parts, site_ride_tracker
 from rct2.fitness import CoasterRequest, PhysicsFitness, ProxyFitness
 from rct2.generate import (
     BEGIN_STATION,
@@ -265,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def fits_path(output: Path) -> Path:
+    """Where the best ride that fits the site goes: the main file's name plus `-fits`."""
+    return output.with_name(f"{output.stem}-fits{output.suffix}")
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -384,6 +389,14 @@ def main():
             max_width=request.max_width, max_depth=request.max_depth, site=request.site
         )
 
+    # With a site, watch every ride the search scores so the best ride that
+    # fits can be returned even when a train would stall on it. Scores pass
+    # through unchanged.
+    tracker = None
+    if site is not None:
+        tracker = site_ride_tracker(fitness_fn, site, args.max_width, args.max_depth)
+        fitness_fn = tracker
+
     # Every run is saved to the library unless asked not to, so the web UI
     # can show terminal runs alongside its own.
     run_id = None
@@ -465,6 +478,10 @@ def main():
         mutation_rate=args.mutation_rate,
         progress_callback=progress if (args.verbose or run_id) else None,
     )
+    if args.genome == "parts":
+        # Moving the hill is what fits a very tight site; without a site it
+        # only costs ride quality, so it is on for site runs alone.
+        run_kwargs["relocate_hill"] = site is not None
     if args.oracle_calibrate:
         from rct2.calibration_log import append_record
 
@@ -541,6 +558,13 @@ def main():
         for issue in result.issues:
             print(f"    - {issue.code}: {issue.message}")
 
+    # The best ride that fits the site, when it is a different ride from the
+    # one above (or the one above cannot be built at all).
+    fitting = tracker.best_fitting if tracker is not None else None
+    if fitting is not None and result.valid and fitting.segments == best.segments:
+        fitting = None
+    fits_output = fits_path(args.output) if fitting is not None else None
+
     summary = None
     if run_id is not None:
         summary = runrecord.ride_summary(
@@ -551,6 +575,32 @@ def main():
             stopped_early=bool(stop_requested),
             exported=result.valid,
         )
+        if fitting is not None:
+            summary["fitting_ride"] = dict(
+                runrecord.ride_summary(
+                    fitting.segments, args.max_width, args.max_depth, site=site,
+                ),
+                track=list(fitting.segments),
+                playable=fitting.playable,
+                fitness=fitting.fitness,
+                file=runrecord.FITS_TD6,
+            )
+
+    stale_fits = fits_path(args.output)
+    if fitting is None and stale_fits.exists():
+        print(f"\nNote: {stale_fits} is left over from an earlier run and is not this run's result.")
+
+    if fitting is not None:
+        fits_ride = create_ride_from_segments(fitting.segments, template_path)
+        td6.save(fits_ride, fits_output)
+        if run_id is not None:
+            td6.save(fits_ride, runrecord.run_dir(run_id) / runrecord.FITS_TD6)
+        playable_note = (
+            "its train finishes" if fitting.playable else "NOT playable: its train would stall"
+        )
+        print(f"\nBest ride that fits the site ({playable_note}) saved to: {fits_output}")
+        if not result.valid:
+            print("No playable ride was found, only this one that fits.")
 
     if not result.valid:
         if run_id is not None:

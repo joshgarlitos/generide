@@ -48,6 +48,112 @@ class Individual:
         return validate_construction(self.segments).valid
 
 
+@dataclass(frozen=True)
+class TrackedRide:
+    """A ride the tracker kept, with the score the search gave it."""
+
+    segments: list[int]
+    fitness: float
+    playable: bool
+
+
+class RideTracker:
+    """Wraps a fitness function and remembers two rides besides the best overall.
+
+    One is the best ride the game would build and a train could finish; the
+    other is the best ride that fits the site, even when its train stalls. A
+    tight site can leave no playable ride that fits, and the second one still
+    shows how far the search got.
+
+    It only watches. Every score passes through unchanged, so selection, the
+    best overall and every seeded run are exactly what they were without it.
+    Anything else asked of it (`site`, `max_width`, ...) goes to the wrapped
+    fitness function.
+
+    Args:
+        fitness_fn: The scorer the search uses.
+        fits: Whether a track fits the site.
+        buildable: Whether the game would build the track. A stalled train or an
+            energy estimate that falls short does not count against it, because
+            those only make a ride not playable.
+        playable: Whether the track is buildable and a train finishes it.
+    """
+
+    def __init__(
+        self,
+        fitness_fn: FitnessFunction,
+        fits: Callable[[list[int]], bool],
+        buildable: Callable[[list[int]], bool],
+        playable: Callable[[list[int]], bool],
+    ):
+        self.fitness_fn = fitness_fn
+        self._fits = fits
+        self._buildable = buildable
+        self._playable = playable
+        self.best_playable: Optional[TrackedRide] = None
+        self.best_fitting: Optional[TrackedRide] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.fitness_fn, name)
+
+    def evaluate(self, segments: list[int]) -> float:
+        score = self.fitness_fn.evaluate(segments)
+
+        # Cheap comparisons first: most evaluations beat neither record.
+        beats_playable = self.best_playable is None or score > self.best_playable.fitness
+        beats_fitting = self.best_fitting is None or score > self.best_fitting.fitness
+        is_playable = None
+        if beats_playable:
+            is_playable = self._playable(segments)
+            if is_playable:
+                self.best_playable = TrackedRide(list(segments), score, True)
+        if beats_fitting and self._fits(segments) and self._buildable(segments):
+            if is_playable is None:
+                is_playable = self._playable(segments)
+            self.best_fitting = TrackedRide(list(segments), score, is_playable)
+        return score
+
+
+def site_ride_tracker(
+    fitness_fn: FitnessFunction,
+    site: Any,
+    max_width: Optional[int] = None,
+    max_depth: Optional[int] = None,
+) -> RideTracker:
+    """A `RideTracker` that judges fit, buildable and playable the way a request does."""
+    from rct2 import physics
+    from rct2.construction import validate_for_request
+    from rct2.site import best_fit
+
+    last = {}
+
+    def validate(segments):
+        # buildable and playable both ask about the same track, so the check
+        # runs once for it.
+        key = tuple(segments)
+        if last.get("key") != key:
+            last["key"] = key
+            last["result"] = validate_for_request(
+                segments, site=site, max_width=max_width, max_depth=max_depth,
+            )
+        return last["result"]
+
+    def buildable(segments):
+        # Only the energy estimate may fail: everything else is a rule the game
+        # enforces (closed circuit, geometry, slope, bank, lift steepness).
+        return all(issue.code == "energy_shortfall" for issue in validate(segments).issues)
+
+    def playable(segments):
+        return validate(segments).valid and physics.simulate(segments).completed
+
+    return RideTracker(
+        fitness_fn,
+        fits=lambda segments: best_fit(site, segments).fits,
+        buildable=buildable,
+        playable=playable,
+    )
+
+
 @dataclass
 class Population:
     """A population of track designs."""
@@ -375,14 +481,15 @@ def _ensure_scaffold_parts(
     parts: list[list[int]],
     rng: random.Random,
     length: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
 ) -> list[list[int]]:
-    """Station at part 0, lift hill at part 1, in that order.
+    """Station at part 0, then exactly one lift hill somewhere after it.
 
-    Order matters: `ensure_hill_parts` inserts at a fixed index on the
-    assumption the station is already part 0, so a genome missing both would
+    Order matters: `ensure_hill_parts` looks for the hill after the station
+    and inserts a missing one just behind it, so a genome missing both would
     otherwise end up with the hill in the wrong slot.
     """
-    return ensure_hill_parts(_ensure_station_parts(parts, length), rng)
+    return ensure_hill_parts(_ensure_station_parts(parts, length), rng, free_hill)
 
 
 def _create_initial_population_parts(
@@ -391,6 +498,8 @@ def _create_initial_population_parts(
     fitness_fn: FitnessFunction,
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> Population:
     """Part-based counterpart to `_create_initial_population`."""
     individuals = []
@@ -401,10 +510,14 @@ def _create_initial_population_parts(
 
     while len(individuals) < population_size:
         if rng.random() < 0.7:
-            mutated = mutate_parts(seed_parts, rng, rate=0.3)
-            mutated = _ensure_scaffold_parts(mutated, rng, platform)
+            mutated = mutate_parts(
+                seed_parts, rng, rate=0.3, free_hill=free_hill, relocate_hill=relocate_hill,
+            )
+            mutated = _ensure_scaffold_parts(mutated, rng, platform, free_hill)
         else:
-            mutated = generate_random_track_parts(rng, station_tiles=platform)
+            mutated = generate_random_track_parts(
+                rng, station_tiles=platform, free_hill=free_hill,
+            )
 
         ind = Individual(segments=flatten_parts(mutated), parts=mutated)
         ind.fitness = fitness_fn.evaluate(ind.segments)
@@ -420,16 +533,23 @@ def _create_offspring_parts(
     fitness_fn: FitnessFunction,
     rng: random.Random,
     platform: int = DEFAULT_STATION_LENGTH,
+    free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> list[Individual]:
     """Part-based counterpart to `_create_offspring`."""
     offspring = []
 
-    child1_parts, child2_parts = crossover_parts(parent1.parts, parent2.parts, rng)
+    child1_parts, child2_parts = crossover_parts(
+        parent1.parts, parent2.parts, rng, free_hill,
+    )
 
     for child_parts in [child1_parts, child2_parts]:
-        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
-        child_parts = mutate_parts(child_parts, rng, rate=mutation_rate)
-        child_parts = _ensure_scaffold_parts(child_parts, rng, platform)
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
+        child_parts = mutate_parts(
+            child_parts, rng, rate=mutation_rate, free_hill=free_hill,
+            relocate_hill=relocate_hill,
+        )
+        child_parts = _ensure_scaffold_parts(child_parts, rng, platform, free_hill)
 
         child = Individual(segments=flatten_parts(child_parts), parts=child_parts)
         child.fitness = fitness_fn.evaluate(child.segments)
@@ -529,6 +649,8 @@ def evolve_parts(
     oracle_scorer: Optional[Callable[[list[int]], Any]] = None,
     oracle_log_writer: Optional[Callable[[Any], None]] = None,
     stop_check: Optional[Callable[[], bool]] = None,
+    free_hill: bool = True,
+    relocate_hill: bool = False,
 ) -> EvolutionStats:
     """Part-based counterpart to `evolve`.
 
@@ -538,7 +660,7 @@ def evolve_parts(
     docs/research-plan.md for why that matters.
 
     Seed with `generate.create_hill_circuit()`, not `create_simple_circuit()`.
-    Every genome here carries a mandatory lift hill, and a hill is a straight
+    Every genome here carries exactly one lift hill, and a hill is a straight
     run of 8 or more tiles, so inserting one into the flat oval displaces its
     end further than `repair_circuit` can walk back and leaves every descendant
     open. Seeded correctly this run improves; seeded with the flat oval it does
@@ -575,6 +697,12 @@ def evolve_parts(
             after the progress callback. When it returns True the run ends
             there and returns the best of the current population, with
             `generations` set to the number of generations actually bred.
+        free_hill: When True (the default) the hill may sit anywhere after
+            the station and the search can move it. When False it stays pinned
+            at the slot right after the station.
+        relocate_hill: Also let mutation move the hill to another slot. Meant
+            for runs with a site: it fits tight sites that nothing else does,
+            and costs ordinary rides some quality (see `mutate_parts`).
 
     Returns:
         EvolutionStats with best individual and history
@@ -588,10 +716,10 @@ def evolve_parts(
 
     platform = station_length(seed) or DEFAULT_STATION_LENGTH
     seed_parts = _ensure_scaffold_parts(
-        segments_to_parts(_ensure_station(seed, platform)), rng, platform
+        segments_to_parts(_ensure_station(seed, platform)), rng, platform, free_hill
     )
     population = _create_initial_population_parts(
-        seed_parts, population_size, fitness_fn, rng, platform
+        seed_parts, population_size, fitness_fn, rng, platform, free_hill, relocate_hill
     )
 
     fitness_history = []
@@ -632,7 +760,8 @@ def evolve_parts(
             parent1 = _tournament_select(population, rng, tournament_size)
             parent2 = _tournament_select(population, rng, tournament_size)
             offspring = _create_offspring_parts(
-                parent1, parent2, mutation_rate, fitness_fn, rng, platform
+                parent1, parent2, mutation_rate, fitness_fn, rng, platform, free_hill,
+                relocate_hill,
             )
             next_gen.extend(offspring)
 
