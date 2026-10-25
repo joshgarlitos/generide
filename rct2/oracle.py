@@ -619,8 +619,13 @@ registerPlugin({
                         return;
                     }
                     var ride0 = map.getRide(rideId);
+                    var builtCars = 0;
+                    var allCars = map.getAllEntities('car');
+                    for (var bc = 0; bc < allCars.length; bc++) {
+                        if (allCars[bc].ride === rideId) builtCars++;
+                    }
                     console.log('GENERIDE_TRAINS|numTrains=' + (ride0.vehicles ? ride0.vehicles.length : -1) +
-                                '|carsPerTrain=' + CARS_PER_TRAIN);
+                                '|carsPerTrain=' + CARS_PER_TRAIN + '|totalCars=' + builtCars);
                     var ticks = 0;
                     var stillTicks = 0;
                     var lastPos = '';
@@ -907,7 +912,10 @@ def _parse_measurements(line: str) -> Optional[RideMeasurements]:
     return RideMeasurements(**values)
 
 
-_TRAINS_RE = re.compile(r"GENERIDE_TRAINS\|numTrains=(?P<trains>-?\d+)\|carsPerTrain=(?P<cars>-?\d+)")
+_TRAINS_RE = re.compile(
+    r"GENERIDE_TRAINS\|numTrains=(?P<trains>-?\d+)\|carsPerTrain=(?P<cars>-?\d+)"
+    r"(?:\|totalCars=(?P<total>-?\d+))?"
+)
 
 TICKS_PER_SECOND = 40  # measured at game speed 1, see docs/headless-oracle-spike.md
 
@@ -928,6 +936,12 @@ def _parse_trains(line: str) -> Optional[tuple[int, int]]:
     cars = int(match.group("cars"))
     if trains < 0 or cars < 0:  # the plugin reports -1 when it cannot read them
         return None
+    # `carsPerTrain` is only what the plugin asked for. The cars the game
+    # built are counted off the ride's car entities, and train mass (so the
+    # speed-squared drag) follows that count. Only an even split is believed.
+    total = match.group("total")
+    if total is not None and trains > 0 and int(total) > 0 and int(total) % trains == 0:
+        cars = int(total) // trains
     return trains, cars
 
 

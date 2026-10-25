@@ -181,3 +181,24 @@ def test_samples_are_matched_to_the_piece_the_car_is_on():
 def test_a_sample_on_no_placed_piece_has_no_index():
     samples = [_parse_trace("'GENERIDE_TRACE|t=1|v=1|a=0|mass=500|tt=3|prog=1|tx=1|ty=1|tz=1|z=1'")]
     assert _assign_piece_indices(samples, {0: (3200, 3200, 144, 2)})[0].piece_index is None
+
+
+def test_cars_per_train_is_read_from_the_cars_the_game_built():
+    # The plugin echoes the cars it asked for, which the game ignores. The
+    # count that matters is how many car entities exist per train, and train
+    # mass (and so the speed-squared drag) depends on it.
+    line = "'GENERIDE_TRAINS|numTrains=1|carsPerTrain=2|totalCars=7'"
+
+    assert _parse_trains(line) == (1, 7)
+
+
+def test_cars_per_train_divides_the_cars_across_the_trains():
+    line = "'GENERIDE_TRAINS|numTrains=3|carsPerTrain=2|totalCars=12'"
+
+    assert _parse_trains(line) == (3, 4)
+
+
+def test_a_car_count_that_does_not_split_evenly_is_not_trusted():
+    line = "'GENERIDE_TRAINS|numTrains=3|carsPerTrain=2|totalCars=10'"
+
+    assert _parse_trains(line) == (3, 2)

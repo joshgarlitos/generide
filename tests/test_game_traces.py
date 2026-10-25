@@ -8,7 +8,7 @@ import pytest
 
 from tests import game_traces
 
-NAMES = ["seed_circuit", "evolved_80_pieces"]
+NAMES = ["seed_circuit", "evolved_80_pieces", "simple_circuit"]
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -22,10 +22,11 @@ def test_every_sample_is_matched_to_a_piece_of_the_track(name):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_the_game_weighs_each_car_500(name):
-    samples = game_traces.load(name)["samples"]
+def test_the_game_runs_one_train_of_seven_cars_each_weighing_500(name):
+    trace = game_traces.load(name)
 
-    assert {s["mass"] for s in samples} == {500}
+    assert {s["mass"] for s in trace["samples"]} == {500}
+    assert (trace["num_trains"], trace["cars_per_train"]) == (1, 7)
 
 
 def test_the_flat_coast_after_the_seed_drop_loses_the_speed_the_drag_formula_says():
