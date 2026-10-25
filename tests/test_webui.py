@@ -16,13 +16,14 @@ import pytest
 
 from rct2 import runrecord, settings, td6
 from rct2.webui import App, Request, make_server
+from tests.stalling import STALLING_STRIP
 
 REPO = Path(__file__).resolve().parent.parent
 MANIC_MINER = REPO / "data" / "sample_rides" / "manic_miner_test.td6"
 PORT = 8765
 # The station powers the first pieces; on 30 flat pieces after it the train
 # runs out of speed and stops.
-STALLS = [0x02, 0x01] + [0x00] * 30
+STALLS = STALLING_STRIP
 HOST = f"127.0.0.1:{PORT}"
 
 # Stands in for evolve_coaster.py: writes a run record under the id it is

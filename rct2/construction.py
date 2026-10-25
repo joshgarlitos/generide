@@ -24,6 +24,15 @@ silently.
 from dataclasses import dataclass
 from typing import Optional, Set, Tuple
 
+from rct2.coasting import (
+    CAR_MASS,
+    DEFAULT_TRAIN_CARS,
+    HEIGHT_UNIT_M,
+    LIFT_SPEED_MS,
+    MIN_SPEED_MS,
+    coast,
+    segment_length,
+)
 from rct2.geometry import Position, ValidationIssue, ValidationResult, validate_track
 from rct2.segments import SEGMENTS
 
@@ -203,14 +212,6 @@ def hill_height(part: list[int]) -> int:
         if part == build_hill(height):
             return height
     return 0
-
-
-# Kinetic energy expressed as head (height the train could still climb), in
-# RCT2 height units. Derived from physics.py: v^2 / 2g, converted out of meters
-# by HEIGHT_UNIT_M. A train leaves the station or the lift at LIFT_SPEED_MS and
-# is considered stalled below MIN_SPEED_MS.
-LIFT_HEAD = 0.329  # physics.LIFT_SPEED_MS -> head
-STALL_HEAD = 0.068  # physics.MIN_SPEED_MS -> head
 
 
 @dataclass(frozen=True)
@@ -455,38 +456,46 @@ def _energy_issues(segments: list[int], lift_indices: set[int]) -> list[Validati
 def energy_stall_index(
     segments: list[int],
     lift_indices: Optional[Set[int]] = None,
+    train_cars: int = DEFAULT_TRAIN_CARS,
 ) -> Optional[int]:
     """Index of the first segment where the train would run out of speed.
 
-    Tracks the train's kinetic energy as head — the height it could still climb
-    — in RCT2 height units. Climbing spends head, descending returns it, and
-    every unpowered segment pays FRICTION_PER_SEGMENT. Chain lift and station
-    pieces drive the train, so they restore head instead of spending it. The
-    train stalls once head falls below STALL_HEAD.
+    Walks the track with `rct2.coasting`, the same speed walk `physics.trace`
+    takes, so the two always name the same piece. Chain lift and station
+    pieces drive the train, so they restore its speed instead of spending it.
+    The train stalls once its speed falls below MIN_SPEED_MS.
+
+    This is the cheap, physics-free route to that answer: it needs no ride
+    statistics, only the speed. construction.py cannot import physics.py
+    (physics depends on construction), which is why the walk lives in
+    `rct2/coasting.py`. It is deliberately not part of `validate_construction`:
+    a stalling track is still buildable.
 
     Unlike `_energy_issues`, nothing floors the budget at zero, so this catches
-    a train dying on flat ground from accumulated friction as well as one that
+    a train dying on flat ground from accumulated drag as well as one that
     fails to crest a hill.
 
-    This is a screen, not an adjudicator, and it is deliberately not part of
-    `validate_construction` — a stalling track is still buildable. Callers that
-    can afford the real simulation should use `rct2.physics.simulate`, whose
-    per-segment arc lengths make it strictly more accurate than the flat
-    per-segment friction charged here.
+    Args:
+        train_cars: Cars in the train. The squared term of the drag divides by
+            the train's mass, so a shorter train stalls sooner.
 
     Returns:
         The index of the first stalling segment, or None if the train gets
         all the way around.
     """
     resolved = default_lift_indices(segments) if lift_indices is None else set(lift_indices)
-    head = LIFT_HEAD
-    for index, segment in enumerate(segments):
-        if index in resolved or segment in STATION_SEGMENTS:
-            head = max(head, LIFT_HEAD)
+    train_mass = train_cars * CAR_MASS
+    speed = LIFT_SPEED_MS
+    for index, segment_id in enumerate(segments):
+        if index in resolved or segment_id in STATION_SEGMENTS:
+            speed = max(speed, LIFT_SPEED_MS)
             continue
-        head -= SEGMENTS.get(segment, SEGMENTS[0x00]).elevation_delta
-        head -= FRICTION_PER_SEGMENT
-        if head < STALL_HEAD:
+        segment = SEGMENTS.get(segment_id, SEGMENTS[0x00])
+        speed = coast(
+            speed, segment.elevation_delta * HEIGHT_UNIT_M,
+            segment_length(segment).length_m, train_mass,
+        )
+        if speed < MIN_SPEED_MS:
             return index
     return None
 

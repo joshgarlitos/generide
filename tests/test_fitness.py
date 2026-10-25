@@ -310,7 +310,10 @@ class TestNoSiteIsUnchanged:
     """Covers AE3: with no site, scoring and a seeded run match the code before sites existed.
 
     The expected values were recorded from the commit before the site work,
-    not computed from the code under test.
+    not computed from the code under test. The proxy values are still those.
+    The physics values were re-recorded on 2026-10-25 when the simulator took
+    the game's speed-based drag (the ratings read the simulated speeds), so
+    they are the post-drag numbers for the no-site code.
     """
 
     def test_default_proxy_and_physics_scores_on_the_fixture(self):
@@ -318,16 +321,16 @@ class TestNoSiteIsUnchanged:
 
         assert ProxyFitness().evaluate(segments) == 521.0
         assert ProxyFitness(max_width=10, max_depth=10).evaluate(segments) == -9609.0
-        assert PhysicsFitness().evaluate(segments) == pytest.approx(61.55684431164997)
+        assert PhysicsFitness().evaluate(segments) == pytest.approx(58.06345406047892)
         assert PhysicsFitness(max_width=12, max_depth=12).evaluate(segments) == pytest.approx(
-            11.556844311649968
+            8.063454060478918
         )
 
     @pytest.mark.parametrize(
         "make_fitness, best_fitness, length",
         [
             (ProxyFitness, 235.0, 58),
-            (PhysicsFitness, 50.853068924145916, 54),
+            (PhysicsFitness, 49.91707266967845, 54),
         ],
     )
     def test_a_seeded_run_finds_the_same_best_ride(self, make_fitness, best_fitness, length):
@@ -384,7 +387,7 @@ class TestSiteFitness:
         assert ProxyFitness(max_width=10, max_depth=10, site=site).evaluate(segments) == 521.0
         assert PhysicsFitness(max_width=12, max_depth=12, site=site).evaluate(
             segments
-        ) == pytest.approx(61.55684431164997)
+        ) == pytest.approx(58.06345406047892)
 
     @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
     def test_a_ride_with_more_blocked_tiles_scores_lower(self, make):
@@ -467,9 +470,13 @@ class TestSiteFitness:
         site = Site.from_rows(["".join(r) for r in rows], anchor=anchor)
         assert best_fit(site, seed).blocked > 0
 
+        # About half of all seeds find the way round in this budget, and
+        # physics scoring did the same under the old constant-friction
+        # simulator and the game's-drag one (5 of 10 seeds each), so each
+        # scorer's seed is pinned to one that does.
         stats = evolve_parts(
             seed,
-            random.Random(3),
+            random.Random(1 if make is PhysicsFitness else 3),
             fitness_fn=make(site=site),
             generations=25,
             population_size=20,

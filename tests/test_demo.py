@@ -13,6 +13,7 @@ from pathlib import Path
 
 from rct2 import demo
 from rct2.generate import create_hill_circuit, create_simple_circuit
+from tests.stalling import stalling_loop
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -123,9 +124,9 @@ def test_a_construction_invalid_ride_has_no_download():
 
 
 def test_a_buildable_ride_whose_train_stalls_is_still_offered():
-    # The flat starter loop builds but has no lift, so the train stops.
-    flat = create_simple_circuit(station_length=6)
-    result = demo.ride_result(flat, max_width=30, max_depth=30)
+    # A long flat loop builds but has no lift, so the train coasts to a stop.
+    flat = stalling_loop()
+    result = demo.ride_result(flat, max_width=40, max_depth=40)
     assert result["summary"]["valid"] is True
     assert result["summary"]["completed"] is False
     assert result["td6"] is not None
@@ -138,7 +139,7 @@ def test_ride_bar_matches_r16():
 
 
 def test_results_carry_the_web_uis_stats_table_and_warnings():
-    flat = demo.ride_result(create_simple_circuit(station_length=6), 30, 30)
+    flat = demo.ride_result(stalling_loop(), 40, 40)
     labels = [row["label"] for row in flat["stats_view"]["simulated"]]
     assert "Top speed" in labels and "Completes the circuit" in labels
     assert any("does not complete the circuit" in w for w in flat["warnings"])
