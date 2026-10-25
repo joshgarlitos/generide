@@ -595,3 +595,19 @@ def test_the_same_ride_completes_with_the_games_seven_cars_and_stalls_with_two()
     assert trace["status"] == "rated"
     assert physics.simulate(trace["segments"], lifts, train_cars=7).completed
     assert not physics.simulate(trace["segments"], lifts, train_cars=2).completed
+
+
+def test_the_simulated_train_is_the_train_the_exporters_write():
+    """Both exporters write 1 train of 2 cars; drag depends on that train's mass.
+
+    If an exporter changes its car count and this default does not, the
+    simulator checks a different train from the one the player rides.
+    """
+    from evolve_coaster import create_ride_from_segments
+    from rct2 import generate
+
+    segments = generate.create_hill_circuit()
+
+    exported = create_ride_from_segments(segments, Path("data/sample_rides/manic_miner_test.td6"))
+
+    assert (exported.num_trains, exported.cars_per_train) == (1, physics.DEFAULT_TRAIN_CARS)
