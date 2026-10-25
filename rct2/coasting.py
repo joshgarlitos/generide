@@ -119,7 +119,6 @@ def segment_length(segment: Segment) -> SegmentGeometry:
     return SegmentGeometry(length_m=math.hypot(arc_m, rise_m), radius_m=radius_m)
 
 
-
 def drag_deceleration(speed_ms: float, train_mass: float) -> float:
     """What the game takes off a train's speed each second, in m/s^2."""
     deceleration = LINEAR_DRAG * speed_ms

@@ -29,25 +29,19 @@ from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Optional, Set
 
 from rct2 import construction
-from rct2.coasting import (  # noqa: F401  (re-exported: other modules and tests use physics.<name>)
+from rct2.coasting import (  # noqa: F401  (some names are re-exported: others use physics.<name>)
     CAR_MASS,
     DEFAULT_TRAIN_CARS,
-    DRAG_LENGTH_SCALE,
-    GAME_TICKS_PER_S,
-    GAME_VELOCITY_UNITS_PER_MS,
     GRAVITY,
     HEIGHT_UNIT_M,
     LIFT_SPEED_MS,
-    LINEAR_DRAG,
     MIN_SPEED_MS,
-    QUADRATIC_DRAG,
     TILE_M,
-    SegmentGeometry,
     coast as _coast,
     drag_deceleration,
     segment_length,
 )
-from rct2.segments import SEGMENTS, Segment
+from rct2.segments import SEGMENTS
 
 # The scale at which GFORCE_VERTICAL_COEFF was fitted. Do not change this when
 # recalibrating TILE_M; it records where that number came from.
@@ -169,7 +163,6 @@ _SLOPE_ANGLE_RAD = {
 _STATION_SEGMENTS = construction.STATION_SEGMENTS
 
 
-
 @dataclass(frozen=True)
 class RideStats:
     max_speed: float  # m/s
@@ -259,8 +252,6 @@ class RideTrace:
     points: List[TracePoint]
     completed: bool
     stall_index: Optional[int]
-
-
 
 
 def trace(

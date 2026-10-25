@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rct2 import physics, td6
+from rct2 import coasting, physics, td6
 from rct2.calibration import read_csv
 from rct2.physics import RATING_WEIGHTS, RideStats, rate, segment_length, simulate
 from rct2.segments import SEGMENTS
@@ -51,19 +51,22 @@ def test_lift_then_drop_speed_near_energy_limit():
     assert stats.max_speed > ideal * 0.8  # friction should not eat 20 percent
 
 
-def test_zero_friction_conserves_energy(monkeypatch):
-    monkeypatch.setattr(physics, "drag_deceleration", lambda speed, train_mass: 0.0)
-    up_count = 6
-    track = make_hill(up_count, up_count)
-    lift = set(range(0, up_count + 2))
-    stats = simulate(track, lift_indices=lift)
-    # Back at start elevation with no friction: exit speed equals lift speed.
-    assert stats.completed
-    final_speed = stats.avg_speed  # sanity: sim ran
-    assert final_speed > 0
-    # Re-derive the exit speed by simulating with a trailing flat segment.
-    stats2 = simulate(track + [FLAT], lift_indices=lift)
-    assert stats2.completed
+def test_without_drag_a_drop_then_a_climb_returns_the_same_speed(monkeypatch):
+    """Gravity alone conserves energy, so any speed lost on the way is drag's."""
+    monkeypatch.setattr(coasting, "drag_deceleration", lambda speed, train_mass: 0.0)
+
+    after_drop = coasting.coast(5.0, -3.0, 4.0, 3500)
+    after_climb = coasting.coast(after_drop, 3.0, 4.0, 3500)
+
+    assert after_drop > 5.0
+    assert after_climb == pytest.approx(5.0)
+
+
+def test_with_drag_a_drop_then_a_climb_loses_speed():
+    after_drop = coasting.coast(5.0, -3.0, 4.0, 3500)
+    after_climb = coasting.coast(after_drop, 3.0, 4.0, 3500)
+
+    assert after_climb < 5.0
 
 
 def test_lateral_g_scales_with_speed_and_banking():
