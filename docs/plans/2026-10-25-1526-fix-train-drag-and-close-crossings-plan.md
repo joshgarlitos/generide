@@ -46,8 +46,8 @@ The oracle could not confirm any of this. It builds a ride piece by piece, and t
 
 - R1. The simulator applies, on every unpowered piece, a loss equal to the game's linear term plus its squared term divided by train mass.
 - R2. Train mass is an input with one default, set by U3 from a measurement. The simulator, the exported ride and the oracle use the same train length.
-- R3. On every track that builds in the game, simulated speed at the end of each unpowered piece is within 10% of the game's logged speed. The seed circuit is the first such track.
-- R4. The quick stall check (`energy_stall_index`) never passes a track the simulator stalls, with the new constants.
+- R3. On every track that builds in the game, the simulator's mean speed on each unpowered piece follows the game's. Recorded tolerances: under 2% mean error on the seed circuit, under 3% on the flat loop, under 8% on the 80-piece ride, with no piece off by more than 5%, 7% and 20% (the long train smooths hills that the simulator's single point does not).
+- R4. The quick stall check (`energy_stall_index`) names the same stalling piece as `physics.simulate` for every track and train length.
 
 **Oracle coverage**
 
@@ -84,10 +84,10 @@ The oracle could not confirm any of this. It builds a ride piece by piece, and t
 ### Key Technical Decisions
 
 - KTD1. **Drag in sim units.** Per-piece loss uses `a = 0.009766·v + 2.5·v²/M` in m/s², with `v` in m/s and `M` the total train mass. The constants come from the game's integer formula at 40 ticks per second and 65536 velocity units per m/s; U2 re-derives them from the source and checks them against U1's trace instead of trusting this plan. (session-settled: user-directed — chosen over a refit constant: see Key Decisions.) Governs R1.
-- KTD2. **`TILE_M` stays at 4.36.** The game's distance per tick (`(v>>10)*42` against 13962 per step, 32 steps per tile) gives 12.4 m/s at 783k units, which matches the simulator's convention at that tile length. No recalibration is part of this plan.
-- KTD3. **Train mass comes from car count.** Mass is 500 per car, read from the game's `car.mass` on the seed circuit. Riders are ignored because the oracle runs with none. A different count changes drag strength, so the car count is a ride setting, not a constant.
+- KTD2. **Drag distance is measured, not derived.** `TILE_M` stays at 4.36 for the ride-length statistic. The game moves a train along a flat tile in about 8 ticks, which is 2.4 to 2.75 m in the simulator's speed units. Drag therefore uses `DRAG_LENGTH_SCALE` = 0.6 of the piece length. It was fitted to the recorded traces (0.65 best for the seed circuit, 0.5 for the 80-piece ride). Why the game covers more track per tick than its source formula gives is open.
+- KTD3. **Train mass comes from car count.** Mass is 500 per car, read from the game's `car.mass`. Riders are ignored because the oracle runs with none. The default is 2 cars, the train `evolve_coaster.py` exports. The oracle cannot set the car count and runs the game's default of 7, so a ride that the oracle completes can still stall in the player's park. This explains why the seed 123 ride stalled for the player and not in the simulator at 7 cars.
 - KTD4. **The validator gets no clearance rule.** The game loads saved designs with self-crossings tighter than the piece-by-piece build allows (devlog 2026-08-29), so rejecting them would forbid rides that work. The oracle limit is handled in U5.
-- KTD5. **The stall screen stays conservative and physics-free.** `construction.py` cannot import `physics.py`. The screen's per-piece charge is raised to the value that never passes a track the simulator stalls, checked on the existing random-track property test, and pinned by a test as today.
+- KTD5. **The stall screen and the simulation share one coasting walk.** A flat charge per piece cannot stay conservative once drag grows with speed (measured: 16 of 657 stalling tracks still passed at a charge of 0.25 per piece). The walk and its constants move to `rct2/coasting.py`, which imports neither `construction.py` nor `physics.py`. `energy_stall_index` and `physics.trace` both call it, so they name the same piece by construction.
 - KTD6. **Game traces are recorded, not run in CI.** `tests/test_oracle.py` mocks the game. U1 stores the game's trace as a JSON fixture and tests compare the simulator against it. The live probe runs by hand.
 
 ### High-Level Technical Design
@@ -190,24 +190,21 @@ The units are m/s². At low speed the simulator over-charges, at high speed it u
   - An invalid count (zero, negative) is rejected with a clear message.
 - **Verification:** The same count is visible in the CLI help, the web form, the run record and the oracle result.
 
-### U4. Retune the stall screen
+### U4. Share the coasting walk with the stall screen
 
-- **Goal:** Make `energy_stall_index` conservative against the new simulator.
+- **Goal:** Make `energy_stall_index` and `physics.trace` stall on the same piece.
 - **Requirements:** R4.
 - **Dependencies:** U2, U3.
-- **Files:** `rct2/construction.py`, `tests/test_construction.py`.
+- **Files:** `rct2/coasting.py`, `rct2/construction.py`, `rct2/physics.py`, `tests/test_construction.py`.
 - **Approach:**
-  1. Measure the screen against `physics.simulate` over a large random corpus and find the per-piece charge that never passes a stalling track.
-  2. Update `FRICTION_PER_SEGMENT`, `LIFT_HEAD` and `STALL_HEAD` and update the pin test to recompute them from the physics source.
-  3. Report how many more tracks the screen now rejects, so the owner sees the cost.
-- **Execution note:** The existing property test (`test_construction.py` around line 205) is the failing test to extend: widen it to the new model and to several car counts.
-- **Patterns to follow:** `test_stall_screen_constants_match_the_physics_model`.
+  1. Move the drag constants, piece lengths and the per-piece coast into `rct2/coasting.py`. `physics.py` re-exports the names it used to define.
+  2. Rewrite `energy_stall_index` as the same speed walk, with the train's car count as an argument. Remove the head constants.
+  3. Replace the constants-pin test with a test that the two stall indices agree over a corpus at 1, 2 and 7 cars.
 - **Test scenarios:**
-  - Property: 300 or more random tracks, screen passes implies simulator completes, for 1, 4 and 7 cars.
-  - The seed 123 fixture is rejected by the screen.
-  - The hill circuit seed is not rejected.
-  - Pin test fails if a physics constant moves without the screen constant.
-- **Verification:** The property test passes at every car count in scope.
+  - Screen and simulation agree on the stalling piece for 150 random part-based tracks and the Manic Miner fixture, at 1, 2 and 7 cars.
+  - A lighter train stalls sooner on a long flat loop.
+  - The screen never passes a track the simulation stalls, over 600 random tracks from both generators.
+- **Verification:** The full suite passes and the screen costs a few microseconds per piece.
 
 ### U5. Spike: run saved designs in the oracle
 
