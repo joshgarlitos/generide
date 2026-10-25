@@ -40,6 +40,9 @@ Which of four quarter turns the isometric view is drawn from. A turn rotates the
 ### Train
 The row of cars drawn lapping the track in the isometric view. Its speed on each piece is the speed the physics trace gives, so it crawls up the lift and races down the drops. One lap always takes 20 seconds of picture time, whatever the ride's length, so the lap shows relative speeds and not real lap time. A train that cannot finish the circuit runs to the piece where it stalls and stops there, and the picture marks that spot.
 
+### Train mass
+What the game weighs the train at: 500 per car, no riders. It sets how much speed the train loses to the squared part of the game's drag, so a 7-car train (3500) keeps its speed far better than the 2 cars a file exports (1000). The physics simulation assumes the exported 2 cars. The headless oracle cannot change the game's own 7, so a ride the oracle completes can still stall in the player's park.
+
 ### Track path
 The line down the middle of the track, one per piece, running from the middle of the piece's entry edge to the middle of the next piece's entry edge. The isometric view draws its rails along it and the train rides on it, so the train is always on the track it is drawn on.
 
