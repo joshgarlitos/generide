@@ -258,9 +258,8 @@ def check_message(check: Dict[str, Any]) -> str:
         piece = re.match(r"piece_(\d+)", detail)
         where = f" at piece {int(piece.group(1)) + 1}" if piece else ""
         return (
-            f"The game would not build the ride{where}. Its piece-by-piece build "
-            f"is stricter than loading a saved design about tracks crossing "
-            f"close over themselves, so the design may still load in the game."
+            f"The game would not build the ride{where}. The design may still "
+            f"load in the game, which does not build it piece by piece."
         )
     return f"generide could not run the game check: {detail or 'unknown error'}."
 

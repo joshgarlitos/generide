@@ -8,7 +8,7 @@ import pytest
 
 from tests import game_traces
 
-NAMES = ["seed_circuit", "evolved_80_pieces", "simple_circuit"]
+NAMES = ["seed_circuit", "evolved_80_pieces", "simple_circuit", "evolved_s123_7_cars"]
 
 
 @pytest.mark.parametrize("name", NAMES)

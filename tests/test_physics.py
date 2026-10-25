@@ -521,6 +521,9 @@ SPEED_FIT = {
     "seed_circuit": (11, 8, 0.02, 0.05),
     "evolved_80_pieces": (15, 8, 0.08, 0.20),
     "simple_circuit": (5, 0, 0.03, 0.07),
+    # The ride that stalls in the player's park, run by the oracle with the
+    # game's 7-car train: 100 pieces of coasting after the one real drop.
+    "evolved_s123_7_cars": (17, 8, 0.09, 0.25),
 }
 
 
@@ -576,3 +579,19 @@ def test_the_evolved_ride_that_stalls_in_the_game_stalls_in_the_simulator():
 
     assert not stats.completed
     assert 90 <= stats.stall_index <= 110  # the last third of 120 pieces
+
+
+def test_the_same_ride_completes_with_the_games_seven_cars_and_stalls_with_two():
+    """Why the oracle never saw the stall: it cannot set the car count.
+
+    The game completes the seed 123 ride with its default 7 cars (minimum speed
+    7.5 m/s on piece 109, recorded). The ride exports with 2 cars, which weigh
+    a seventh as much per car and lose far more to the squared drag, and the
+    player's train stalled in the last third.
+    """
+    trace = game_traces.load("evolved_s123_7_cars")
+    lifts = set(trace["lift_indices"])
+
+    assert trace["status"] == "rated"
+    assert physics.simulate(trace["segments"], lifts, train_cars=7).completed
+    assert not physics.simulate(trace["segments"], lifts, train_cars=2).completed

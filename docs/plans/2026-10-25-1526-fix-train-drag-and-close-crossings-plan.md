@@ -211,18 +211,12 @@ The units are m/s². At low speed the simulator over-charges, at high speed it u
 - **Goal:** Find out whether the oracle can load a saved design the way the game does, so rides with tight self-crossings can be measured.
 - **Requirements:** R5.
 - **Dependencies:** U1.
-- **Files:** `rct2/oracle.py`, `tests/test_oracle.py`, `docs/headless-oracle-spike.md`, `tests/data/stall_repro/`.
-- **Approach:**
-  1. List the actions the installed game (v0.5.3) exposes for placing a track design, using the plugin API's action list and the game source for `TrackDesignAction`.
-  2. If one takes a design file, write the `.td6` to the track folder and place it, then compare its result to the piece-by-piece build on a ride that builds both ways.
-  3. If none exists, record the evidence in `docs/headless-oracle-spike.md` and stop. Do not build a workaround.
-- **Execution note:** Time-boxed. A negative result is a complete outcome.
+- **Files:** `rct2/oracle.py`, `tests/test_oracle.py`, `docs/headless-oracle-spike.md`.
+- **Result:** Done. `trackplace` takes `isFromTrackDesign`, and with it true the seed 123 ride builds and rates. Rides that built before rate identically. `score_track(from_track_design=True)` is the default. Evidence is in `docs/headless-oracle-spike.md`.
 - **Test scenarios:**
-  - If a route is found: the seed 123 fixture returns a rated or stalled result instead of `placement_failed`.
-  - If a route is found: a ride that builds both ways gets the same rating from both.
-  - If a route is found: a design the game rejects on load returns a clear status, not a timeout.
-  - If no route is found: `Test expectation: none -- documentation of a negative result`.
-- **Verification:** Either the seed 123 ride runs in the oracle, or the spike document names the evidence that rules each route out.
+  - The plugin places pieces with the flag on by default and off when asked.
+  - Recorded: the seed 123 ride rated in the game with its 7-car train.
+- **Verification:** Met. The seed 123 ride runs in the oracle.
 
 ### U6. Check ratings drift and lift speed
 

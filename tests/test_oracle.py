@@ -202,3 +202,21 @@ def test_a_car_count_that_does_not_split_evenly_is_not_trusted():
     line = "'GENERIDE_TRAINS|numTrains=3|carsPerTrain=2|totalCars=10'"
 
     assert _parse_trains(line) == (3, 2)
+
+
+# A saved design loaded the normal way skips the game's check that a piece
+# clears the ride's own earlier track (TrackPlaceAction's `_fromTrackDesign`),
+# because a real coaster crosses itself. Placing pieces one at a time used to
+# apply that check, so rides that load fine in the player's park came back as
+# "in the way". `isFromTrackDesign` on the `trackplace` action switches it off.
+
+def test_pieces_are_placed_the_way_a_loaded_design_places_them_by_default():
+    source = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20)
+
+    assert "isFromTrackDesign: true" in source
+
+
+def test_the_stricter_piece_by_piece_check_can_be_asked_for():
+    source = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20, from_track_design=False)
+
+    assert "isFromTrackDesign: false" in source

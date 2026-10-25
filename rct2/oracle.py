@@ -73,25 +73,24 @@ STALL_TICKS = 1200
 # hardcoding the number, so the two stay in sync.
 DEFAULT_PROCESS_TIMEOUT_S = 90.0
 
-# KNOWN LIMITATION, not yet worked around: this module places pieces one at a
-# time via the scripting API's own trackplace action, which enforces vertical
-# clearance against the ride's *own* already-placed track the same as it
-# would against any other ride. A design placed the normal way, by loading a
-# saved .td6 through the ride construction window, does not: OpenRCT2's
-# TrackPlaceAction takes a `_fromTrackDesign` flag that tells its clearance
-# check to ignore the ride under construction's own ID entirely
-# (`ignoreRideId = _fromTrackDesign ? _rideIndex : RideId::GetNull()` in
-# src/openrct2/actions/track/TrackPlaceAction.cpp), because a real coaster
-# routinely crosses itself and that is expected. Confirmed 2026-08-29: a real
-# evolved track (114 segments, docs/devlog.md) crosses itself with 2 height
-# units of clearance at one point, which this module's piece-by-piece build
-# rejects as "Mine Train Coaster 1 in the way" -- and the same file, loaded
-# and ridden normally in-game, worked fine and rated 5.21/6.97/4.31.
-# So a `placement_failed` result from this module does not mean the track is
-# actually invalid; it means this build method is stricter than real design
-# loading on self-crossings tighter than 3 height units apart. No fix is
-# implemented yet -- the scripting API does not appear to expose an
-# equivalent to `_fromTrackDesign`.
+# Pieces are placed the way the game places a loaded design. This module places
+# a ride one piece at a time through the scripting API's `trackplace` action,
+# which by default checks vertical clearance against the ride's *own*
+# already-placed track the same as against anyone else's. Loading a saved .td6
+# through the construction window does not: TrackPlaceAction takes a
+# `_fromTrackDesign` flag that makes its clearance check ignore the ride under
+# construction (`ignoreRideId = _fromTrackDesign ? _rideIndex : RideId::GetNull()`
+# in src/openrct2/actions/track/TrackPlaceAction.cpp), because a real coaster
+# routinely crosses itself.
+#
+# Until 2026-10-25 this module sent the flag as false and came back with
+# "Mine Train Coaster 1 in the way" for any ride that crosses itself within 3
+# height units (docs/devlog.md, 2026-08-29, which concluded the API did not
+# expose the flag). It does: `isFromTrackDesign` on the action. With it true,
+# the evolved ride that failed on piece 53 builds and runs, and rides that
+# built before rate identically (seed circuit 0.54/0.64/0.43, an 80-piece ride
+# 5.58/7.08/4.66, with the flag on and off). `from_track_design=False` keeps the
+# stricter check for anyone who wants it.
 
 
 @dataclass(frozen=True)
@@ -211,6 +210,7 @@ def _build_plugin_source(
     num_trains: int = 1,
     cars_per_train: int = 2,
     trace_every_ticks: Optional[int] = None,
+    from_track_design: bool = True,
 ) -> str:
     """Generate the JS plugin that builds one track and reports its rating.
 
@@ -373,7 +373,7 @@ registerPlugin({
                         ride: rideId, trackType: trackType, rideType: %(ride_type)d,
                         brakeSpeed: BRAKE_SPEED, colour: 0, seatRotation: 4,
                         trackPlaceFlags: wantsLift ? %(lift_flag)d : 0,
-                        isFromTrackDesign: false,
+                        isFromTrackDesign: %(from_track_design)s,
                     }, function (r) {
                         console.log('GENERIDE_PLACE|i=' + i + '|type=' + trackType + '|error=' + r.error +
                                     '|msg=' + (r.errorMessage || '') + '|x=' + cursor.x + '|y=' + cursor.y +
@@ -735,6 +735,7 @@ registerPlugin({
         )),
         "lift_flag": TRACK_PLACE_FLAG_CHAIN_LIFT,
         "trace_block": _trace_block(trace_every_ticks),
+        "from_track_design": "true" if from_track_design else "false",
         "brake_speed": brake_speed,
         "num_trains": num_trains,
         "cars_per_train": cars_per_train,
@@ -993,6 +994,7 @@ def score_track(
     cars_per_train: int = 2,
     binary: Optional[str] = None,
     trace_every_ticks: Optional[int] = None,
+    from_track_design: bool = True,
 ) -> OracleResult:
     """Build `segments` in a real, headless OpenRCT2 and run a train on it.
 
@@ -1015,6 +1017,10 @@ def score_track(
     into `OracleResult.trace`, the game's own measurement for checking
     `physics.py` against.
 
+    `from_track_design` places pieces the way a loaded saved design is placed
+    (see the note above `RideMeasurements`); False applies the stricter
+    piece-by-piece clearance check.
+
     `binary` defaults to `resolve_binary()`, read at call time.
     """
     if binary is None:
@@ -1028,7 +1034,7 @@ def score_track(
         segments, base_x_tile, base_y_tile, timeout_ticks, level_radius,
         lift_indices=lift_indices, brake_speed=brake_speed,
         num_trains=num_trains, cars_per_train=cars_per_train,
-        trace_every_ticks=trace_every_ticks,
+        trace_every_ticks=trace_every_ticks, from_track_design=from_track_design,
     ))
 
     try:
