@@ -117,6 +117,31 @@ class RideMeasurements:
 
 
 @dataclass(frozen=True)
+class TraceSample:
+    """One reading of the lead car during the test lap.
+
+    Velocity and acceleration stay in the game's integer units (65536 per
+    m/s in the simulator's convention, see rct2/physics.py) so a trace can be
+    compared with the game's own formula without a conversion in the way.
+    `piece_index` says which piece of the submitted track the car was on; the
+    game reports a track type and tile, not an index, so it is filled in
+    afterwards from where each piece was placed.
+    """
+
+    tick: int
+    velocity: int
+    acceleration: int
+    mass: int
+    track_type: int
+    progress: int
+    track_x: int
+    track_y: int
+    track_z: int
+    z: int
+    piece_index: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class OracleResult:
     excitement: Optional[float]
     intensity: Optional[float]
@@ -130,6 +155,8 @@ class OracleResult:
     measurements: Optional[RideMeasurements] = None
     num_trains: int = 1
     cars_per_train: int = 2
+    # Only filled when score_track is asked for a trace.
+    trace: tuple[TraceSample, ...] = ()
 
 
 def _joint_heights(segments: list[int]) -> list[int]:
@@ -183,6 +210,7 @@ def _build_plugin_source(
     brake_speed: int = DEFAULT_BRAKE_SPEED,
     num_trains: int = 1,
     cars_per_train: int = 2,
+    trace_every_ticks: Optional[int] = None,
 ) -> str:
     """Generate the JS plugin that builds one track and reports its rating.
 
@@ -618,6 +646,7 @@ registerPlugin({
                         for (var c = 0; c < cars.length; c++) {
                             if (cars[c].ride === rideId) mine.push(cars[c]);
                         }
+%(trace_block)s
                         if (mine.length > 0) {
                             var fingerprint = '';
                             for (var m = 0; m < mine.length; m++) {
@@ -700,6 +729,7 @@ registerPlugin({
             if lift_indices is None else lift_indices
         )),
         "lift_flag": TRACK_PLACE_FLAG_CHAIN_LIFT,
+        "trace_block": _trace_block(trace_every_ticks),
         "brake_speed": brake_speed,
         "num_trains": num_trains,
         "cars_per_train": cars_per_train,
@@ -740,6 +770,102 @@ def _parse_result(line: str) -> Optional[OracleResult]:
         excitement=None, intensity=None, nausea=None,
         status=status, detail=detail, stalled_at_type=stalled_type,
     )
+
+
+def _trace_block(every_ticks: Optional[int]) -> str:
+    """JS that logs the fastest car every `every_ticks` ticks, or nothing.
+
+    The fastest car is the moving train's: with several trains the others sit
+    in the station, and following an arbitrary car would log a parked one.
+    """
+    if not every_ticks:
+        return ""
+    return (
+        "                        if (mine.length > 0 && ticks %% %d === 0) {\n"
+        "                            var q = mine[0];\n"
+        "                            for (var k = 1; k < mine.length; k++) {\n"
+        "                                if (Math.abs(mine[k].velocity) > Math.abs(q.velocity)) q = mine[k];\n"
+        "                            }\n"
+        "                            var tl = q.trackLocation || {};\n"
+        "                            console.log('GENERIDE_TRACE|t=' + ticks + '|v=' + q.velocity +\n"
+        "                                        '|a=' + q.acceleration + '|mass=' + q.mass +\n"
+        "                                        '|tt=' + tl.trackType + '|prog=' + q.trackProgress +\n"
+        "                                        '|tx=' + tl.x + '|ty=' + tl.y + '|tz=' + tl.z + '|z=' + q.z);\n"
+        "                        }\n"
+    ) % every_ticks
+
+
+_TRACE_RE = re.compile(r"GENERIDE_TRACE\|(?P<body>[^'\x1b]+)")
+_TRACE_FIELDS = {
+    "t": "tick", "v": "velocity", "a": "acceleration", "mass": "mass",
+    "tt": "track_type", "prog": "progress", "tx": "track_x", "ty": "track_y",
+    "tz": "track_z", "z": "z",
+}
+
+
+def _parse_trace(line: str) -> Optional[TraceSample]:
+    """One trace line, or None when it is not one or a field is unreadable."""
+    match = _TRACE_RE.search(line)
+    if not match:
+        return None
+    values = {}
+    for pair in match.group("body").split("|"):
+        key, _, raw = pair.partition("=")
+        field = _TRACE_FIELDS.get(key)
+        if field is None:
+            continue
+        try:
+            values[field] = int(raw)
+        except ValueError:
+            return None
+    if set(values) != set(_TRACE_FIELDS.values()):
+        return None
+    return TraceSample(**values)
+
+
+_PLACE_RE = re.compile(
+    r"GENERIDE_PLACE\|i=(?P<i>\d+)\|type=(?P<type>\d+)\|error=0\|msg=[^|]*"
+    r"\|x=(?P<x>-?\d+)\|y=(?P<y>-?\d+)\|z=(?P<z>-?\d+)"
+)
+
+
+def _parse_placement(line: str) -> Optional[tuple[int, tuple[int, int, int, int]]]:
+    """(piece index, (x, y, z, track type)) for a piece the game accepted."""
+    match = _PLACE_RE.search(line)
+    if not match:
+        return None
+    return int(match.group("i")), (
+        int(match.group("x")), int(match.group("y")),
+        int(match.group("z")), int(match.group("type")),
+    )
+
+
+def _assign_piece_indices(
+    samples: list[TraceSample],
+    placements: dict[int, tuple[int, int, int, int]],
+) -> list[TraceSample]:
+    """Say which piece of the track each sample was on.
+
+    A sample matches a piece when its tile, height and track type equal where
+    that piece was placed. A ride can cross itself, so several pieces can
+    match; the car only moves forward, so take the first match at or after the
+    previous sample's piece and fall back to the first match overall once the
+    lap wraps.
+    """
+    by_key: dict[tuple[int, int, int, int], list[int]] = {}
+    for index, key in placements.items():
+        by_key.setdefault(key, []).append(index)
+    result = []
+    last = 0
+    for sample in samples:
+        matches = sorted(by_key.get(
+            (sample.track_x, sample.track_y, sample.track_z, sample.track_type), []
+        ))
+        chosen = next((i for i in matches if i >= last), matches[0] if matches else None)
+        if chosen is not None:
+            last = chosen
+        result.append(replace(sample, piece_index=chosen))
+    return result
 
 
 _STATS_RE = re.compile(r"GENERIDE_STATS\|(?P<body>[^'\x1b]+)")
@@ -852,6 +978,7 @@ def score_track(
     num_trains: int = 1,
     cars_per_train: int = 2,
     binary: Optional[str] = None,
+    trace_every_ticks: Optional[int] = None,
 ) -> OracleResult:
     """Build `segments` in a real, headless OpenRCT2 and run a train on it.
 
@@ -870,6 +997,10 @@ def score_track(
     plugin directory available (see module docstring). Only one call should
     run at a time; concurrent calls would overwrite each other's plugin file.
 
+    `trace_every_ticks` also logs the lead car's speed every that many ticks
+    into `OracleResult.trace`, the game's own measurement for checking
+    `physics.py` against.
+
     `binary` defaults to `resolve_binary()`, read at call time.
     """
     if binary is None:
@@ -883,6 +1014,7 @@ def score_track(
         segments, base_x_tile, base_y_tile, timeout_ticks, level_radius,
         lift_indices=lift_indices, brake_speed=brake_speed,
         num_trains=num_trains, cars_per_train=cars_per_train,
+        trace_every_ticks=trace_every_ticks,
     ))
 
     try:
@@ -913,6 +1045,8 @@ def score_track(
     # What the game actually gave the ride, which is not what we asked for
     # whenever ridesetvehicle rejects our arguments -- see _parse_trains.
     actual_trains: Optional[tuple[int, int]] = None
+    trace_samples: list[TraceSample] = []
+    placements: dict[int, tuple[int, int, int, int]] = {}
     try:
         deadline = time.time() + process_timeout_s
         for line in process.stdout:
@@ -922,6 +1056,15 @@ def score_track(
                 measurements = _parse_measurements(line) or measurements
             if "GENERIDE_TRAINS" in line:
                 actual_trains = _parse_trains(line) or actual_trains
+            if trace_every_ticks:
+                if "GENERIDE_TRACE" in line:
+                    sample = _parse_trace(line)
+                    if sample is not None:
+                        trace_samples.append(sample)
+                elif "GENERIDE_PLACE" in line:
+                    placed = _parse_placement(line)
+                    if placed is not None:
+                        placements[placed[0]] = placed[1]
             if "GENERIDE_RESULT" in line:
                 result = _parse_result(line)
                 if result is not None:
@@ -945,6 +1088,7 @@ def score_track(
     return replace(
         result, measurements=measurements,
         num_trains=ran_trains, cars_per_train=ran_cars,
+        trace=tuple(_assign_piece_indices(trace_samples, placements)),
     )
 
 
