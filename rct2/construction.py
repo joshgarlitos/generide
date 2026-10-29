@@ -206,12 +206,19 @@ def build_hill(height: int = MIN_HILL_HEIGHT) -> list[int]:
     return climb + drop
 
 
+# Every hill the search can build, by its pieces, so recognising one is a lookup.
+_HILL_HEIGHTS = {
+    tuple(build_hill(height)): height
+    for height in range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2)
+}
+_MIN_HILL_PIECES = min(len(pieces) for pieces in _HILL_HEIGHTS)
+
+
 def hill_height(part: list[int]) -> int:
     """Height units a `build_hill` sequence climbs, or 0 if `part` isn't one."""
-    for height in range(MIN_HILL_HEIGHT, MAX_HILL_HEIGHT + 1, 2):
-        if part == build_hill(height):
-            return height
-    return 0
+    if len(part) < _MIN_HILL_PIECES:
+        return 0
+    return _HILL_HEIGHTS.get(tuple(part), 0)
 
 
 @dataclass(frozen=True)

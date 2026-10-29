@@ -31,6 +31,56 @@ Not done: a train-length setting in the web form and CLI (the default is the 2 c
 
 ---
 
+## 2026-10-11: The lift hill can move, so rides can turn before the climb
+
+The generator kept breaking out of tight sites, and it never tried a layout like station, curve, lift, curve. The cause was a shortcut in the search and not a rule of the game: the part-based genome pinned the station at part 0 and the lift hill at part 1, and mutation and crossover only worked from part 2 on, so nothing could ever sit between the station and the hill. A hand-built `station, turn, hill` track already passed the construction and physics checks. The plan is `docs/plans/2026-10-11-1900-feat-free-ride-layout-plan.md`. This is the first slice of it.
+
+What changed:
+
+- The hill is still in every ride exactly once, but it can sit anywhere after the station. Mutation can insert parts directly ahead of it, crossover picks cut points so each child takes exactly one hill, and the random starting tracks now put it after zero to three other parts. `free_hill=False` pins it at slot 1 again and reproduces the old seeded runs exactly.
+- A "move the hill" mutation exists, but only runs with a site turn it on. See the measurements below for why.
+- A ride whose climb is stolen by a smaller climb ahead of the hill is scored as before: a stall and an energy shortfall, a penalty and not a rejection. The new tests pin that on both scorers (`PhysicsFitness` is the one the benchmark uses; the proxy's missing-lift penalty can never fire, which was already a known limitation).
+- With a site, a run now returns two rides: the best one a train can finish, and the best one that fits the site even if the train would stall. The second is written next to the first with a `-fits` suffix, kept in the run record, and shown in the web UI with the label "Best fit, not playable: the train stalls". When there is no playable ride, the fitting ride is still written and the run says so.
+- `run_benchmark.py --site-file` runs any saved site next to the canned ones. `tests/data/site-14x14.json` is the tight test site from the plan.
+- `tools/train_probe.js` and `docs/train-length-spike.md` are written for the train-length check. **They have not been run against the real game**, so every finding in the write-up says "not run".
+
+How it was measured: `ga_parts`, 2,000 evaluations per run, scored by the ported ratings. The baseline is the code at 48c29b0 with the hill pinned. The after numbers are the code at bdb502a. Each number is 25 seeds, no-site numbers are 50 seeds (seeds 1 to 50), and the raw results are in `benchmark_results/` (not tracked).
+
+| site | pinned hill | hill free |
+|---|---|---|
+| L shape | 100% | 100% |
+| blocked centre | 88% | 100% |
+| downhill | 100% | 100% |
+| 14 by 14 open square | 0% | 92% |
+
+Those are the share of runs whose best ride fits the site; the fits-and-usable column is identical in every row. The 14 by 14 square is the site that started this: no ride with the hill right after the station can fit it, and now 23 of 25 runs fit it with a ride a train finishes.
+
+Two things differ from what the plan assumed. First, the blocked-centre baseline is 88% at the full protocol, not 40%. The 40% came from the earlier 5-seed, 800-evaluation run, which was too small to trust, so the rise there is smaller than the plan expected. Second, freeing the hill cost ordinary rides some quality until I found why.
+
+No site, 50 seeds:
+
+| | median excitement | mean | runs below 3.5 | best |
+|---|---|---|---|---|
+| hill pinned | 4.365 | 4.24 | 3 | 4.60 |
+| hill free, with the move-the-hill mutation | 4.325 | 3.95 | 9 | 4.52 |
+| hill free, no varied random starts | 4.32 | 4.03 | 7 | 4.64 |
+| hill free, no move-the-hill mutation | 4.355 | 4.24 | 3 | 4.68 |
+
+The median barely moved in any row, which is why the first 25 seeds looked fine. The move-the-hill mutation tripled the share of runs that get stuck near 2.1 (a short ride that never builds up), and the mean fell by 0.29. Without it the no-site numbers match the pinned search, and the best run is higher. But that mutation is also what fits the 14 by 14 square: without it, 1 run in 25 fits (4%) and the blocked-centre ride is only usable 72% of the time. So the move-the-hill mutation is on for runs with a site and off for runs without one, the fallback the plan allowed for. The final numbers above are from that setup.
+
+On the plan's quality bar, "median excitement not below today's": the median is 4.355 against 4.365, a difference of 0.01 with a 95% interval of -0.065 to +0.055 over 50 seeds, so it is not distinguishable from equal, but it is not literally above. I am calling that met and have said so on the pull request so it can be overruled.
+
+Smaller findings from the work:
+
+- Moving the hill almost never gives a closed loop on its own. Of 629 candidate slots across 31 genomes, 34 closed, mostly by moving the hill past straight pieces. Mutations that change a genome fell from 54 to 30 of 300, while closed crossover children rose from 28 to 44 of 600. Random starting tracks close 0 times in 400 either way, so they are scaffolds the search repairs.
+- `generate_ride` refuses a track with an energy shortfall, so a stalled ride cannot go through it. The command line's own exporter writes it, which is why the "fits" ride can be saved.
+- Seeded pins changed because the search draws different random numbers: the seeded run in `tests/test_fitness.py` (213.0 over 52 pieces for the proxy, 51.78 over 54 for the physics scorer) and the two output digests in `tests/test_evolve_coaster.py`. I re-recorded them after the quality check passed. One test that follows a single seed around a blocked block passed on 5 of 8 seeds both before and after, so it now tries seeds 1 to 5.
+- I dropped one planned test, "a later stall scores higher than an early one". On the layouts I built, the score does not rise with the stall position, because the longer layout carries more energy-shortfall issues, so the test would pin something that is not true.
+
+Still open from the plan: whether the move-the-hill mutation could be made safe for runs without a site (it would make the code simpler), and the train-length probe, which the owner has to run with the game.
+
+---
+
 ## 2026-10-11: The ride view shows the space it has to fit
 
 A verdict of "fits the site" is hard to trust when you cannot see the site, so the isometric view now draws it. Give a run a site and the picture of its best ride shows the ground under the ride: usable tiles as a faint grid, blocked tiles hatched, ground that stands higher than where the ride starts as blocks with walls, and a dashed outline on every ride tile that breaks the site. A small key under the picture names the hatching and the dashes, so nothing depends on colour alone, and the heading says whether the ride fits.
