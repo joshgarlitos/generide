@@ -88,6 +88,32 @@ Each of these was run and returned success in headless:
 
 `tools/oracle_probe.js` is the working probe from this spike, kept as a starting point.
 
+## Placing a ride the way a loaded design is placed (2026-10-25)
+
+The oracle builds a ride one piece at a time with the `trackplace` action. By default that action checks each piece against the ride's own earlier track, so a ride that crosses itself within 3 height units comes back "Mine Train Coaster 1 in the way" and `placement_failed`, even though the same file loads and rides in the player's park. The 2026-08-29 devlog entry concluded the scripting API had no way around this.
+
+It does: the action takes `isFromTrackDesign`, the argument that maps to the game's `_fromTrackDesign` flag, and with it true the check ignores the ride under construction. `score_track(from_track_design=True)` is the default now. Checked against the game:
+
+| Ride | Flag off | Flag on |
+|---|---|---|
+| Seed circuit | 0.54 / 0.64 / 0.43, 183 m, 26 mph | identical |
+| 80-piece evolved ride | 5.58 / 7.08 / 4.66, 424 m, 37 mph | identical |
+| Evolved ride, seed 123 (120 pieces) | `placement_failed` at piece 54 | rated, 684 m, 41 mph |
+
+Three of five saved evolved rides used to fail this way.
+
+## Recording a speed trace
+
+`score_track(segments, lift_indices=..., trace_every_ticks=5)` returns the lead car's velocity, acceleration and mass every 5 ticks in `OracleResult.trace`, each sample matched to the piece it was on. The fixtures in `tests/data/game_traces/` were recorded with it:
+
+```python
+from dataclasses import asdict
+result = oracle.score_track(segments, lift_indices=lifts, trace_every_ticks=5)
+samples = [asdict(s) for s in result.trace]
+```
+
+Two things a trace showed that the ratings did not. The game runs its default train of 7 cars, whatever the plugin asks for (`ridesetvehicle` rejects the request), and the oracle now reports the real count in `OracleResult.cars_per_train`. And the game takes speed off the train every tick as `velocity / 4096` plus `velocity squared / total mass`, so a 7-car train (3500) loses a third of what the exported 2-car train (1000) loses to the squared term.
+
 ## What this spike did not prove
 
 **No end-to-end rating of a known design.** The acceptance criteria asked for a sanity check against `data/sample_rides/`, and that did not happen. Each link works in isolation, but placing all 89 segments of `manic_miner_test.td6` and testing it is the implementation, not the spike, so the numbers here rest on the mechanism working rather than on a reproduced rating. The baseline to check against when someone does it, from the fixture's own header: **excitement 6.2, intensity 6.5, nausea 4.2**. If the oracle returns 620/650/420 for that segment list, it is validated.

@@ -29,6 +29,7 @@ from rct2.benchmark import (
     summarize,
 )
 from rct2.generate import create_simple_circuit
+from tests.stalling import stalling_loop
 
 
 # A short open stub: station drives it the whole way, so `completed` is True,
@@ -87,13 +88,13 @@ class TestReliabilityAndDiversity:
         assert reliability([good, bad]) == 0.5
 
     def test_flat_liftless_loop_is_valid_but_does_not_complete(self):
-        """create_simple_circuit is construction-valid (the game builds it)
-        but no train can finish it -- the seed every evolution run starts
-        from (see docs/architecture.md, "Buildable is not runnable"). It's
-        the concrete case that makes `valid and completed` the right gate
-        rather than `valid` alone.
+        """A flat loop long enough to coast to a stop is construction-valid (the
+        game builds it) but no train can finish it. It's the concrete case that
+        makes `valid and completed` the right gate rather than `valid` alone
+        (see docs/architecture.md, "Buildable is not runnable"). The short
+        starter loop is not that case: the game completes it.
         """
-        result = evaluate_result("m", 1, create_simple_circuit(), 1)
+        result = evaluate_result("m", 1, stalling_loop(), 1, max_width=40, max_depth=40)
         assert result.valid
         assert not result.completed
         assert result.ported_excitement is None
