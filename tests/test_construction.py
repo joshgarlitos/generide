@@ -24,6 +24,7 @@ from rct2.construction import (
 from rct2.segments import SEGMENTS
 from rct2.evolution import Individual
 from rct2.generate import create_simple_circuit
+from tests.stalling import stalling_loop
 from rct2.physics import simulate
 
 
@@ -141,13 +142,15 @@ def test_climb_beyond_lift_height_is_an_energy_shortfall():
     assert result.count("energy_shortfall") > 0
 
 
-def test_flat_liftless_circuit_is_buildable_but_not_completable():
-    """The seed track is the case that keeps the two checks separate.
+def test_a_long_flat_liftless_circuit_is_buildable_but_not_completable():
+    """The case that keeps the two checks separate.
 
-    OpenRCT2 builds this fine, so it stays construction-valid. No train can
-    run it, so the stall screen and physics both reject it.
+    OpenRCT2 builds a long flat loop fine, so it stays construction-valid. The
+    train coasts to a stop before it gets round, so the stall screen and
+    physics both reject it. The short starter loop is not this case: the game
+    completes it (tests/data/game_traces/simple_circuit.json).
     """
-    segments = create_simple_circuit()
+    segments = stalling_loop()
 
     assert validate_construction(segments).valid
     assert energy_stall_index(segments) is not None
@@ -157,19 +160,19 @@ def test_flat_liftless_circuit_is_buildable_but_not_completable():
 def test_stall_screen_catches_friction_death_on_flat_ground():
     # Long flat run with no lift: nothing ever climbs, so _energy_issues stays
     # silent while the train coasts to a stop.
-    segments = [0x02, 0x01] + [0x00] * 40
+    segments = [0x02, 0x01] + [0x00] * 60
 
     assert not validate_construction(segments).count("energy_shortfall")
     assert energy_stall_index(segments) is not None
 
 
 def test_lift_restores_head_so_a_powered_track_keeps_running():
-    segments = [0x02, 0x01] + [0x00] * 6
+    segments = [0x02, 0x01] + [0x00] * 60
 
     # Identical geometry: marking the flat run as lift-driven is what keeps
     # the train alive, so the lift set has to actually feed the budget.
     assert energy_stall_index(segments, lift_indices=set()) is not None
-    assert energy_stall_index(segments, lift_indices=set(range(2, 8))) is None
+    assert energy_stall_index(segments, lift_indices=set(range(2, 62))) is None
 
 
 def test_real_mine_train_completes_under_the_stall_screen():
@@ -183,15 +186,14 @@ def test_real_mine_train_completes_under_the_stall_screen():
 
 
 def test_stall_screen_never_passes_a_track_the_simulation_stalls():
-    """Issue #60: the screen must stay conservative against the corrected scale.
+    """`ProxyFitness` trusts this screen to avoid passing tracks the real
+    simulation stalls. Checked over a seeded corpus of the part-based tracks
+    evolution actually builds from, plus the real fixture.
 
-    Rescaling TILE_M re-expressed the friction the simulation charges per
-    metre, and `ProxyFitness` trusts this screen to avoid passing tracks the
-    real simulation stalls. Checked over a seeded corpus of the part-based
-    tracks evolution actually builds from, plus the real fixture. The
-    flat-genome generator (`generate_random_track`) is deliberately not
-    included: it already produces a handful of tracks the screen passes and the
-    simulation stalls, before and after the rescale, which is a separate gap.
+    The screen used to charge a flat amount per piece and let a handful of
+    tracks through that the simulation stalled (a gap this test excluded the
+    flat-genome generator for). It now takes the same coasting walk as the
+    simulation, so there is no gap to exclude.
     """
     import random
 
@@ -203,29 +205,47 @@ def test_stall_screen_never_passes_a_track_the_simulation_stalls():
     assert energy_stall_index(fixture, lift_indices=lifts) is None
     assert simulate(fixture, lift_indices=lifts).completed
 
+    from rct2.mutations import generate_random_track
+
     rng = random.Random(60)
-    for _ in range(300):
-        segments = flatten_parts(generate_random_track_parts(rng))
+    corpus = [flatten_parts(generate_random_track_parts(rng)) for _ in range(300)]
+    corpus += [generate_random_track(rng) for _ in range(300)]
+    for segments in corpus:
         if energy_stall_index(segments) is None:
             assert simulate(segments).completed, segments
 
 
-def test_stall_screen_constants_match_the_physics_model():
-    """Pin the head constants so the two energy models cannot drift.
+def test_the_stall_screen_and_the_simulation_share_one_coasting_walk():
+    """The screen stops the train on the same piece the simulation does.
 
     construction.py cannot import physics.py (physics depends on construction),
-    so the head constants are written out as numbers there. This recomputes
-    them from the physics source values and fails if either side moves.
+    so both walk the track with `rct2.coasting`, which imports neither. The
+    screen used to carry its own constants and a flat charge per piece; drag
+    that grows with speed cannot be summarised that way, and a screen that
+    drifted from the simulation passed rides the game then stalled.
     """
-    def head_units(speed_ms: float) -> float:
-        return speed_ms**2 / (2 * physics.GRAVITY) / physics.HEIGHT_UNIT_M
+    import random
 
-    assert construction.LIFT_HEAD == pytest.approx(
-        head_units(physics.LIFT_SPEED_MS), abs=1e-3
-    )
-    assert construction.STALL_HEAD == pytest.approx(
-        head_units(physics.MIN_SPEED_MS), abs=1e-3
-    )
+    from rct2.mutations import flatten_parts, generate_random_track_parts
+
+    rng = random.Random(60)
+    tracks = [flatten_parts(generate_random_track_parts(rng)) for _ in range(150)]
+    ride = td6.load(FIXTURE)
+    lifts = {i for i, e in enumerate(ride.elements) if e.chain_lift}
+    tracks.append([e.segment_type for e in ride.elements])
+
+    for cars in (1, 2, 7):
+        for segments in tracks:
+            use = lifts if segments is tracks[-1] else None
+            assert energy_stall_index(segments, lift_indices=use, train_cars=cars) == (
+                simulate(segments, lift_indices=use, train_cars=cars).stall_index
+            ), (cars, segments)
+
+
+def test_the_screen_charges_more_for_a_lighter_train():
+    segments = create_simple_circuit(station_length=40)  # stalls with 1 car and with 7
+
+    assert energy_stall_index(segments, train_cars=1) < energy_stall_index(segments, train_cars=7)
 
 
 class TestBuildHill:

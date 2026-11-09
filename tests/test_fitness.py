@@ -314,7 +314,9 @@ class TestNoSiteIsUnchanged:
     2026-10-11 when the lift hill stopped being pinned to slot 1, which makes
     the search draw different random numbers (docs/devlog.md, 2026-10-11); the
     run with the hill pinned still gives the old values
-    (tests/test_evolution.py, TestFreeHillSearch).
+    (tests/test_evolution.py, TestFreeHillSearch). The physics values were
+    re-recorded on 2026-10-25 when the simulator took the game's speed-based
+    drag (the ratings read the simulated speeds).
     """
 
     def test_default_proxy_and_physics_scores_on_the_fixture(self):
@@ -322,16 +324,16 @@ class TestNoSiteIsUnchanged:
 
         assert ProxyFitness().evaluate(segments) == 521.0
         assert ProxyFitness(max_width=10, max_depth=10).evaluate(segments) == -9609.0
-        assert PhysicsFitness().evaluate(segments) == pytest.approx(61.55684431164997)
+        assert PhysicsFitness().evaluate(segments) == pytest.approx(58.06345406047892)
         assert PhysicsFitness(max_width=12, max_depth=12).evaluate(segments) == pytest.approx(
-            11.556844311649968
+            8.063454060478918
         )
 
     @pytest.mark.parametrize(
         "make_fitness, best_fitness, length",
         [
             (ProxyFitness, 213.0, 52),
-            (PhysicsFitness, 51.77783000262507, 54),
+            (PhysicsFitness, 50.755167563106426, 64),
         ],
     )
     def test_a_seeded_run_finds_the_same_best_ride(self, make_fitness, best_fitness, length):
@@ -388,7 +390,7 @@ class TestSiteFitness:
         assert ProxyFitness(max_width=10, max_depth=10, site=site).evaluate(segments) == 521.0
         assert PhysicsFitness(max_width=12, max_depth=12, site=site).evaluate(
             segments
-        ) == pytest.approx(61.55684431164997)
+        ) == pytest.approx(58.06345406047892)
 
     @pytest.mark.parametrize("make", [ProxyFitness, PhysicsFitness])
     def test_a_ride_with_more_blocked_tiles_scores_lower(self, make):

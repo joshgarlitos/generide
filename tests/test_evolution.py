@@ -442,7 +442,7 @@ class TestFreeHillSearch:
 
         for make_fitness, best_fitness, length in (
             (ProxyFitness, 235.0, 58),
-            (PhysicsFitness, 50.853068924145916, 54),
+            (PhysicsFitness, 49.91707266967845, 54),
         ):
             stats = evolve_parts(
                 create_hill_circuit(), random.Random(3), fitness_fn=make_fitness(),

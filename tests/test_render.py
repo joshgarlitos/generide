@@ -25,6 +25,7 @@ from rct2.render import (
 )
 from rct2.construction import STATION_SEGMENTS
 from rct2.generate import create_simple_circuit
+from tests.stalling import STALLING_STRIP
 from rct2.site import Site, best_fit, site_coords
 from rct2.geometry import Heading
 from rct2.physics import trace
@@ -180,7 +181,7 @@ def test_profile_marks_each_counted_drop():
 
 
 def test_profile_marks_the_stall_point():
-    root = ET.fromstring(render_profile([0x00] * 30, lift_indices=set()))
+    root = ET.fromstring(render_profile([0x00] * 60, lift_indices=set()))
     stall = root.findall(".//{http://www.w3.org/2000/svg}*[@data-series='stall']")
     assert stall
     assert "stalls" in ET.tostring(root, encoding="unicode")
@@ -334,7 +335,7 @@ def _floats(text):
 
 def test_the_train_runs_at_the_simulations_speeds_over_twenty_seconds():
     # Covers AE6. The share of the lap spent on lift and station pieces is the
-    # simulation's own, about 39 percent for Manic Miner, whatever the lap's
+    # simulation's own, about 32 percent for Manic Miner, whatever the lap's
     # length in seconds.
     segments = manic_miner_segments()
     ride = trace(segments)
@@ -346,7 +347,7 @@ def test_the_train_runs_at_the_simulations_speeds_over_twenty_seconds():
     share = sum(
         times[p.index + 1] - times[p.index] for p in ride.points if p.on_lift or p.is_station
     )
-    assert share == pytest.approx(0.388, abs=0.01)
+    assert share == pytest.approx(0.320, abs=0.01)
 
 
 def test_the_train_uses_linear_timing_or_the_speeds_are_ignored():
@@ -379,7 +380,7 @@ def test_turning_the_view_changes_where_the_train_is_not_when():
     assert first.get("keyPoints") != second.get("keyPoints")
 
 
-STALLING = [0x02, 0x01] + [0x00] * 30
+STALLING = STALLING_STRIP
 
 
 def test_a_train_that_stalls_stops_where_the_simulation_says_with_a_marker():

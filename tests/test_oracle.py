@@ -5,7 +5,9 @@ from rct2.oracle import (
     TICKS_PER_SECOND,
     _build_plugin_source,
     _default_timeout_ticks,
+    _assign_piece_indices,
     _parse_result,
+    _parse_trace,
     _parse_trains,
 )
 
@@ -133,3 +135,88 @@ def test_a_failed_launch_removes_the_plugin_it_wrote(monkeypatch):
         oracle.score_track([0x02, 0x01])
     assert oracle.PLUGIN_DIR.is_dir()
     assert list(oracle.PLUGIN_DIR.iterdir()) == []
+
+
+# The game's per-tick car trace (U1 of the train-drag plan). The trace is how
+# the simulator's speed model gets checked against the game's own, so the
+# parser has to be exact about units: velocity and acceleration stay in the
+# game's integer units and are converted only where they are compared.
+
+def test_parses_a_trace_sample_keeping_the_games_units():
+    sample = _parse_trace(
+        "'GENERIDE_TRACE|t=655|v=777626|a=-353|mass=500|tt=0|prog=2"
+        "|tx=3040|ty=3200|tz=148|z=148'\x1b[0m"
+    )
+    assert sample.tick == 655
+    assert sample.velocity == 777626
+    assert sample.acceleration == -353
+    assert sample.mass == 500
+    assert sample.track_type == 0
+    assert (sample.track_x, sample.track_y, sample.track_z) == (3040, 3200, 148)
+
+
+def test_a_trace_line_with_a_missing_field_is_skipped_not_a_crash():
+    assert _parse_trace("'GENERIDE_TRACE|t=5|v=0'") is None
+    assert _parse_trace("'GENERIDE_TRACE|t=5|v=undefined|a=0|mass=500|tt=1|prog=1|tx=1|ty=1|tz=1|z=1'") is None
+    assert _parse_trace("'GENERIDE_STATS|maxSpeed=26'") is None
+
+
+def test_the_plugin_only_logs_a_trace_when_asked():
+    plain = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20)
+    traced = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20, trace_every_ticks=5)
+    assert "GENERIDE_TRACE" not in plain
+    assert "GENERIDE_TRACE" in traced
+
+
+def test_samples_are_matched_to_the_piece_the_car_is_on():
+    placements = {0: (3200, 3200, 144, 2), 1: (3168, 3200, 144, 3), 2: (3136, 3200, 144, 3)}
+    samples = [
+        _parse_trace("'GENERIDE_TRACE|t=1|v=1|a=0|mass=500|tt=3|prog=1|tx=3136|ty=3200|tz=144|z=144'"),
+        _parse_trace("'GENERIDE_TRACE|t=2|v=1|a=0|mass=500|tt=2|prog=1|tx=3200|ty=3200|tz=144|z=144'"),
+    ]
+    indexed = _assign_piece_indices(samples, placements)
+    assert [s.piece_index for s in indexed] == [2, 0]
+
+
+def test_a_sample_on_no_placed_piece_has_no_index():
+    samples = [_parse_trace("'GENERIDE_TRACE|t=1|v=1|a=0|mass=500|tt=3|prog=1|tx=1|ty=1|tz=1|z=1'")]
+    assert _assign_piece_indices(samples, {0: (3200, 3200, 144, 2)})[0].piece_index is None
+
+
+def test_cars_per_train_is_read_from_the_cars_the_game_built():
+    # The plugin echoes the cars it asked for, which the game ignores. The
+    # count that matters is how many car entities exist per train, and train
+    # mass (and so the speed-squared drag) depends on it.
+    line = "'GENERIDE_TRAINS|numTrains=1|carsPerTrain=2|totalCars=7'"
+
+    assert _parse_trains(line) == (1, 7)
+
+
+def test_cars_per_train_divides_the_cars_across_the_trains():
+    line = "'GENERIDE_TRAINS|numTrains=3|carsPerTrain=2|totalCars=12'"
+
+    assert _parse_trains(line) == (3, 4)
+
+
+def test_a_car_count_that_does_not_split_evenly_is_not_trusted():
+    line = "'GENERIDE_TRAINS|numTrains=3|carsPerTrain=2|totalCars=10'"
+
+    assert _parse_trains(line) == (3, 2)
+
+
+# A saved design loaded the normal way skips the game's check that a piece
+# clears the ride's own earlier track (TrackPlaceAction's `_fromTrackDesign`),
+# because a real coaster crosses itself. Placing pieces one at a time used to
+# apply that check, so rides that load fine in the player's park came back as
+# "in the way". `isFromTrackDesign` on the `trackplace` action switches it off.
+
+def test_pieces_are_placed_the_way_a_loaded_design_places_them_by_default():
+    source = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20)
+
+    assert "isFromTrackDesign: true" in source
+
+
+def test_the_stricter_piece_by_piece_check_can_be_asked_for():
+    source = _build_plugin_source([0, 4, 4, 9], 100, 100, 2000, 20, from_track_design=False)
+
+    assert "isFromTrackDesign: false" in source

@@ -11,12 +11,15 @@ Unit conventions:
   TILE_M meters per tile, HEIGHT_UNIT_M meters per height unit. Neither is a
   surveyed real-world size. HEIGHT_UNIT_M is confirmed by the game's drop
   height and drop count; TILE_M is calibrated so `ride_length` matches the
-  length OpenRCT2 itself reports (see TILE_M), because that is the unit the
-  rating thresholds are written in.
-- TILE_M is coupled to FRICTION_COEFF and GFORCE_VERTICAL_COEFF: each
-  consumes a horizontal length, so they are expressed through TILE_SCALE and
-  move with it. Change the scale in one place and they follow. Lateral g does
-  not depend on TILE_M: it is the game's own per-piece table (LATERAL_FACTOR).
+  length OpenRCT2 itself reports (see TILE_M in rct2/coasting.py), because that
+  is the unit the rating thresholds are written in. The constants and the
+  speed-loss walk along unpowered track live in rct2/coasting.py so that
+  construction.energy_stall_index can use them too.
+- TILE_M is coupled to GFORCE_VERTICAL_COEFF: it consumes a horizontal
+  length, so it is expressed through TILE_SCALE and moves with it. Change the
+  scale in one place and it follows. Lateral g does not depend on TILE_M: it is
+  the game's own per-piece table (LATERAL_FACTOR). Drag does not depend on it
+  either: it is written in the game's own units (see rct2/coasting.py).
 - Rating multipliers in RATING_WEIGHTS are fitted against real designs; see
   the constant's own docstring for the fit and its limits.
 """
@@ -26,40 +29,25 @@ from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Optional, Set
 
 from rct2 import construction
-from rct2.segments import SEGMENTS, Segment
+from rct2.coasting import (  # noqa: F401  (some names are re-exported: others use physics.<name>)
+    CAR_MASS,
+    DEFAULT_TRAIN_CARS,
+    GRAVITY,
+    HEIGHT_UNIT_M,
+    LIFT_SPEED_MS,
+    MIN_SPEED_MS,
+    TILE_M,
+    coast as _coast,
+    drag_deceleration,
+    segment_length,
+)
+from rct2.segments import SEGMENTS
 
-# Horizontal scale, calibrated against the ride length OpenRCT2 reports
-# (issue #60). It was 3.0, which read about 30% short on every track tried.
-# The per-piece geometry was never the problem: the shortfall stayed within
-# one percent of a fixed multiplier across a 0.22 and a 0.57 fraction of turn
-# length, which a wrong turn model could not do and a wrong scale does.
-#
-# Solving TILE_M so the simulated length equals the game's, per track:
-#   manic_miner_test.td6 (header, 691 m)             -> 4.379
-#   create_hill_circuit() seed (live oracle, 183 m)  -> 4.342
-# 4.36 is the midpoint: -0.4% and +0.4% on those two. Two paired
-# measurements is thin. Re-run the fit with more `oracle.score_track()`
-# readings before trusting the last decimal.
-#
-# This is a calibration, not a survey: the "meters" here were never real
-# meters. The vertical scale (HEIGHT_UNIT_M) is independent and unchanged:
-# drop count and highest drop match the game exactly on the fixture.
-TILE_M = 4.36
-# The scale at which FRICTION_COEFF and GFORCE_VERTICAL_COEFF were fitted. Do
-# not change this when recalibrating TILE_M; it records where those two numbers
-# came from.
+# The scale at which GFORCE_VERTICAL_COEFF was fitted. Do not change this when
+# recalibrating TILE_M; it records where that number came from.
 _FIT_TILE_M = 3.0
 TILE_SCALE = TILE_M / _FIT_TILE_M
-HEIGHT_UNIT_M = 0.75
-GRAVITY = 9.81
-# Rolling friction deceleration per meter, as fraction of g. Scale-coupled to
-# TILE_M: energy lost is 2 * FRICTION_COEFF * GRAVITY * length_m, so when the
-# same piece got longer this had to shrink by the same factor to keep the
-# energy lost per piece (0.01 at the original 3.0 m per tile).
-FRICTION_COEFF = 0.01 / TILE_SCALE
 MPH_PER_MS = 2.23694
-LIFT_SPEED_MS = 2.2  # Mine Train chain lift, roughly 5 mph
-MIN_SPEED_MS = 1.0  # below this off-lift, the train stalls
 
 # G-force is linear in speed, not speed-squared over a geometric radius.
 #
@@ -176,40 +164,6 @@ _STATION_SEGMENTS = construction.STATION_SEGMENTS
 
 
 @dataclass(frozen=True)
-class SegmentGeometry:
-    length_m: float
-    radius_m: Optional[float]  # None for straight pieces
-
-
-def segment_length(segment: Segment) -> SegmentGeometry:
-    """Approximate arc length and turn radius for a segment.
-
-    Radii come from the footprint size of the known turn shapes; unknown
-    shapes fall back to a straight piece so the GA never crashes here.
-    """
-    rise_m = abs(segment.elevation_delta) * HEIGHT_UNIT_M
-    if segment.direction_delta == 0:
-        run_m = max(1, abs(segment.forward_delta)) * TILE_M
-        return SegmentGeometry(length_m=math.hypot(run_m, rise_m), radius_m=None)
-
-    # Turn radius by displacement shape: 5-tile quarter turns (forward=2,
-    # right=3) curve at ~2.5 tiles, 3-tile turns (forward=1, right=2) at ~1.5.
-    # These set the arc length. They no longer feed lateral g, which comes
-    # from the game's per-piece table (LATERAL_FACTOR). An earlier fit tried to
-    # recover the radius from lateral g readings, and found implied radii of
-    # 0.83-2.0 tiles with no single value fitting; that spread was the
-    # quantization in the readings, not the radius (issue #41).
-    shape = (abs(segment.forward_delta), abs(segment.right_delta))
-    radius_tiles = {(2, 3): 2.5, (1, 2): 1.5}.get(shape)
-    if radius_tiles is None:
-        # Helices and anything unrecognized: estimate from sideways reach.
-        radius_tiles = max(1.0, abs(segment.right_delta) / 2)
-    radius_m = radius_tiles * TILE_M
-    arc_m = abs(segment.direction_delta) * (math.pi / 2) * radius_m
-    return SegmentGeometry(length_m=math.hypot(arc_m, rise_m), radius_m=radius_m)
-
-
-@dataclass(frozen=True)
 class RideStats:
     max_speed: float  # m/s
     avg_speed: float  # m/s
@@ -303,6 +257,7 @@ class RideTrace:
 def trace(
     segments: list[int],
     lift_indices: Optional[Set[int]] = None,
+    train_cars: int = DEFAULT_TRAIN_CARS,
 ) -> RideTrace:
     """Walk a track piece by piece with the energy method.
 
@@ -313,6 +268,7 @@ def trace(
     if lift_indices is None:
         lift_indices = construction.default_lift_indices(segments)
 
+    train_mass = train_cars * CAR_MASS
     points: List[TracePoint] = []
     speed = LIFT_SPEED_MS
     distance = 0.0
@@ -332,9 +288,7 @@ def trace(
         if on_lift:
             exit_speed = max(speed, LIFT_SPEED_MS)
         else:
-            v_sq = speed**2 - 2 * GRAVITY * dz_m
-            v_sq -= 2 * FRICTION_COEFF * GRAVITY * geometry.length_m
-            exit_speed = math.sqrt(max(0.0, v_sq))
+            exit_speed = _coast(speed, dz_m, geometry.length_m, train_mass)
             if exit_speed < MIN_SPEED_MS:
                 points.append(TracePoint(
                     index=index, segment=seg_id,
@@ -391,9 +345,10 @@ def trace(
 def simulate(
     segments: list[int],
     lift_indices: Optional[Set[int]] = None,
+    train_cars: int = DEFAULT_TRAIN_CARS,
 ) -> RideStats:
     """Run the energy-method walk over a track and collect ride stats."""
-    ride = trace(segments, lift_indices)
+    ride = trace(segments, lift_indices, train_cars)
 
     max_speed = LIFT_SPEED_MS
     ride_length = 0.0

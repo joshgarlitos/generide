@@ -236,7 +236,7 @@ class TestRunRecord:
         (["-g", "10", "-p", "12", "--rng-seed", "21", "--fitness", "physics"],
          "bc8e533a824ab43c2528ef0b5cc5944da74ebcb22194ae1aa69803c265408dfe"),
         (["-g", "10", "-p", "12", "--rng-seed", "8", "--fitness", "proxy"],
-         "cdb4828557e651720f61be21d769be3b0730f4cc96ec5556a2291e4e79021819"),
+         "ea66397ce324ec402223e84ad0637883a32da8e42f1df02b169a2f7b4434533b"),
     ])
     def test_output_bytes_are_unchanged_for_a_fixed_seed(self, monkeypatch, tmp_path, args, digest):
         """Digests of a seeded CLI run, to catch an accidental change.
@@ -433,17 +433,19 @@ class TestTwoRides:
     """Covers AE3: with a site, the run returns the best playable ride and the best one that fits.
 
     The scripted search scores two rides: the hill circuit, which a train
-    finishes but which does not fit a narrow site, and the flat oval, which
-    fits it and which no train can finish.
+    finishes but which crosses a blocked tile in the site, and the flat oval
+    with a 24-piece station, which clears that tile and which no train can
+    finish (ovals up to a 23-piece station complete, at about 2 m/s, under the
+    game's drag).
     """
 
-    SITE_ROWS = ["." * 8] * 14
+    SITE_ROWS = ["." * 8] * 7 + ["." * 3 + "#" + "." * 4] + ["." * 8] * 24
 
     def _site_path(self, tmp_path):
         from rct2.site import Site
 
         path = tmp_path / "narrow.json"
-        Site.from_rows(self.SITE_ROWS, anchor=(4, 7)).save(path)
+        Site.from_rows(self.SITE_ROWS, anchor=(4, 2)).save(path)
         return path
 
     def _scripted_search(self, rides, best):
@@ -474,7 +476,7 @@ class TestTwoRides:
         from rct2 import runrecord, td6
         from rct2.generate import create_simple_circuit
 
-        hill, oval = create_hill_circuit(), create_simple_circuit()
+        hill, oval = create_hill_circuit(), create_simple_circuit(station_length=24)
         monkeypatch.setattr(
             evolve_coaster, "evolve_parts", self._scripted_search([hill, oval], best=hill),
         )
@@ -540,7 +542,7 @@ class TestTwoRides:
         from rct2 import runrecord
         from rct2.generate import create_simple_circuit
 
-        oval = create_simple_circuit()
+        oval = create_simple_circuit(station_length=24)
         # The best overall is an open stub, which the game cannot build.
         stub = [0x02, 0x01, 0x00, 0x00, 0x00]
         monkeypatch.setattr(

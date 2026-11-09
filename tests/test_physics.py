@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from rct2 import physics
+from rct2 import coasting, physics, td6
 from rct2.calibration import read_csv
 from rct2.physics import RATING_WEIGHTS, RideStats, rate, segment_length, simulate
 from rct2.segments import SEGMENTS
+from tests import game_traces
 
 CALIBRATION = Path(__file__).parent.parent / "data" / "calibration.csv"
 
@@ -50,19 +51,22 @@ def test_lift_then_drop_speed_near_energy_limit():
     assert stats.max_speed > ideal * 0.8  # friction should not eat 20 percent
 
 
-def test_zero_friction_conserves_energy(monkeypatch):
-    monkeypatch.setattr(physics, "FRICTION_COEFF", 0.0)
-    up_count = 6
-    track = make_hill(up_count, up_count)
-    lift = set(range(0, up_count + 2))
-    stats = simulate(track, lift_indices=lift)
-    # Back at start elevation with no friction: exit speed equals lift speed.
-    assert stats.completed
-    final_speed = stats.avg_speed  # sanity: sim ran
-    assert final_speed > 0
-    # Re-derive the exit speed by simulating with a trailing flat segment.
-    stats2 = simulate(track + [FLAT], lift_indices=lift)
-    assert stats2.completed
+def test_without_drag_a_drop_then_a_climb_returns_the_same_speed(monkeypatch):
+    """Gravity alone conserves energy, so any speed lost on the way is drag's."""
+    monkeypatch.setattr(coasting, "drag_deceleration", lambda speed, train_mass: 0.0)
+
+    after_drop = coasting.coast(5.0, -3.0, 4.0, 3500)
+    after_climb = coasting.coast(after_drop, 3.0, 4.0, 3500)
+
+    assert after_drop > 5.0
+    assert after_climb == pytest.approx(5.0)
+
+
+def test_with_drag_a_drop_then_a_climb_loses_speed():
+    after_drop = coasting.coast(5.0, -3.0, 4.0, 3500)
+    after_climb = coasting.coast(after_drop, 3.0, 4.0, 3500)
+
+    assert after_climb < 5.0
 
 
 def test_lateral_g_scales_with_speed_and_banking():
@@ -368,19 +372,17 @@ def test_ride_length_matches_the_real_fixture_header():
 
 
 def test_scale_coupled_constants_stay_expressed_at_the_current_tile_scale():
-    """Issue #60: FRICTION_COEFF and the vertical g coefficient move with TILE_M.
+    """Issue #60: the vertical g coefficient moves with TILE_M.
 
-    Each one consumes a horizontal length, so recalibrating TILE_M alone makes
-    the real Manic Miner stall (friction is charged per metre) and shifts every
-    vertical g-force. These pin the products and ratios that must hold at the
-    scale the constants were fitted at (3.0 m per tile), so an edit that
-    changes one without the other fails here rather than silently invalidating
-    them. Lateral g is not scale-coupled: it is the game's own table.
+    It consumes a horizontal length, so recalibrating TILE_M alone shifts every
+    vertical g-force. This pins the ratio that must hold at the scale the
+    constant was fitted at (3.0 m per tile), so an edit that changes one
+    without the other fails here rather than silently invalidating it. Lateral
+    g is not scale-coupled: it is the game's own table. Drag no longer is
+    either: it is in the game's own units with its own measured length scale.
     """
     fit_tile_m = 3.0
 
-    # Energy lost over one flat tile is the same as at the fitted scale.
-    assert physics.FRICTION_COEFF * physics.TILE_M == pytest.approx(0.01 * fit_tile_m)
     # The shape term divides by a length, which grew with TILE_M.
     assert physics.GFORCE_VERTICAL_COEFF / physics.TILE_M == pytest.approx(0.56393 / fit_tile_m)
 
@@ -481,3 +483,134 @@ def test_trace_of_empty_track_is_empty_and_complete():
     ride = physics.trace([])
     assert ride.points == []
     assert ride.completed
+
+
+# The simulator against the game's own speeds (recorded in tests/data/game_traces).
+#
+# The game takes speed off the train every tick: the velocity over 4096, plus
+# the velocity squared over the train's total mass (OpenRCT2 v0.5.3,
+# Vehicle.TrackMotion.cpp UpdateTrackMotion and Vehicle.cpp
+# GetAccelerationDecrease2). The simulator used to charge one small constant
+# per metre instead, which is about right at 4 m/s and six times too small at
+# 18 m/s, so it let evolved rides coast for 100 pieces that stall in the game.
+
+def _game_piece_speeds(trace):
+    """Mean game speed in m/s per piece of the first lap, unpowered pieces only."""
+    powered = set(trace["lift_indices"])
+    by_piece = {}
+    last = -1
+    for sample in trace["samples"]:
+        index = sample["piece_index"]
+        if index < last:  # the car came round to the start again
+            break
+        last = index
+        if sample["velocity"] > 0 and index not in powered:
+            by_piece.setdefault(index, []).append(sample["velocity"] / game_traces.VELOCITY_UNITS_PER_MS)
+    return {i: sum(v) / len(v) for i, v in by_piece.items()}
+
+
+# How closely the simulator has to follow the game, per recorded track:
+# (last powered piece, pieces to skip for the train to clear the crest,
+# allowed mean error, allowed worst-piece error).
+#
+# The seed circuit is flat and long and fits within 1%; the flat loop is the
+# slow end (about 2 m/s, where only the linear term matters) and fits within
+# 3%, worst on the first piece after the station, where the simulator launches
+# at 2.2 m/s and the game's train is at 2.05. The 80-piece ride has hills, turns and a train seven cars long spread
+# over several of them, which the point-mass simulator smooths, so its error
+# is larger and peaks on the hills. The crest is skipped because the game's
+# fastest car is over it while the simulator's point is not.
+SPEED_FIT = {
+    "seed_circuit": (11, 8, 0.02, 0.05),
+    "evolved_80_pieces": (15, 8, 0.08, 0.20),
+    "simple_circuit": (5, 0, 0.03, 0.07),
+    # The ride that stalls in the player's park, run by the oracle with the
+    # game's 7-car train: 100 pieces of coasting after the one real drop.
+    "evolved_s123_7_cars": (17, 8, 0.09, 0.25),
+}
+
+
+@pytest.mark.parametrize("name", list(SPEED_FIT))
+def test_simulated_speed_follows_the_games_on_the_unpowered_pieces(name):
+    trace = game_traces.load(name)
+    sim = physics.trace(trace["segments"], set(trace["lift_indices"]), train_cars=trace["cars_per_train"])
+    sim_mean = {p.index: p.mean_speed for p in sim.points if not p.stalled}
+    launch_end, crest, mean_limit, worst_limit = SPEED_FIT[name]
+
+    errors = {
+        index: (sim_mean[index] - speed) / speed
+        for index, speed in _game_piece_speeds(trace).items()
+        if index in sim_mean and index > launch_end + crest
+        and trace["segments"][index] not in physics._STATION_SEGMENTS
+    }
+
+    assert len(errors) >= 8
+    assert sum(abs(e) for e in errors.values()) / len(errors) < mean_limit
+    worst = max(errors, key=lambda i: abs(errors[i]))
+    assert abs(errors[worst]) < worst_limit, f"piece {worst}: {errors[worst]:+.1%}"
+
+
+def test_a_heavier_train_keeps_more_of_its_speed():
+    segments = game_traces.load("seed_circuit")["segments"]
+    light = physics.simulate(segments, train_cars=1)
+    heavy = physics.simulate(segments, train_cars=7)
+
+    assert heavy.avg_speed > light.avg_speed
+
+
+def test_drag_per_metre_grows_with_speed():
+    """At 18 m/s the game takes about six times what the old constant took."""
+    slow = physics.drag_deceleration(4.0, train_mass=3500)
+    fast = physics.drag_deceleration(18.0, train_mass=3500)
+
+    assert slow == pytest.approx(0.050, abs=0.003)
+    assert fast == pytest.approx(0.407, abs=0.01)
+
+
+def test_zero_train_mass_has_no_squared_term_like_the_game():
+    assert physics.drag_deceleration(10.0, train_mass=0) == pytest.approx(0.009766 * 10.0, rel=1e-3)
+
+
+def test_the_evolved_ride_that_stalls_in_the_game_stalls_in_the_simulator():
+    """Seed 123, evolved with the constant-friction model: complete in the
+    simulator, stuck in the last third of the ride in the player's park."""
+    ride = td6.load("tests/data/stall_repro/evolved_s123_stalls_in_game.td6")
+    segments = [e.segment_type for e in ride.elements]
+    lifts = {i for i, e in enumerate(ride.elements) if e.chain_lift}
+
+    stats = physics.simulate(segments, lifts)  # the exported ride's 2-car train
+
+    assert not stats.completed
+    assert 90 <= stats.stall_index <= 110  # the last third of 120 pieces
+
+
+def test_the_same_ride_completes_with_the_games_seven_cars_and_stalls_with_two():
+    """Why the oracle never saw the stall: it cannot set the car count.
+
+    The game completes the seed 123 ride with its default 7 cars (minimum speed
+    7.5 m/s on piece 109, recorded). The ride exports with 2 cars, which weigh
+    a seventh as much per car and lose far more to the squared drag, and the
+    player's train stalled in the last third.
+    """
+    trace = game_traces.load("evolved_s123_7_cars")
+    lifts = set(trace["lift_indices"])
+
+    assert trace["status"] == "rated"
+    assert physics.simulate(trace["segments"], lifts, train_cars=7).completed
+    assert not physics.simulate(trace["segments"], lifts, train_cars=2).completed
+
+
+def test_the_simulated_train_is_the_train_the_exporters_write():
+    """Both exporters write 1 train of 2 cars; drag depends on that train's mass.
+
+    If an exporter changes its car count and this default does not, the
+    simulator checks a different train from the one the player rides.
+    """
+    from evolve_coaster import create_ride_from_segments
+    from rct2 import generate
+
+    segments = generate.create_hill_circuit()
+
+    exported = create_ride_from_segments(segments, Path("data/sample_rides/manic_miner_test.td6"))
+
+    assert (exported.num_trains, exported.cars_per_train) == (1, physics.DEFAULT_TRAIN_CARS)

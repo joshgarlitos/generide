@@ -4,6 +4,33 @@ A running record of decisions, surprises, and things I learned building this. Ne
 
 ---
 
+## 2026-10-25: The simulator let trains coast for free, and the oracle was running a different train
+
+An evolved ride (seed 123, 120 pieces) that `physics.simulate` called complete stalled in my park, in the last third of the track. The cause was the speed model. It took the same small amount of speed off at every speed, about 0.07 m/s². The game takes `velocity / 4096` plus `velocity² / total train mass` off every tick (OpenRCT2 v0.5.3, `Vehicle.TrackMotion.cpp`). At 18 m/s that is 0.41 m/s² for the two-car train the file exports. So the old model charged six times too little at speed, and the search lengthened the ride with about 100 coasting pieces after its one real drop, because length earns rating points and coasting looked free.
+
+I read the formula from the game's source and checked it against the game's own log before changing anything. On the seed circuit's flat coast the game logged a deceleration of 357 units a tick at 783k units, and the formula with the 7 cars the game ran (mass 3500) gives 191 plus 166, which is 357.
+
+Three things the traces showed that I had not expected:
+
+- **The oracle runs a different train.** The plugin asks for 2 cars and the game ignores it and runs 7. A train that weighs 3500 loses far less to the squared term than the exported 1000, so the oracle completes the seed 123 ride (minimum speed 7.5 m/s on piece 109) while the same ride stalls with 2 cars, on piece 101 in the simulator. `OracleResult.cars_per_train` now reports the count the game built, not the count requested.
+- **The oracle was not refusing bad rides.** Three of five saved evolved rides came back `placement_failed` ("in the way"). The 2026-08-29 entry below concluded the API cannot place pieces the way a loaded design is placed. It can: `trackplace` takes `isFromTrackDesign`. With it true those rides build and rate, and rides that built before rate identically. It is the default now. My first reading of the failure was that the validator should reject close crossings, which would have forbidden rides that work in the park.
+- **The flat starter loop completes.** The game runs `create_simple_circuit()` at about 2 m/s, falling to 1.7 over a lap. The old simulator stalled it on piece 5, and the docs called it the standard "buildable but not runnable" example. It is not one. A loop long enough to coast to a stop (`station_length=30`) is.
+
+What changed: `rct2/coasting.py` holds the drag, piece lengths and the coast step, and both `physics.trace` and `construction.energy_stall_index` call it. A flat charge per piece could not stay conservative once drag grows with speed (16 of 657 stalling tracks still passed at 0.25 a piece), so the quick check now walks speed the same way and cannot name a different piece. Four recorded game traces are in `tests/data/game_traces/`, taken with `score_track(trace_every_ticks=5)`.
+
+How well it matches: mean speed error against the game is under 2% on the seed circuit and the flat loop, 8% on an 80-piece ride and 9% on the seed 123 ride, with the worst single piece 20% to 25% off on hills (the game's train is seven cars long and smooths a hill that the simulator treats as a point). Rating drift from the new speeds is under 0.15 on any rating for the three rides I could run (fit and port both).
+
+Open, found on the way and not fixed:
+
+- The game covers a flat tile in about 8 ticks, which is 2.4 to 2.75 m in the simulator's speed units, not the 4.36 that matches the game's reported ride length. Drag distance uses a fitted 0.6 of the piece length. Why the game moves more track per tick than its formula gives is unexplained.
+- The same factor shows up in the lift. The game's lift runs at 1.96 m/s, not the 2.2 assumed, and covers a lift piece in 2.85 m against the simulator's 4.55 (0.63, the same ratio). So `ride_time` is too long (87 s against 71 s for the seed 123 ride) and the simulated lift takes about 1.4 times as long. Fixing it changes time-based ratings, so it needs its own calibration pass.
+- `construction._energy_issues` still uses the old flat friction for its reachable-height check. It can only be too loose now.
+- Exported rides carry 2 cars and the oracle cannot change its 7, so the oracle cannot confirm a stall for the train the player will ride. The simulator is now the better check for that.
+
+Not done: a train-length setting in the web form and CLI (the default is the 2 cars the file exports), re-running benchmarks and re-evolving. The plan is `docs/plans/2026-10-25-1526-fix-train-drag-and-close-crossings-plan.md`.
+
+---
+
 ## 2026-10-11: The lift hill can move, so rides can turn before the climb
 
 The generator kept breaking out of tight sites, and it never tried a layout like station, curve, lift, curve. The cause was a shortcut in the search and not a rule of the game: the part-based genome pinned the station at part 0 and the lift hill at part 1, and mutation and crossover only worked from part 2 on, so nothing could ever sit between the station and the hill. A hand-built `station, turn, hill` track already passed the construction and physics checks. The plan is `docs/plans/2026-10-11-1900-feat-free-ride-layout-plan.md`. This is the first slice of it.

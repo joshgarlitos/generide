@@ -73,25 +73,24 @@ STALL_TICKS = 1200
 # hardcoding the number, so the two stay in sync.
 DEFAULT_PROCESS_TIMEOUT_S = 90.0
 
-# KNOWN LIMITATION, not yet worked around: this module places pieces one at a
-# time via the scripting API's own trackplace action, which enforces vertical
-# clearance against the ride's *own* already-placed track the same as it
-# would against any other ride. A design placed the normal way, by loading a
-# saved .td6 through the ride construction window, does not: OpenRCT2's
-# TrackPlaceAction takes a `_fromTrackDesign` flag that tells its clearance
-# check to ignore the ride under construction's own ID entirely
-# (`ignoreRideId = _fromTrackDesign ? _rideIndex : RideId::GetNull()` in
-# src/openrct2/actions/track/TrackPlaceAction.cpp), because a real coaster
-# routinely crosses itself and that is expected. Confirmed 2026-08-29: a real
-# evolved track (114 segments, docs/devlog.md) crosses itself with 2 height
-# units of clearance at one point, which this module's piece-by-piece build
-# rejects as "Mine Train Coaster 1 in the way" -- and the same file, loaded
-# and ridden normally in-game, worked fine and rated 5.21/6.97/4.31.
-# So a `placement_failed` result from this module does not mean the track is
-# actually invalid; it means this build method is stricter than real design
-# loading on self-crossings tighter than 3 height units apart. No fix is
-# implemented yet -- the scripting API does not appear to expose an
-# equivalent to `_fromTrackDesign`.
+# Pieces are placed the way the game places a loaded design. This module places
+# a ride one piece at a time through the scripting API's `trackplace` action,
+# which by default checks vertical clearance against the ride's *own*
+# already-placed track the same as against anyone else's. Loading a saved .td6
+# through the construction window does not: TrackPlaceAction takes a
+# `_fromTrackDesign` flag that makes its clearance check ignore the ride under
+# construction (`ignoreRideId = _fromTrackDesign ? _rideIndex : RideId::GetNull()`
+# in src/openrct2/actions/track/TrackPlaceAction.cpp), because a real coaster
+# routinely crosses itself.
+#
+# Until 2026-10-25 this module sent the flag as false and came back with
+# "Mine Train Coaster 1 in the way" for any ride that crosses itself within 3
+# height units (docs/devlog.md, 2026-08-29, which concluded the API did not
+# expose the flag). It does: `isFromTrackDesign` on the action. With it true,
+# the evolved ride that failed on piece 53 builds and runs, and rides that
+# built before rate identically (seed circuit 0.54/0.64/0.43, an 80-piece ride
+# 5.58/7.08/4.66, with the flag on and off). `from_track_design=False` keeps the
+# stricter check for anyone who wants it.
 
 
 @dataclass(frozen=True)
@@ -117,6 +116,31 @@ class RideMeasurements:
 
 
 @dataclass(frozen=True)
+class TraceSample:
+    """One reading of the lead car during the test lap.
+
+    Velocity and acceleration stay in the game's integer units (65536 per
+    m/s in the simulator's convention, see rct2/physics.py) so a trace can be
+    compared with the game's own formula without a conversion in the way.
+    `piece_index` says which piece of the submitted track the car was on; the
+    game reports a track type and tile, not an index, so it is filled in
+    afterwards from where each piece was placed.
+    """
+
+    tick: int
+    velocity: int
+    acceleration: int
+    mass: int
+    track_type: int
+    progress: int
+    track_x: int
+    track_y: int
+    track_z: int
+    z: int
+    piece_index: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class OracleResult:
     excitement: Optional[float]
     intensity: Optional[float]
@@ -130,6 +154,8 @@ class OracleResult:
     measurements: Optional[RideMeasurements] = None
     num_trains: int = 1
     cars_per_train: int = 2
+    # Only filled when score_track is asked for a trace.
+    trace: tuple[TraceSample, ...] = ()
 
 
 def _joint_heights(segments: list[int]) -> list[int]:
@@ -183,6 +209,8 @@ def _build_plugin_source(
     brake_speed: int = DEFAULT_BRAKE_SPEED,
     num_trains: int = 1,
     cars_per_train: int = 2,
+    trace_every_ticks: Optional[int] = None,
+    from_track_design: bool = True,
 ) -> str:
     """Generate the JS plugin that builds one track and reports its rating.
 
@@ -345,7 +373,7 @@ registerPlugin({
                         ride: rideId, trackType: trackType, rideType: %(ride_type)d,
                         brakeSpeed: BRAKE_SPEED, colour: 0, seatRotation: 4,
                         trackPlaceFlags: wantsLift ? %(lift_flag)d : 0,
-                        isFromTrackDesign: false,
+                        isFromTrackDesign: %(from_track_design)s,
                     }, function (r) {
                         console.log('GENERIDE_PLACE|i=' + i + '|type=' + trackType + '|error=' + r.error +
                                     '|msg=' + (r.errorMessage || '') + '|x=' + cursor.x + '|y=' + cursor.y +
@@ -591,8 +619,13 @@ registerPlugin({
                         return;
                     }
                     var ride0 = map.getRide(rideId);
+                    var builtCars = 0;
+                    var allCars = map.getAllEntities('car');
+                    for (var bc = 0; bc < allCars.length; bc++) {
+                        if (allCars[bc].ride === rideId) builtCars++;
+                    }
                     console.log('GENERIDE_TRAINS|numTrains=' + (ride0.vehicles ? ride0.vehicles.length : -1) +
-                                '|carsPerTrain=' + CARS_PER_TRAIN);
+                                '|carsPerTrain=' + CARS_PER_TRAIN + '|totalCars=' + builtCars);
                     var ticks = 0;
                     var stillTicks = 0;
                     var lastPos = '';
@@ -618,6 +651,7 @@ registerPlugin({
                         for (var c = 0; c < cars.length; c++) {
                             if (cars[c].ride === rideId) mine.push(cars[c]);
                         }
+%(trace_block)s
                         if (mine.length > 0) {
                             var fingerprint = '';
                             for (var m = 0; m < mine.length; m++) {
@@ -700,6 +734,8 @@ registerPlugin({
             if lift_indices is None else lift_indices
         )),
         "lift_flag": TRACK_PLACE_FLAG_CHAIN_LIFT,
+        "trace_block": _trace_block(trace_every_ticks),
+        "from_track_design": "true" if from_track_design else "false",
         "brake_speed": brake_speed,
         "num_trains": num_trains,
         "cars_per_train": cars_per_train,
@@ -742,6 +778,102 @@ def _parse_result(line: str) -> Optional[OracleResult]:
     )
 
 
+def _trace_block(every_ticks: Optional[int]) -> str:
+    """JS that logs the fastest car every `every_ticks` ticks, or nothing.
+
+    The fastest car is the moving train's: with several trains the others sit
+    in the station, and following an arbitrary car would log a parked one.
+    """
+    if not every_ticks:
+        return ""
+    return (
+        "                        if (mine.length > 0 && ticks %% %d === 0) {\n"
+        "                            var q = mine[0];\n"
+        "                            for (var k = 1; k < mine.length; k++) {\n"
+        "                                if (Math.abs(mine[k].velocity) > Math.abs(q.velocity)) q = mine[k];\n"
+        "                            }\n"
+        "                            var tl = q.trackLocation || {};\n"
+        "                            console.log('GENERIDE_TRACE|t=' + ticks + '|v=' + q.velocity +\n"
+        "                                        '|a=' + q.acceleration + '|mass=' + q.mass +\n"
+        "                                        '|tt=' + tl.trackType + '|prog=' + q.trackProgress +\n"
+        "                                        '|tx=' + tl.x + '|ty=' + tl.y + '|tz=' + tl.z + '|z=' + q.z);\n"
+        "                        }\n"
+    ) % every_ticks
+
+
+_TRACE_RE = re.compile(r"GENERIDE_TRACE\|(?P<body>[^'\x1b]+)")
+_TRACE_FIELDS = {
+    "t": "tick", "v": "velocity", "a": "acceleration", "mass": "mass",
+    "tt": "track_type", "prog": "progress", "tx": "track_x", "ty": "track_y",
+    "tz": "track_z", "z": "z",
+}
+
+
+def _parse_trace(line: str) -> Optional[TraceSample]:
+    """One trace line, or None when it is not one or a field is unreadable."""
+    match = _TRACE_RE.search(line)
+    if not match:
+        return None
+    values = {}
+    for pair in match.group("body").split("|"):
+        key, _, raw = pair.partition("=")
+        field = _TRACE_FIELDS.get(key)
+        if field is None:
+            continue
+        try:
+            values[field] = int(raw)
+        except ValueError:
+            return None
+    if set(values) != set(_TRACE_FIELDS.values()):
+        return None
+    return TraceSample(**values)
+
+
+_PLACE_RE = re.compile(
+    r"GENERIDE_PLACE\|i=(?P<i>\d+)\|type=(?P<type>\d+)\|error=0\|msg=[^|]*"
+    r"\|x=(?P<x>-?\d+)\|y=(?P<y>-?\d+)\|z=(?P<z>-?\d+)"
+)
+
+
+def _parse_placement(line: str) -> Optional[tuple[int, tuple[int, int, int, int]]]:
+    """(piece index, (x, y, z, track type)) for a piece the game accepted."""
+    match = _PLACE_RE.search(line)
+    if not match:
+        return None
+    return int(match.group("i")), (
+        int(match.group("x")), int(match.group("y")),
+        int(match.group("z")), int(match.group("type")),
+    )
+
+
+def _assign_piece_indices(
+    samples: list[TraceSample],
+    placements: dict[int, tuple[int, int, int, int]],
+) -> list[TraceSample]:
+    """Say which piece of the track each sample was on.
+
+    A sample matches a piece when its tile, height and track type equal where
+    that piece was placed. A ride can cross itself, so several pieces can
+    match; the car only moves forward, so take the first match at or after the
+    previous sample's piece and fall back to the first match overall once the
+    lap wraps.
+    """
+    by_key: dict[tuple[int, int, int, int], list[int]] = {}
+    for index, key in placements.items():
+        by_key.setdefault(key, []).append(index)
+    result = []
+    last = 0
+    for sample in samples:
+        matches = sorted(by_key.get(
+            (sample.track_x, sample.track_y, sample.track_z, sample.track_type), []
+        ))
+        chosen = next((i for i in matches if i >= last), matches[0] if matches else None)
+        if chosen is not None:
+            last = chosen
+        result.append(replace(sample, piece_index=chosen))
+    return result
+
+
 _STATS_RE = re.compile(r"GENERIDE_STATS\|(?P<body>[^'\x1b]+)")
 
 _STAT_FIELDS = {
@@ -781,7 +913,10 @@ def _parse_measurements(line: str) -> Optional[RideMeasurements]:
     return RideMeasurements(**values)
 
 
-_TRAINS_RE = re.compile(r"GENERIDE_TRAINS\|numTrains=(?P<trains>-?\d+)\|carsPerTrain=(?P<cars>-?\d+)")
+_TRAINS_RE = re.compile(
+    r"GENERIDE_TRAINS\|numTrains=(?P<trains>-?\d+)\|carsPerTrain=(?P<cars>-?\d+)"
+    r"(?:\|totalCars=(?P<total>-?\d+))?"
+)
 
 TICKS_PER_SECOND = 40  # measured at game speed 1, see docs/headless-oracle-spike.md
 
@@ -802,6 +937,12 @@ def _parse_trains(line: str) -> Optional[tuple[int, int]]:
     cars = int(match.group("cars"))
     if trains < 0 or cars < 0:  # the plugin reports -1 when it cannot read them
         return None
+    # `carsPerTrain` is only what the plugin asked for. The cars the game
+    # built are counted off the ride's car entities, and train mass (so the
+    # speed-squared drag) follows that count. Only an even split is believed.
+    total = match.group("total")
+    if total is not None and trains > 0 and int(total) > 0 and int(total) % trains == 0:
+        cars = int(total) // trains
     return trains, cars
 
 
@@ -852,6 +993,8 @@ def score_track(
     num_trains: int = 1,
     cars_per_train: int = 2,
     binary: Optional[str] = None,
+    trace_every_ticks: Optional[int] = None,
+    from_track_design: bool = True,
 ) -> OracleResult:
     """Build `segments` in a real, headless OpenRCT2 and run a train on it.
 
@@ -870,6 +1013,14 @@ def score_track(
     plugin directory available (see module docstring). Only one call should
     run at a time; concurrent calls would overwrite each other's plugin file.
 
+    `trace_every_ticks` also logs the lead car's speed every that many ticks
+    into `OracleResult.trace`, the game's own measurement for checking
+    `physics.py` against.
+
+    `from_track_design` places pieces the way a loaded saved design is placed
+    (see the note above `RideMeasurements`); False applies the stricter
+    piece-by-piece clearance check.
+
     `binary` defaults to `resolve_binary()`, read at call time.
     """
     if binary is None:
@@ -883,6 +1034,7 @@ def score_track(
         segments, base_x_tile, base_y_tile, timeout_ticks, level_radius,
         lift_indices=lift_indices, brake_speed=brake_speed,
         num_trains=num_trains, cars_per_train=cars_per_train,
+        trace_every_ticks=trace_every_ticks, from_track_design=from_track_design,
     ))
 
     try:
@@ -913,6 +1065,8 @@ def score_track(
     # What the game actually gave the ride, which is not what we asked for
     # whenever ridesetvehicle rejects our arguments -- see _parse_trains.
     actual_trains: Optional[tuple[int, int]] = None
+    trace_samples: list[TraceSample] = []
+    placements: dict[int, tuple[int, int, int, int]] = {}
     try:
         deadline = time.time() + process_timeout_s
         for line in process.stdout:
@@ -922,6 +1076,15 @@ def score_track(
                 measurements = _parse_measurements(line) or measurements
             if "GENERIDE_TRAINS" in line:
                 actual_trains = _parse_trains(line) or actual_trains
+            if trace_every_ticks:
+                if "GENERIDE_TRACE" in line:
+                    sample = _parse_trace(line)
+                    if sample is not None:
+                        trace_samples.append(sample)
+                elif "GENERIDE_PLACE" in line:
+                    placed = _parse_placement(line)
+                    if placed is not None:
+                        placements[placed[0]] = placed[1]
             if "GENERIDE_RESULT" in line:
                 result = _parse_result(line)
                 if result is not None:
@@ -945,6 +1108,7 @@ def score_track(
     return replace(
         result, measurements=measurements,
         num_trains=ran_trains, cars_per_train=ran_cars,
+        trace=tuple(_assign_piece_indices(trace_samples, placements)),
     )
 
 

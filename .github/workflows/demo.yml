@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # The slower smoke case's time on this runner (27.0 s) plus 50%
       # (docs/devlog.md, 2026-10-03).
